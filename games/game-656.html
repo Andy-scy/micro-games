@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逻辑法庭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:24px;text-align:center;color:#e0aaff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#e0aaff}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#e0aaff;border-radius:6px}
+#prem{background:#232a48;border:1px solid #2c3357;border-radius:10px;padding:12px 14px;font-size:15px;line-height:1.9;margin-bottom:10px}
+#conc{background:#241a38;border:1px solid #4d3d78;border-radius:10px;padding:12px 14px;font-size:16px;line-height:1.7;margin-bottom:12px;color:#ffd166}
+#conc b{color:#e0aaff}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:11px 13px;font-size:16px;margin-bottom:8px;cursor:pointer;text-align:center;font-family:inherit;font-weight:700}
+.opt:hover{border-color:#e0aaff}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#e0aaff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#e0aaff;color:#241038;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>逻辑法庭</h1>
+  <p class="tips">逻辑庭审:根据给出的前提,判断结论属于哪种情况——「一定成立」「无法确定」「一定不成立」。只依据前提推理,别用直觉!每案 25 秒,共 12 案,3 条命。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/12</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="prem">……</div>
+    <div id="conc">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">逻辑法庭</h2><p id="ovp">· 每案给出若干前提与一个结论<br>· 三选一:一定成立 / 无法确定 / 一定不成立<br>· 只能依据题面前提推理,<br>　不能引入外部知识!<br>· 每案 25 秒,判对 +120<br>· 判错或超时 -1 条命,共 3 条命</p><button class="btn" id="obtn">开庭!</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{p:'前提一:班长比小红高。<br>前提二:小红比小刚高。',c:'结论:班长比小刚高。',a:0,why:'身高传递:甲>乙且乙>丙,则甲>丙。'},
+{p:'前提:小明比小刚高。',c:'结论:小明比小红高。',a:1,why:'前提完全没提小红,无法比较。'},
+{p:'前提一:甲比乙高。<br>前提二:乙比甲高。',c:'结论:甲和乙一样高。',a:2,why:'两个前提互相矛盾,"一样高"必不成立。'},
+{p:'前提一:宠物店里的猫都有芯片。<br>前提二:咪咪是这家宠物店的猫。',c:'结论:咪咪有芯片。',a:0,why:'全体都具有的性质,成员必然具有。'},
+{p:'前提一:公园里的花都是红色的。<br>前提二:这朵花是红色的。',c:'结论:这朵花是公园里的花。',a:1,why:'"红花的"不一定是"公园的",别把条件反过来用。'},
+{p:'前提一:教室里所有同学都戴眼镜。<br>前提二:小马不戴眼镜。',c:'结论:小马不是这间教室的同学。',a:0,why:'"都戴眼镜"的逆否:不戴眼镜的一定不是这班的。'},
+{p:'前提一:动物园里的鸟都有两只脚。<br>前提二:鸵鸟是动物园里的鸟。',c:'结论:鸵鸟有两只脚。',a:0,why:'全体具有的性质,成员必然具有。'},
+{p:'前提:如果明天下雨,运动会就延期。',c:'结论:如果运动会没延期,那么明天没下雨。',a:0,why:'"如果 A 则 B"的逆否命题一定成立。'},
+{p:'前提:如果明天下雨,运动会就延期。',c:'结论:如果明天不下雨,运动会就不延期。',a:1,why:'否定前件推不出否定后件,也许另有延期原因。'},
+{p:'前提一:比小明高的同学都会打篮球。<br>前提二:小刚会打篮球。',c:'结论:小刚比小明高。',a:1,why:'"会打篮球"的不一定都"比小明高",条件不能反推。'},
+{p:'前提:盒子里只有红球和白球。',c:'结论:从盒子里可能摸出绿球。',a:2,why:'与"只有红白"直接矛盾,绿球不可能出现。'},
+{p:'前提一:一班的同学都是少先队员。<br>前提二:小芳是少先队员。',c:'结论:小芳是一班的同学。',a:1,why:'别的班也有少先队员,小芳不一定在一班。'},
+{p:'前提一:小玲比小勇跑得快。<br>前提二:小勇比小军跑得快。',c:'结论:三人中,小军跑得最慢。',a:0,why:'玲>勇>军,小军垫底。'},
+{p:'前提一:所有的茄子都是紫色的。<br>前提二:这个蔬菜是紫色的。',c:'结论:这个蔬菜是茄子。',a:1,why:'紫色的蔬菜还有很多,不能反推。'},
+{p:'前提一:每只天鹅在本题中要么是白色,要么是黑色。<br>前提二:大白是本题中的天鹅,且不是黑色。',c:'结论:大白是白色的。',a:0,why:'二选一且排除其一,必是另一个。'}
+];
+var N=12,QLEN=25;
+var OPTS=['一定成立','无法确定','一定不成立'];
+var quiz=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('prem').innerHTML=it.p;
+  $('conc').innerHTML=it.c;
+  var box=$('opts');box.innerHTML='';
+  for(var k=0;k<3;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=OPTS[k];
+    b.dataset.ok=(k===it.a)?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var it=quiz[idx];
+  locked=true;
+  var btns=$('opts').children,i;
+  if(btn.dataset.ok==='1'){
+    score+=120;
+    btn.classList.add('ok');
+    $('msg').textContent='判决公正!+120';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=(qLeft<=0?'超时':'误判')+'!'+it.why;
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1900);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1200?'大法官!':(score>=800?'逻辑清明!':'见习书记员!');
+  $('ovt').textContent=win?'结案 · '+rank:'法庭失误过多…';
+  $('ovp').innerHTML='审结 '+Math.min(idx+1,N)+'/12 案<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 只认前提不认直觉,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0){
+      var it=quiz[idx],btns=$('opts').children,i;
+      locked=true;
+      lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+      for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+      $('msg').textContent='超时!'+it.why;
+      schedule(function(){
+        if(!playing||over)return;
+        if(lives<=0)finish(false);
+        else{idx++;showQ();}
+      },1900);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

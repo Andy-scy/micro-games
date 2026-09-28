@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意滑灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#5eead4;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#5eead4;font-size:16px}
+.gbtn{background:#123c38;color:#5eead4;border:1px solid #5eead4;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#5eead4;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:360px;margin:0 auto;touch-action:none;user-select:none;-webkit-user-select:none}
+.cell{aspect-ratio:1/1;border-radius:11px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .3s,box-shadow .3s}
+.cell.on{background:linear-gradient(145deg,#99f6e4,#14b8a6);border-color:#ccfbf1;animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{box-shadow:0 0 8px rgba(94,234,212,.35)}50%{box-shadow:0 0 20px rgba(94,234,212,.7)}}
+.cell.winf{animation:wf .7s ease}
+@keyframes wf{0%{filter:brightness(1)}50%{filter:brightness(1.8)}100%{filter:brightness(1)}}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#5eead4;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#5eead4;color:#123c38;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>禅意滑灯</h1>
+  <p class="hint">指尖为笔,灯光为墨:按住并滑过棋盘,经过的每盏灯都会带着十字翻转。没有失败与倒计时——连续点亮 5 盘,完成一轮禅修。鼠标拖动或触屏滑动皆可。</p>
+  <div class="hud">
+    <span>本轮进度 <b id="prog">0</b>/5 盘</span>
+    <span>滑动翻转 <b id="flips">0</b> 次</span>
+    <span>最快禅修 <b id="best">--</b></span>
+    <button class="gbtn" id="btnNew">重新开始</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">禅意滑灯</h2>
+    <p id="ovDesc">慢下来的点灯:不计数步,不计成败,按住手指在棋盘上缓缓滑行,让每一道十字波纹随心展开。连续点亮 5 盘灯海,即完成一轮禅修。呼吸,滑动,点亮。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始禅修</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=4,CNT=16,GOAL=5;
+var gridEl=$("grid"),elProg=$("prog"),elFlips=$("flips"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cells=[],board=[],prog=0,flips=0,state="menu",dragging=false,lastCell=-1,elapsed=0;
+var best=loadNum("mg337_time");
+
+function loadNum(k){try{var v=parseFloat(localStorage.getItem(k)||"");return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function setMsg(s){elMsg.textContent=s;}
+function build(){
+  gridEl.innerHTML="";cells=[];
+  for(var i=0;i<CNT;i++){
+    var d=document.createElement("div");
+    d.className="cell";d.dataset.i=i;
+    gridEl.appendChild(d);cells.push(d);
+  }
+}
+function paint(i){if(board[i])cells[i].classList.add("on");else cells[i].classList.remove("on");}
+function paintAll(){for(var i=0;i<CNT;i++)paint(i);}
+function crossList(r,c){
+  var list=[r*N+c];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function applyAt(i){
+  if(i<0||i>=CNT||i===lastCell)return;
+  lastCell=i;
+  var list=crossList((i/N)|0,i%N),k;
+  for(k=0;k<list.length;k++){board[list[k]]^=1;paint(list[k]);}
+  flips++;elFlips.textContent=flips;
+  if(litAll()){
+    prog++;elProg.textContent=prog;
+    for(k=0;k<CNT;k++)cells[k].classList.add("winf");
+    if(prog>=GOAL){win();return;}
+    setMsg("第 "+prog+" 盘点亮,呼吸如常…");
+    state="lock";
+    setTimeout(function(){
+      state="playing";lastCell=-1;
+      nextBoard();
+      setMsg("新的一盘,继续滑动");
+    },800);
+  }
+}
+function litAll(){for(var i=0;i<CNT;i++)if(!board[i])return false;return true;}
+function pickCells(k){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function nextBoard(){
+  board=[];for(var i=0;i<CNT;i++)board.push(1);
+  var ps=pickCells(5),j;
+  for(j=0;j<ps.length;j++){
+    var list=crossList((ps[j]/N)|0,ps[j]%N),q;
+    for(q=0;q<list.length;q++)board[list[q]]^=1;
+  }
+  for(j=0;j<CNT;j++)cells[j].classList.remove("winf");
+  paintAll();
+}
+function cellFromEvent(x,y){
+  var k;
+  for(k=0;k<CNT;k++){
+    var rect=cells[k].getBoundingClientRect();
+    if(x>=rect.left&&x<=rect.right&&y>=rect.top&&y<=rect.bottom)return k;
+  }
+  return -1;
+}
+function updateHud(){elProg.textContent=prog;elFlips.textContent=flips;}
+function newGame(){
+  prog=0;flips=0;elapsed=0;lastCell=-1;state="playing";
+  nextBoard();updateHud();
+  setMsg("按住并滑过棋盘,点亮所有灯");
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||elapsed<best){best=elapsed;saveNum("mg337_time",best);isNew=true;}
+  ovTitle.textContent="禅修圆满";
+  ovDesc.textContent=isNew?"新纪录!一口气点亮五盘,心境澄明。":"五盘灯海次第亮起,一轮禅修功德圆满。";
+  ovScore.style.display="block";
+  ovScore.textContent="用时 "+elapsed.toFixed(1)+"s · 滑动翻转 "+flips+" 次";
+  btnGo.textContent="再来一轮";
+  ov.classList.remove("hide");
+}
+function start(){newGame();ov.classList.add("hide");}
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();
+});
+gridEl.addEventListener("mousedown",function(e){
+  if(state!=="playing")return;
+  dragging=true;lastCell=-1;
+  applyAt(cellFromEvent(e.clientX,e.clientY));
+});
+gridEl.addEventListener("mousemove",function(e){
+  if(!dragging||state!=="playing")return;
+  applyAt(cellFromEvent(e.clientX,e.clientY));
+});
+document.addEventListener("mouseup",function(){dragging=false;lastCell=-1;});
+gridEl.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  dragging=true;lastCell=-1;
+  applyAt(cellFromEvent(t.clientX,t.clientY));
+},{passive:false});
+gridEl.addEventListener("touchmove",function(e){
+  if(!dragging||state!=="playing")return;
+  e.preventDefault();
+  var i;
+  for(i=0;i<e.changedTouches.length;i++){
+    var t=e.changedTouches[i];
+    applyAt(cellFromEvent(t.clientX,t.clientY));
+  }
+},{passive:false});
+gridEl.addEventListener("touchend",function(){dragging=false;lastCell=-1;},{passive:false});
+build();
+board=[];for(var z=0;z<CNT;z++)board.push(1);
+var ps0=pickCells(5),z2,z3;
+for(z2=0;z2<ps0.length;z2++){
+  var l0=crossList((ps0[z2]/N)|0,ps0[z2]%N);
+  for(z3=0;z3<l0.length;z3++)board[l0[z3]]^=1;
+}
+paintAll();updateHud();
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=t-lastT;lastT=t;
+  if(state==="playing"){elapsed+=dt/1000;}
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

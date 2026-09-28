@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声呐船钓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ctrl{margin-top:8px}
+#net{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 40px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>声呐船钓</h1>
+<p class="tip">开船巡湖(WASD/方向键,或按住屏幕拖动),声呐环每 1.6 秒一圈,扫过鱼群才会短暂显形——记住位置,把船开过去按空格/撒网键下网!80 秒 600 分。</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">80</b> 秒</span><span>目标 <b>600</b> 分</span></div>
+<canvas id="cv" width="640" height="480"></canvas>
+<div id="ctrl"><button id="net">撒网(空格)</button></div>
+<div id="ov"><h2 id="ot">声呐船钓</h2><p id="op">茫茫大湖,鱼群藏在水下。<br>靠声呐环扫描显形,凭记忆把船开到鱼群上,<br>一网下去就是几十上百斤!</p><button id="ob">起航</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var bNet=document.getElementById('net');
+var W=cv.width,H=cv.height;
+var state='ready',tl=80,score=0,msg='',cd=0;
+var boat={x:320,y:240};
+var schools=[],rings=[],sT=0,weeds=[],keys={},pHold=false,pPos={x:320,y:240};
+function rnd(a,b){return a+Math.random()*(b-a)}
+function placeSchool(){
+  var tries=0,x,y,ok,i;
+  do{
+    x=rnd(60,W-60);y=rnd(60,H-60);ok=true;
+    if(Math.sqrt((x-boat.x)*(x-boat.x)+(y-boat.y)*(y-boat.y))<120)ok=false;
+    for(i=0;i<schools.length;i++){
+      if(Math.sqrt((x-schools[i].x)*(x-schools[i].x)+(y-schools[i].y)*(y-schools[i].y))<90){ok=false;break}
+    }
+    tries++;
+  }while(!ok&&tries<40);
+  var n=2+Math.floor(Math.random()*3);
+  schools.push({x:x,y:y,n:n,v:40+n*30,alive:true,vis:0,re:0});
+}
+function makeWeeds(){
+  weeds=[];
+  var i;
+  for(i=0;i<12;i++)weeds.push({x:rnd(20,W-20),y:rnd(20,H-20),r:rnd(18,42)});
+}
+function net(){
+  if(state!=='play'||cd>0)return;
+  cd=0.8;
+  var best=-1,bd=70,i;
+  for(i=0;i<schools.length;i++){
+    if(!schools[i].alive)continue;
+    var d=Math.sqrt((schools[i].x-boat.x)*(schools[i].x-boat.x)+(schools[i].y-boat.y)*(schools[i].y-boat.y));
+    if(d<bd){bd=d;best=i}
+  }
+  if(best>=0){
+    score+=schools[best].v;
+    msg='起网!满满一网 +'+schools[best].v+' 分';
+    schools[best].alive=false;
+    schools[best].re=4;
+  }else{
+    msg='空网…声呐没扫到,先找鱼群';
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再巡一湖';
+  ot.textContent=win?'鱼满舱!':'湖太大,网太慢…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 600 分<br>'+(win?'声呐在手,湖里没有秘密!':'看一圈记一圈,别瞎开船。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=80;score=0;msg='';cd=0;boat.x=320;boat.y=240;
+  schools=[];rings=[];sT=0;keys={};pHold=false;
+  makeWeeds();
+  var i;for(i=0;i<6;i++)placeSchool();
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  if(cd>0)cd-=dt;
+  tl-=dt;if(tl<=0){tl=0;finish(score>=600);return}
+  var mx=0,my=0;
+  if(keys.left)mx-=1;if(keys.right)mx+=1;
+  if(keys.up)my-=1;if(keys.down)my+=1;
+  if(pHold){
+    var dx=pPos.x-boat.x,dy=pPos.y-boat.y,d=Math.sqrt(dx*dx+dy*dy);
+    if(d>12){mx=dx/d;my=dy/d}
+  }
+  boat.x=Math.max(30,Math.min(W-30,boat.x+mx*150*dt));
+  boat.y=Math.max(30,Math.min(H-30,boat.y+my*150*dt));
+  sT-=dt;
+  if(sT<=0){sT=1.6;rings.push({x:boat.x,y:boat.y,r:0})}
+  var i,j;
+  for(i=rings.length-1;i>=0;i--){
+    var rg=rings[i];
+    rg.r+=190*dt;
+    for(j=0;j<schools.length;j++){
+      var s=schools[j];
+      if(!s.alive)continue;
+      var d=Math.sqrt((s.x-rg.x)*(s.x-rg.x)+(s.y-rg.y)*(s.y-rg.y));
+      if(Math.abs(d-rg.r)<20)s.vis=1.2;
+    }
+    if(rg.r>340)rings.splice(i,1);
+  }
+  for(i=0;i<schools.length;i++){
+    var sc=schools[i];
+    if(sc.vis>0)sc.vis-=dt;
+    if(!sc.alive){
+      sc.re-=dt;
+      if(sc.re<=0){
+        schools.splice(i,1);
+        placeSchool();
+        i--;
+      }
+    }
+  }
+}
+function draw(){
+  X.fillStyle='#0d2438';X.fillRect(0,0,W,H);
+  var i,j;
+  X.fillStyle='rgba(10,40,34,.55)';
+  for(i=0;i<weeds.length;i++){
+    X.beginPath();X.ellipse(weeds[i].x,weeds[i].y,weeds[i].r,weeds[i].r*0.6,0,0,7);X.fill();
+  }
+  X.strokeStyle='rgba(127,212,255,.10)';X.lineWidth=1;
+  for(i=1;i<8;i++){X.beginPath();X.moveTo(0,i*60);X.lineTo(W,i*60);X.stroke()}
+  for(i=0;i<rings.length;i++){
+    var rg=rings[i],a=Math.max(0,0.5-rg.r/700);
+    X.strokeStyle='rgba(127,220,255,'+a.toFixed(2)+')';X.lineWidth=2;
+    X.beginPath();X.arc(rg.x,rg.y,rg.r,0,7);X.stroke();
+  }
+  for(i=0;i<schools.length;i++){
+    var s=schools[i];
+    if(!s.alive||s.vis<=0)continue;
+    var al=Math.min(1,s.vis/1.2);
+    for(j=0;j<s.n;j++){
+      var fx=s.x+Math.cos(j*2.4+s.vis*3)*16,fy=s.y+Math.sin(j*2.4+s.vis*3)*12;
+      X.fillStyle='rgba(180,225,255,'+(0.85*al).toFixed(2)+')';
+      X.beginPath();X.ellipse(fx,fy,10,5,0,0,7);X.fill();
+      X.beginPath();X.moveTo(fx+8,fy);X.lineTo(fx+15,fy-4);X.lineTo(fx+15,fy+4);X.closePath();X.fill();
+    }
+  }
+  X.fillStyle='#3b4e6e';
+  X.beginPath();X.ellipse(boat.x,boat.y,26,15,-0.4,0,7);X.fill();
+  X.fillStyle='#ffd75e';X.beginPath();X.arc(boat.x,boat.y,4,0,7);X.fill();
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';
+  X.fillText(cd>0?'收网中…':msg,W/2,30);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('WASD/方向键 或按住拖动 开船 · 空格/撒网键 下网',W/2,H-14);
+}
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else net();
+    return;
+  }
+  var k=e.key.toLowerCase();
+  if(k==='a'||e.key==='ArrowLeft')keys.left=true;
+  if(k==='d'||e.key==='ArrowRight')keys.right=true;
+  if(k==='w'||e.key==='ArrowUp')keys.up=true;
+  if(k==='s'||e.key==='ArrowDown')keys.down=true;
+});
+document.addEventListener('keyup',function(e){
+  var k=e.key.toLowerCase();
+  if(k==='a'||e.key==='ArrowLeft')keys.left=false;
+  if(k==='d'||e.key==='ArrowRight')keys.right=false;
+  if(k==='w'||e.key==='ArrowUp')keys.up=false;
+  if(k==='s'||e.key==='ArrowDown')keys.down=false;
+});
+function setP(e){
+  var r=cv.getBoundingClientRect();
+  pPos.x=(e.clientX-r.left)*(W/r.width);
+  pPos.y=(e.clientY-r.top)*(H/r.height);
+}
+cv.addEventListener('pointerdown',function(e){pHold=true;setP(e)});
+cv.addEventListener('pointermove',function(e){if(pHold)setP(e)});
+window.addEventListener('pointerup',function(){pHold=false});
+bNet.addEventListener('click',net);
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

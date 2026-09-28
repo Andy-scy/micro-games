@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子轮盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:10px 14px;font-size:14px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.pick{background:#232a48;color:#cdd6f4;border:1px solid #333c63;border-radius:9px;padding:9px 10px;font-size:13px;cursor:pointer}
+.pick b{color:#ffd166}
+.pick.on{background:#7a5c00;color:#fff;box-shadow:inset 0 0 0 2px #ffd166}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#wheel{display:block;margin:0 auto}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子轮盘</h1>
+  <p class="tips">转盘八格:数字 1-6、幸运「七」与骰「王」各占一格。押注类型后选筹码(5/10/25/50)转动:<b>单数字 1:6</b>、<b>小(1-3)/大(4-6)1:2</b>、<b>七 1:8</b>、<b>王 1:8</b>。开局 100 筹码,40 回合内滚到 300 即通吃,不足 5 筹码破产!</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">筹码</div><div class="big" id="chips">100</div></div>
+    <div class="card stat"><div class="mut">回合</div><div class="big" id="rd">0/40</div></div>
+    <div class="card stat"><div class="mut">目标</div><div class="big">300</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <canvas id="wheel" width="260" height="260"></canvas>
+    <div class="big" id="restx">选择押注类型与筹码</div>
+  </div>
+  <div class="card">
+    <div class="row" id="types"></div>
+    <div class="row" style="margin-top:8px" id="amts"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="spin" disabled>转动轮盘</button></div>
+  </div>
+  <div class="card log" id="log">先押注,再转动命运的轮盘!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var SECT=['1','2','3','4','5','6','七','王'];
+var BETS=[{k:'n1',n:'数字 1',od:6},{k:'n2',n:'数字 2',od:6},{k:'n3',n:'数字 3',od:6},
+  {k:'n4',n:'数字 4',od:6},{k:'n5',n:'数字 5',od:6},{k:'n6',n:'数字 6',od:6},
+  {k:'small',n:'小 1-3',od:2},{k:'big',n:'大 4-6',od:2},{k:'seven',n:'幸运七',od:8},{k:'king',n:'骰王',od:8}];
+var AMTS=[5,10,25,50];
+var chips=100,round=0,ang=0,betK=null,amt=0,spinning=false,over=false;
+function $(id){return document.getElementById(id)}
+function drawWheel(a){
+  var ctx=$('wheel').getContext('2d');
+  ctx.clearRect(0,0,260,260);
+  ctx.save();ctx.translate(130,130);
+  var cols=['#e5484d','#2a3154','#e5a148','#2a3154','#48a3e5','#2a3154','#b048e5','#e5c048'];
+  for(var i=0;i<8;i++){
+    var a0=(i*45+a-90)*Math.PI/180,a1=a0+45*Math.PI/180;
+    ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,118,a0,a1);ctx.closePath();
+    ctx.fillStyle=cols[i];ctx.fill();
+    ctx.strokeStyle='#0f1220';ctx.lineWidth=2;ctx.stroke();
+    var mid=(i*45+a-67.5)*Math.PI/180;
+    ctx.save();ctx.translate(Math.cos(mid)*86,Math.sin(mid)*86);ctx.rotate(mid+Math.PI/2);
+    ctx.fillStyle='#fff';ctx.font='bold 22px system-ui,sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(SECT[i],0,0);
+    ctx.restore();
+  }
+  ctx.beginPath();ctx.arc(0,0,26,0,Math.PI*2);
+  ctx.fillStyle='#1a1f36';ctx.fill();
+  ctx.strokeStyle='#ffd166';ctx.lineWidth=3;ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle='#ffd166';
+  ctx.beginPath();ctx.moveTo(120,6);ctx.lineTo(140,6);ctx.lineTo(130,32);ctx.closePath();ctx.fill();
+}
+function drawTop(){
+  $('chips').textContent=chips;
+  $('rd').textContent=round+'/40';
+  $('spin').disabled=over||spinning||betK===null||amt===0;
+  if(betK&&amt)$('restx').textContent='已押 '+amt+' 筹码,点「转动轮盘」!';
+}
+function say(m){$('log').textContent=m}
+function buildUI(){
+  var T=$('types');T.innerHTML='';
+  for(var i=0;i<BETS.length;i++){
+    var b=document.createElement('button');
+    b.className='pick'+(betK===BETS[i].k?' on':'');
+    b.innerHTML=BETS[i].n+'<br><b>1:'+BETS[i].od+'</b>';
+    (function(k){b.onclick=function(){
+      if(over||spinning)return;
+      betK=k;buildUI();drawTop();
+    }})(BETS[i].k);
+    T.appendChild(b);
+  }
+  var A=$('amts');A.innerHTML='<span class="mut">筹码:</span>';
+  for(i=0;i<AMTS.length;i++){
+    var a=document.createElement('button');
+    a.className='pick'+(amt===AMTS[i]?' on':'');
+    a.textContent=AMTS[i];
+    (function(v){a.onclick=function(){
+      if(over||spinning)return;
+      amt=v;buildUI();drawTop();
+    }})(AMTS[i]);
+    A.appendChild(a);
+  }
+}
+function landIdx(){return Math.floor(((((-ang)%360)+360)%360)/45)}
+$('spin').onclick=function(){
+  if(over||spinning||betK===null||amt===0)return;
+  spinning=true;drawTop();
+  say('轮盘飞速旋转……');
+  var target=Math.floor(Math.random()*8);
+  var delta=8+Math.random()*28;
+  var a0=ang;
+  var a1=a0+1440+(((-target*45-delta-a0)%360)+360)%360;
+  var t0=performance.now(),D=2400;
+  function step(t){
+    var k=Math.min(1,(t-t0)/D);
+    var e=1-Math.pow(1-k,3);
+    ang=a0+(a1-a0)*e;
+    drawWheel(ang);
+    if(k<1)requestAnimationFrame(step);
+    else{
+      spinning=false;
+      var idx=landIdx();
+      settle(idx);
+    }
+  }
+  requestAnimationFrame(step);
+};
+function settle(idx){
+  var s=SECT[idx],od=0,i;
+  for(i=0;i<BETS.length;i++)if(BETS[i].k===betK)od=BETS[i].od;
+  var win=false;
+  if(betK==='small')win=idx<=2;
+  else if(betK==='big')win=idx>=3&&idx<=5;
+  else if(betK==='seven')win=idx===6;
+  else if(betK==='king')win=idx===7;
+  else win=(s===betK.slice(1));
+  if(win){
+    chips+=amt*od;
+    say('停在第 '+idx+' 格「'+s+'」——押中!+'+(amt*od)+' 筹码。');
+  }else{
+    chips-=amt;
+    say('停在「'+s+'」,押注落空 -'+amt+' 筹码。');
+  }
+  round++;
+  drawTop();buildUI();
+  if(chips>=300){finish(true);return}
+  if(chips<5){finish(false,'筹码不足 5,破产离场。');return}
+  if(round>=40){finish(chips>=300,'40 回合结束,止步于 '+chips+' 筹码。');return}
+  $('restx').textContent='当前 '+chips+' 筹码,继续押注!';
+}
+function finish(good,extra){
+  over=true;drawTop();
+  $('ovt').textContent=good?'通吃全场!':'轮盘无情';
+  $('ovp').innerHTML=good?'40 回合内从 100 滚到 <b>'+chips+'</b> 筹码,今晚轮盘为你而转!':'最终 '+chips+' 筹码。'+(extra||'')+'<br>稳押小大细水长流,孤注一掷七与王!';
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  chips=100;round=0;ang=0;betK=null;amt=0;spinning=false;over=false;
+  $('overlay').classList.remove('show');
+  drawWheel(0);buildUI();drawTop();
+  $('restx').textContent='选择押注类型与筹码';
+  say('新的轮盘之夜,先小注试水!');
+};
+drawWheel(0);buildUI();drawTop();
+</script>
+</body>
+</html>

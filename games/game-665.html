@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右开弓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>左右开弓</h1>
+  <p class="tips">双手双篮!左篮用 A/D,右篮用 ← →,各管半场;触屏则按住哪半边就拖哪只篮。星光落满全场,漏一颗全场 -1 生命,共 5 条——一心二用你行吗?</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥♥♥</div></div>
+    <div class="stat"><div class="mut">接住</div><div class="big" id="ct">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">左右开弓</h2><p id="ovp">玩法:双篮分区,两套键位。<br>· 左篮 A/D 只走左半场,右篮 ← → 只走右半场<br>· 触屏:按住左半边拖左篮,右半边拖右篮<br>· 接住星光 +10,哪只篮接到都算<br>· 任意一颗星光落地 -1 生命,共 5 条<br>· 左右同时来星时最考验分工!</p><button class="btn" id="obtn">开始双打</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var HC=['#4cc9f0','#ffd166','#51d88a','#ff8fab'];
+var S=null;
+function reset(){S={on:false,score:0,lives:5,caught:0,Lx:W*0.25,Rx:W*0.75,bw:72,st:0.7,t:0,items:[],pops:[],keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥♥♥';$('ct').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+function clampL(x){return Math.max(40,Math.min(W/2-40,x))}
+function clampR(x){return Math.max(W/2+40,Math.min(W-40,x))}
+cv.addEventListener('mousemove',function(e){if(!S.on)return;var x=px(e);if(x<W/2)S.Lx=clampL(x);else S.Rx=clampR(x)});
+function handleTouches(ts){
+  for(var i=0;i<ts.length;i++){
+    var x=px(ts[i]);
+    if(x<W/2)S.Lx=clampL(x);else S.Rx=clampR(x);
+  }
+}
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)handleTouches(e.touches)},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)handleTouches(e.touches)},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function update(dt){
+  S.t+=dt;
+  var l1=S.keys['a']||S.keys['A'],r1=S.keys['d']||S.keys['D'];
+  var l2=S.keys['ArrowLeft'],r2=S.keys['ArrowRight'];
+  if(l1)S.Lx-=330*dt;
+  if(r1)S.Lx+=330*dt;
+  if(l2)S.Rx-=330*dt;
+  if(r2)S.Rx+=330*dt;
+  S.Lx=clampL(S.Lx);S.Rx=clampR(S.Rx);
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.42,0.9-S.t*0.012)*(0.7+Math.random()*0.6);
+    S.items.push({x:26+Math.random()*(W-52),y:-14,v:175+S.t*4+Math.random()*60,hc:HC[Math.floor(Math.random()*HC.length)],rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.items.length-1;i>=0;i--){
+    var it=S.items[i];
+    it.y+=it.v*dt;it.rot+=dt*3;
+    var hit=0,who='';
+    if(Math.abs(it.x-S.Lx)<S.bw/2+8&&it.y>=by-16&&it.y<=by+10){hit=1;who='左'}
+    else if(Math.abs(it.x-S.Rx)<S.bw/2+8&&it.y>=by-16&&it.y<=by+10){hit=1;who='右'}
+    if(hit){
+      S.score+=10;S.caught++;$('sc').textContent=S.score;$('ct').textContent=S.caught;
+      pop(it.x,by-28,'+'+10+'('+who+'篮)','#ffd166');
+      S.items.splice(i,1);continue;
+    }
+    if(it.y>H+16){
+      S.items.splice(i,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(it.x,H-100,'漏接!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='双手忙不过来…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>共接住 <b>'+S.caught+'</b> 颗星光<br>左右半场分工明确,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function basket(x,color,label){
+  ctx.fillStyle=color;rr(x-S.bw/2,H-46,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=2;rr(x-S.bw/2,H-46,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#081226';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText(label,x,H-30);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.strokeStyle='rgba(255,255,255,.22)';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#9aa3c0';ctx.font='12px system-ui';ctx.textAlign='center';
+  ctx.fillText('左半场 A/D',W/4,24);ctx.fillText('右半场 ← →',W*0.75,24);
+  for(var i=0;i<S.items.length;i++){
+    var it=S.items[i];
+    ctx.save();ctx.translate(it.x,it.y);ctx.rotate(Math.sin(it.rot)*0.4);
+    ctx.fillStyle=it.hc;
+    ctx.beginPath();ctx.moveTo(0,-9);ctx.lineTo(8,0);ctx.lineTo(0,9);ctx.lineTo(-8,0);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  basket(S.Lx,'#4cc9f0','A/D');
+  basket(S.Rx,'#ff8fab','← →');
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

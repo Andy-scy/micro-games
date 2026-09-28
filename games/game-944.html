@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>库边掘金</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#5eead4;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#5eead4}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#5eead4;color:#042f2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>库边掘金</h1>
+  <p class="hint">吃库越多,进球越值钱 · 先让母球撞库再进球,分数按吃库数翻倍</p>
+  <div class="hud">
+    <span>得分 <b id="hScore">0</b>/1500</span>
+    <span>剩余杆数 <b id="hShots">12</b></span>
+    <span>本杆吃库 <b id="hRail">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="290"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">库边掘金</h2>
+      <p id="ovD">这局不只比进球:母球每吃一次库边,本杆的进球价值就翻一档。进球得分 = 100 × (1 + 吃库次数);空杆只按吃库给小额奖励。12 杆内凑满 1500 分即胜利,母球落袋倒扣 150。台面少于 2 颗红球时会自动补球。</p>
+      <button id="btnGo">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hScore=$("hScore"),hShots=$("hShots"),hRail=$("hRail");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo");
+var W=470,H=290,RL=16,RT=16,RR=454,RB=274,R=8,TAU=6.28318;
+var PK=[[19,19],[235,13],[451,19],[19,271],[235,277],[451,271]];
+var CAPR=13.5;
+var balls=[],cue=null;
+var state="menu",moving=false;
+var aiming=false,aimDx=1,aimDy=0,power=0;
+var score=0,shots=12,rails=0,cueDown=false,redLeft=0,potCount=0;
+var fx=[];
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function mkBall(x,y,o){var b={x:x,y:y,vx:0,vy:0,r:R,live:true};if(o)for(var k in o)b[k]=o[k];balls.push(b);return b;}
+function freeSpot(x,y){var n=0;while(n<90){var ok=true,i;for(i=0;i<balls.length;i++){var b=balls[i];if(b.live){var dx=b.x-x,dy=b.y-y;if(dx*dx+dy*dy<440){ok=false;break;}}}if(ok)return{x:x,y:y};x=RL+22+Math.random()*(RR-RL-44);y=RT+22+Math.random()*(RB-RT-44);n++;}return{x:x,y:y};}
+function anyMoving(){for(var i=0;i<balls.length;i++){var b=balls[i];if(b.live&&(b.vx*b.vx+b.vy*b.vy)>25)return true;}return false;}
+function onPot(b){
+  if(b===cue){cueDown=true;addFx(b.x,b.y,"母球落袋!","#f87171");return;}
+  redLeft--;potCount++;addFx(b.x,b.y,"入袋","#fbbf24");
+}
+function onRail(b){if(b===cue&&moving){rails++;hRail.textContent=rails;}}
+function onClack(){}
+function physics(dt){
+  var i,j,b;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    var f=1-1.8*dt;if(f<0)f=0;b.vx*=f;b.vy*=f;
+    if(b.vx*b.vx+b.vy*b.vy<36){b.vx=0;b.vy=0;}}
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    for(j=0;j<PK.length;j++){var px=b.x-PK[j][0],py=b.y-PK[j][1];
+      if(px*px+py*py<CAPR*CAPR){b.live=false;b.vx=0;b.vy=0;onPot(b);break;}}}
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    if(b.x<RL+b.r){b.x=RL+b.r;if(b.vx<0)b.vx=-b.vx*0.78;}
+    else if(b.x>RR-b.r){b.x=RR-b.r;if(b.vx>0)b.vx=-b.vx*0.78;}
+    if(b.y<RT+b.r){b.y=RT+b.r;if(b.vy<0)b.vy=-b.vy*0.78;}
+    else if(b.y>RB-b.r){b.y=RB-b.r;if(b.vy>0)b.vy=-b.vy*0.78;}}
+  for(i=0;i<balls.length;i++){var a=balls[i];if(!a.live)continue;
+    for(j=i+1;j<balls.length;j++){b=balls[j];if(!b.live)continue;
+      var dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy,mn=a.r+b.r;
+      if(d2<mn*mn&&d2>0.0001){var d=Math.sqrt(d2),nx=dx/d,ny=dy/d,ovp=(mn-d)/2;
+        a.x-=nx*ovp;a.y-=ny*ovp;b.x+=nx*ovp;b.y+=ny*ovp;
+        var rel=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+        if(rel<0){var im=-0.975*rel;a.vx-=im*nx;a.vy-=im*ny;b.vx+=im*nx;b.vy+=im*ny;}}}}
+}
+function endShot(){
+  shots--;
+  var potted=potCount,i;
+  potCount=0;
+  if(cueDown){score=Math.max(0,score-150);var s=freeSpot(110,145);cue.x=s.x;cue.y=s.y;cue.vx=0;cue.vy=0;cue.live=true;cueDown=false;}
+  if(potted>0){var gain=potted*100*(1+rails);score+=gain;addFx(235,145,"+"+gain+"(吃库×"+rails+")","#fbbf24");}
+  else if(rails>0){score+=rails*10;addFx(235,145,"吃库小奖 +"+rails*10,"#94a3b8");}
+  rails=0;hRail.textContent="0";
+  redLeft=0;for(i=0;i<balls.length;i++){var b=balls[i];if(b.live&&b!==cue)redLeft++;}
+  if(redLeft<2){var need=3-redLeft;
+    for(i=0;i<need;i++){var sp=freeSpot(200+Math.random()*160,80+Math.random()*130);mkBall(sp.x,sp.y,{col:"#ef4444"});}
+    addFx(235,80,"补充红球","#5eead4");}
+  updHud();
+  if(score>=1500){state="over";showOv("掘金成功!","12 杆内凑满 1500 分!\n最终得分 "+score,"再来一局");return;}
+  if(shots<=0){state="over";showOv("杆数用尽","还差 "+(1500-score)+" 分,再接再厉。\n最终得分 "+score,"再来一局");return;}
+}
+function updHud(){hScore.textContent=score;hShots.textContent=shots;}
+function reset(){
+  balls=[];fx=[];score=0;shots=12;rails=0;cueDown=false;moving=false;power=0;aiming=false;
+  cue=mkBall(110,145,{col:"#f5f5f0"});
+  var spots=[[250,80],[330,200],[390,100],[270,220],[180,190],[400,230]],i;
+  for(i=0;i<6;i++)mkBall(spots[i][0],spots[i][1],{col:"#ef4444"});
+  redLeft=6;state="play";updHud();hRail.textContent="0";
+}
+function showOv(t,d){ovT.textContent=t;ovD.textContent=d;btnGo.textContent="再来一局";ov.classList.remove("hide");}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play"||moving)return;e.preventDefault();aiming=true;mv(e);}
+function mv(e){if(!aiming)return;e.preventDefault();var p=ptr(e);var dx=cue.x-p.x,dy=cue.y-p.y,d=Math.hypot(dx,dy);if(d<8){power=0;return;}power=Math.min(d,150)/150;aimDx=dx/d;aimDy=dy/d;}
+function up(e){if(!aiming)return;if(e&&e.preventDefault)e.preventDefault();aiming=false;if(power>0.04&&cue.live){var v=120+power*1500;cue.vx=aimDx*v;cue.vy=aimDy*v;moving=true;}power=0;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+btnGo.addEventListener("click",function(){ov.classList.add("hide");reset();});
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function segHit(x,y,dx,dy,b,rad){var fxv=x-b.x,fyv=y-b.y;var bq=dx*fxv+dy*fyv;var c=fxv*fxv+fyv*fyv-rad*rad;var disc=bq*bq-c;if(disc<0)return -1;var t=-bq-Math.sqrt(disc);return t>0?t:-1;}
+function drawBall(b){
+  ctx.save();ctx.translate(b.x,b.y);
+  ctx.beginPath();ctx.arc(0,0,b.r,0,TAU);
+  ctx.fillStyle=b.col;ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.35)";ctx.beginPath();ctx.arc(-b.r*0.32,-b.r*0.35,b.r*0.3,0,TAU);ctx.fill();
+  ctx.restore();
+}
+function drawAim(){
+  if(!aiming||power<=0)return;
+  var x=cue.x,y=cue.y,dx=aimDx,dy=aimDy,bt=1e9,hb=null,tw=1e9,i,b,t;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live||b===cue)continue;
+    t=segHit(x,y,dx,dy,b,b.r+R);if(t>0&&t<bt){bt=t;hb=b;}}
+  if(dx<-1e-6)tw=Math.min(tw,(RL+R-x)/dx);else if(dx>1e-6)tw=Math.min(tw,(RR-R-x)/dx);
+  if(dy<-1e-6)tw=Math.min(tw,(RT+R-y)/dy);else if(dy>1e-6)tw=Math.min(tw,(RB-R-y)/dy);
+  if(tw<bt){bt=tw;hb=null;}
+  if(bt>1e8)bt=0;
+  var ex=x+dx*bt,ey=y+dy*bt;
+  ctx.strokeStyle="rgba(245,245,240,.7)";ctx.lineWidth=1.5;ctx.setLineDash([5,5]);
+  ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(ex,ey);ctx.stroke();ctx.setLineDash([]);
+  if(hb){ctx.strokeStyle="rgba(251,191,36,.9)";ctx.beginPath();ctx.arc(ex,ey,R,0,TAU);ctx.stroke();
+    var nd=Math.hypot(hb.x-ex,hb.y-ey)||1;
+    ctx.strokeStyle="rgba(251,191,36,.55)";ctx.beginPath();ctx.moveTo(hb.x,hb.y);
+    ctx.lineTo(hb.x+(hb.x-ex)/nd*26,hb.y+(hb.y-ey)/nd*26);ctx.stroke();}
+  ctx.fillStyle="rgba(0,0,0,.45)";ctx.fillRect(RL,4,RR-RL,9);
+  ctx.fillStyle=power>0.8?"#f87171":"#5eead4";ctx.fillRect(RL+1,5,(RR-RL-2)*power,7);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#22283f";rr(1,1,W-2,H-2,12);ctx.fill();
+  ctx.fillStyle="#3d2f4f";rr(RL-8,RT-8,RR-RL+16,RB-RT+16,6);ctx.fill();
+  var i,b;
+  for(i=0;i<PK.length;i++){ctx.fillStyle="#05070f";ctx.beginPath();ctx.arc(PK[i][0],PK[i][1],CAPR+3,0,TAU);ctx.fill();}
+  for(i=0;i<balls.length;i++){b=balls[i];if(b.live)drawBall(b);}
+  drawAim();
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.t-=0.02;if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+  if(moving&&rails>0){ctx.fillStyle="rgba(94,234,212,.9)";ctx.font="bold 14px system-ui";ctx.textAlign="center";ctx.fillText("吃库 ×"+rails,235,60);}
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);if(!lastT)lastT=t;var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play"&&moving){var acc=dt,n=0;
+    while(acc>0&&n<60){var s=Math.min(acc,1/240);physics(s);acc-=s;n++;}
+    if(!anyMoving()){moving=false;endShot();}}
+  draw();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

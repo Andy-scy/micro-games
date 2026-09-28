@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真假快判</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:24px;text-align:center;color:#6ee7ff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#6ee7ff}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:50%;background:#51d88a;border-radius:6px}
+#stmt{text-align:center;font-size:21px;font-weight:700;line-height:1.65;background:#232a48;border:2px solid #2c3357;border-radius:12px;padding:20px 14px;margin-bottom:12px;min-height:106px;display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+#stmt.ok{border-color:#51d88a;background:#173327}
+#stmt.bad{border-color:#ff5c5c;background:#3a1a20}
+.pair{display:flex;gap:10px}
+.ans{flex:1;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:12px;padding:16px 0;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit;letter-spacing:6px}
+#bTrue:hover{border-color:#51d88a;color:#51d88a}
+#bFalse:hover{border-color:#ff5c5c;color:#ff5c5c}
+.ans.ok{border-color:#51d88a;background:#173327;color:#51d88a}
+.ans.bad{border-color:#ff5c5c;background:#3a1a20;color:#ff5c5c}
+.keys{font-size:12px;color:#9aa3c0;text-align:center;margin-top:8px}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:8px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#6ee7ff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#6ee7ff;color:#062031;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>真假快判</h1>
+  <p class="tips">一句话常识闪电判断:是「真」是「假」两秒内定夺!答对加时间,答错烧时间,时间烧光就出局。</p>
+  <div class="card"><div class="tbarWrap"><div id="tbar"></div></div><div class="row">
+    <div class="stat"><div class="mut">时间</div><div class="big" id="tm">30.0</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">连对</div><div class="big" id="cb">0</div></div>
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/44</div></div>
+  </div></div>
+  <div class="card">
+    <div id="stmt">准备开始…</div>
+    <div class="pair">
+      <button class="ans" id="bTrue">真</button>
+      <button class="ans" id="bFalse">假</button>
+    </div>
+    <p class="keys">键盘:← 或 1 判「真」 / → 或 2 判「假」</p>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">真假快判</h2><p id="ovp">玩法说明:<br>· 屏幕出现一句常识,判断它是真是假<br>· 初始 30 秒时间银行,答对 +2 秒,答错 −5 秒<br>· 连对越高单题分越高(60~260 分)<br>· 时间烧光即出局;判完全部 44 句则通关<br>　并领取剩余时间 ×10 的奖励分</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{t:'蜂蜜密封保存得当,放很久也不会变质。',a:1},
+{t:'章鱼有三颗心脏。',a:1},
+{t:'闪电绝不会两次击中同一个地点。',a:0},
+{t:'香蕉长在高大的木本树上。',a:0},
+{t:'人体面积最大的器官是皮肤。',a:1},
+{t:'蝙蝠属于鸟类。',a:0},
+{t:'长颈鹿的颈椎骨数量比人类多。',a:0},
+{t:'标准大气压下,纯水到 100 摄氏度会沸腾。',a:1},
+{t:'月亮自己会发光。',a:0},
+{t:'企鹅主要生活在南极一带。',a:1},
+{t:'蜗牛在干旱环境下能休眠很久。',a:1},
+{t:'血液呈红色与血红蛋白中的铁有关。',a:1},
+{t:'一年中共有 7 个月是 31 天。',a:1},
+{t:'珠穆朗玛峰是地球上的最高峰。',a:1},
+{t:'鸵鸟害怕时会把头埋进沙子里。',a:0},
+{t:'金鱼的记忆只有 7 秒。',a:0},
+{t:'蜗牛属于昆虫。',a:0},
+{t:'珊瑚其实是动物。',a:1},
+{t:'人的心脏整体正好位于胸腔正中央。',a:0},
+{t:'草莓的种子长在果实外面。',a:1},
+{t:'北极熊的皮肤是黑色的。',a:1},
+{t:'大熊猫的主食是竹子。',a:1},
+{t:'蜻蜓点水其实是在产卵。',a:1},
+{t:'冰的密度比同温度的液态水大。',a:0},
+{t:'声音可以在真空中传播。',a:0},
+{t:'光速远快于声速。',a:1},
+{t:'人体最坚硬的部分是牙齿。',a:1},
+{t:'猫头鹰的脖子能转动约 270 度。',a:1},
+{t:'树懒大约每周才排便一次。',a:1},
+{t:'地球是太阳系中体积最大的行星。',a:0},
+{t:'彩虹通常被描述为七种颜色。',a:1},
+{t:'蝴蝶主要用翅膀来品尝味道。',a:0},
+{t:'牛有四个胃。',a:1},
+{t:'人类和香蕉大约共享六成基因。',a:1},
+{t:'世界上最深的海沟是马里亚纳海沟。',a:1},
+{t:'花生是长在树上的坚果。',a:0},
+{t:'海马爸爸负责孵化后代。',a:1},
+{t:'骆驼的驼峰里主要储存的是脂肪。',a:1},
+{t:'铅笔芯的主要成分是石墨。',a:1},
+{t:'成年人全身共有 206 块骨骼。',a:1},
+{t:'地球自转一周约需要 24 小时。',a:1},
+{t:'番茄在植物学分类上属于果实。',a:1},
+{t:'胡萝卜是兔子在野外的主要食物。',a:0},
+{t:'企鹅和北极熊在野外会自然相遇。',a:0}
+];
+var N=BANK.length,MAXT=60,START=30;
+var deck=[],ptr=0,timeLeft=START,score=0,combo=0,best=0,right=0,total=0;
+var playing=false,over=false,locked=false,revealT=0,cur=null;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function startGame(){
+  deck=shuffle(BANK.slice());ptr=0;
+  timeLeft=START;score=0;combo=0;best=0;right=0;total=0;
+  playing=true;over=false;locked=false;revealT=0;
+  $('sc').textContent='0';$('cb').textContent='0';$('pg').textContent='0/'+N;
+  $('bTrue').className='ans';$('bFalse').className='ans';
+  $('overlay').classList.add('hide');
+  nextQ();
+}
+function nextQ(){
+  cur=deck[ptr];
+  locked=false;
+  var s=$('stmt');
+  s.className='';
+  s.textContent=cur.t;
+  $('bTrue').className='ans';$('bFalse').className='ans';
+  $('msg').textContent='';
+}
+function judge(v,btn){
+  if(!playing||over||locked)return;
+  locked=true;total++;
+  var s=$('stmt'),ok=(v===cur.a);
+  if(ok){
+    combo++;if(combo>best)best=combo;
+    var gain=60+Math.min(combo,10)*20;
+    score+=gain;right++;
+    if(timeLeft<MAXT)timeLeft+=2;
+    if(btn)btn.classList.add('ok');
+    s.classList.add('ok');
+    $('msg').textContent='答对!+'+gain+' 分,时间 +2 秒'+(combo>=3?(' · 连对 x'+combo):'');
+    $('cb').textContent=combo;
+  }else{
+    combo=0;timeLeft-=5;
+    if(btn)btn.classList.add('bad');
+    s.classList.add('bad');
+    $('msg').textContent='答错,−5 秒 · 正确答案:'+(cur.a?'真':'假');
+    $('cb').textContent='0';
+  }
+  $('sc').textContent=score;
+  $('pg').textContent=total+'/'+N;
+  revealT=0.75;
+}
+function finish(win){
+  playing=false;over=true;
+  var bonus=0;
+  if(win){bonus=Math.round(timeLeft)*10;score+=bonus;}
+  var acc=total>0?Math.round(right/total*100):0;
+  var rank=score>=3000?'人间清醒!':(score>=1800?'常识老手!':(score>=800?'略知一二':'多多积累'));
+  $('ovt').textContent=win?'全部判完 · 通关!':'时间烧光…';
+  $('ovp').innerHTML='最终得分 <b>'+score+'</b> 分'+(win?('(含时间奖励 '+bonus+')'):'')+'<br>判题 '+total+' 句 · 答对 '+right+' 句(正确率 '+acc+'%)<br>最长连对:'+best+' 连<br>'+rank+' 再来一轮!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('bTrue').addEventListener('click',function(){judge(true,this);});
+$('bFalse').addEventListener('click',function(){judge(false,this);});
+document.addEventListener('keydown',function(e){
+  if(!playing||over||locked)return;
+  var k=e.key;
+  if(k==='ArrowLeft'||k==='1'){e.preventDefault();judge(true,$('bTrue'));}
+  else if(k==='ArrowRight'||k==='2'){e.preventDefault();judge(false,$('bFalse'));}
+});
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    if(locked){
+      revealT-=dt;
+      if(revealT<=0){
+        ptr++;
+        if(ptr>=N)finish(true);
+        else nextQ();
+      }
+    }else{
+      timeLeft-=dt;
+      if(timeLeft<=0){timeLeft=0;finish(false);}
+    }
+    var f=timeLeft/MAXT;
+    var bar=$('tbar');
+    bar.style.width=(f*100)+'%';
+    bar.style.background=f>0.5?'#51d88a':(f>0.25?'#ffc857':'#ff5c5c');
+    $('tm').textContent=timeLeft.toFixed(1);
+    $('tm').style.color=timeLeft<10?'#ff5c5c':'#6ee7ff';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

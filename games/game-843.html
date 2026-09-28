@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>井字攻防</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px;flex-wrap:wrap}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px;display:flex;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(3,92px);grid-auto-rows:92px;gap:6px}
+.tc{background:#1c2240;border-radius:10px;font-size:46px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;border:none;transition:background .15s}
+.tc:hover{background:#242c55}
+.tc.x{color:#4f6ef7}
+.tc.o{color:#ff7b8a}
+.tc.win{background:#2c3a2a;outline:2px solid #4ade80}
+#status{text-align:center;min-height:22px;font-size:15px;color:#fbbf24;margin-bottom:10px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:24px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>井字攻防</h1>
+<p class="tip">你执 X 先行,AI 执 O 且从不失误——<br>挑战:在它手下抢下一胜,或守住一场平局!</p>
+<div class="hud"><span id="hT">胜 0</span><span id="hD">平 0</span><span id="hL">负 0</span><span id="hS">连平 0</span></div>
+<div class="panel"><div id="board"></div></div>
+<div id="status"></div>
+<div class="btnrow"><button class="btn pri" id="bNew">再来一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+let b=[],over=false,busy=false;
+let tally={w:0,d:0,l:0},streak=0,winLine=null;
+const boardEl=document.getElementById("board");
+const cells=[];
+for(let i=0;i<9;i++){
+  const d=document.createElement("button");
+  d.className="tc";d.dataset.i=String(i);
+  boardEl.appendChild(d);cells.push(d);
+}
+boardEl.addEventListener("click",e=>{
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined)return;
+  playerMove(parseInt(t.dataset.i,10));
+});
+function winner(bd){
+  for(const L of LINES){
+    if(bd[L[0]]&&bd[L[0]]===bd[L[1]]&&bd[L[1]]===bd[L[2]])return {p:bd[L[0]],line:L};
+  }
+  return null;
+}
+function isFull(bd){for(let i=0;i<9;i++)if(!bd[i])return false;return true;}
+function minimax(bd,me){
+  const w=winner(bd);
+  if(w){return w.p===2?1:-1;}
+  if(isFull(bd))return 0;
+  let best=(me===2)?-2:2;
+  for(let i=0;i<9;i++){
+    if(bd[i])continue;
+    bd[i]=me;
+    const s=minimax(bd,(me===1)?2:1);
+    bd[i]=0;
+    if(me===2){if(s>best)best=s;}else{if(s<best)best=s;}
+  }
+  return best;
+}
+function playerMove(i){
+  if(over||busy||b[i])return;
+  b[i]=1;render();
+  if(endCheck())return;
+  busy=true;
+  document.getElementById("status").textContent="AI 思考中…";
+  setTimeout(aiMove,380);
+}
+function aiMove(){
+  let best=-2;const cand=[];
+  for(let i=0;i<9;i++){
+    if(b[i])continue;
+    b[i]=2;
+    const s=minimax(b,1);
+    b[i]=0;
+    if(s>best){best=s;cand.length=0;cand.push(i);}
+    else if(s===best)cand.push(i);
+  }
+  b[cand[Math.floor(Math.random()*cand.length)]]=2;
+  busy=false;render();
+  endCheck();
+}
+function endCheck(){
+  const w=winner(b);
+  let title="",info="";
+  if(w){
+    over=true;winLine=w.line;
+    if(w.p===1){tally.w++;streak=0;title="不可思议的胜利!";info="你击败了理论不败的 AI,这局值得纪念。";}
+    else{tally.l++;streak=0;title="惜败";info="AI 技高一筹,再试试守住平局吧。";}
+  }else if(isFull(b)){
+    over=true;tally.d++;streak++;title="平局!";
+    info=streak>=3?"连续 "+streak+" 场逼平不败 AI,防守功力深厚。":"面对不败 AI,平局就是荣耀。";
+  }else{
+    document.getElementById("status").textContent="轮到你(X)";
+    render();
+    return false;
+  }
+  updHud();render();
+  info+=" 战绩:胜 "+tally.w+" · 平 "+tally.d+" · 负 "+tally.l;
+  show(title,info);
+  return true;
+}
+function render(){
+  for(let i=0;i<9;i++){
+    const d=cells[i];
+    d.textContent=b[i]===1?"×":(b[i]===2?"○":"");
+    d.classList.toggle("x",b[i]===1);
+    d.classList.toggle("o",b[i]===2);
+    d.classList.toggle("win",!!(winLine&&winLine.indexOf(i)>=0));
+  }
+}
+function updHud(){
+  document.getElementById("hT").textContent="胜 "+tally.w;
+  document.getElementById("hD").textContent="平 "+tally.d;
+  document.getElementById("hL").textContent="负 "+tally.l;
+  document.getElementById("hS").textContent="连平 "+streak;
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function newRound(){
+  b=new Array(9).fill(0);over=false;busy=false;winLine=null;
+  document.getElementById("status").textContent="轮到你(X),点击落子";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+document.getElementById("bNew").addEventListener("click",newRound);
+document.getElementById("ovB").addEventListener("click",newRound);
+document.addEventListener("keydown",e=>{
+  if(e.key>="1"&&e.key<="9")playerMove(parseInt(e.key,10)-1);
+});
+newRound();
+</script>
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一触即爆</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#ff6b6b;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#1a1220;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(24,10,14,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#ff6b6b}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#ff6b6b;color:#1a0a0e;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#ff8f8f}
+</style>
+</head>
+<body>
+<h1>一触即爆</h1>
+<div id="tip">拆除炸弹：正确拼写引线上单词即可剪线；任何一个错误按键都会立即引爆一颗炸弹！</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始拆弹</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var WORDS=["zip","jet","fox","bug","sun","ice","map","key","run","top","gem","owl","ace","bay","dew","elm","fin","gap","hex","ink","jug","kit","lab","mix","nod","oak","pit","raw","sea","tan","urn","vet","wax","yak","zoo","dot","hub","ivy","jaw","kin","lux","mud","nap","opt","paw","rig","saw","tin","van","web"];
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var bombs,buffer,target,score,lives,kills,level,spawnT,elapsed,shake,running,raf,tPrev;
+var parts,flash;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function hudUpd(){hud.textContent='得分 '+score+'　生命 '+lives+'　拆除 '+kills+'　紧张度 Lv.'+level;}
+function reset(){
+  bombs=[];buffer='';target=-1;score=0;lives=3;kills=0;level=1;spawnT=0.6;elapsed=0;shake=0;parts=[];flash=0;hudUpd();
+}
+function spawn(){
+  var t=pick(WORDS);
+  for(var k=0;k<bombs.length;k++){if(bombs[k].text===t)return;}
+  var xx=rnd(40,Math.max(60,cv.width-90));
+  bombs.push({text:t,x:xx,y:-30,vy:56+level*8+rnd(0,20),fuse:9});
+}
+function boom(x,y,col,n){for(var i=0;i<(n||18);i++)parts.push({x:x,y:y,vx:rnd(-160,160),vy:rnd(-200,60),life:rnd(.3,.8),c:col});}
+function detonate(x,y,why){
+  boom(x,y,'#ff6b6b',24);
+  lives--;buffer='';target=-1;shake=9;flash=0.3;hudUpd();
+  if(lives<=0)end(false);
+}
+function cutWire(i){
+  var b=bombs[i];
+  score+=b.text.length*15;kills++;
+  if(kills%6===0)level=Math.min(9,level+1);
+  boom(b.x+26,b.y+22,'#ffd76a');
+  bombs.splice(i,1);
+  if(target===i){target=-1;buffer='';}else if(target>i)target--;
+  hudUpd();
+}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var wx,wy;
+  if(target>=0&&bombs[target]){
+    if(bombs[target].text.charAt(buffer.length)===ch){
+      buffer+=ch;
+      if(buffer===bombs[target].text)cutWire(target);
+      return;
+    }
+    wx=bombs[target].x+26;wy=bombs[target].y+22;
+    detonate(wx,wy,'打错引线');
+    return;
+  }
+  var cand=-1;
+  for(var i=0;i<bombs.length;i++){
+    if(bombs[i].text.charAt(0)===ch){cand=i;break;}
+  }
+  if(cand<0){
+    if(bombs.length>0)detonate(bombs[0].x+26,bombs[0].y+22,'误触引信');
+    return;
+  }
+  target=cand;buffer=ch;
+  if(buffer===bombs[target].text)cutWire(target);
+}
+function update(dt){
+  elapsed+=dt;shake=Math.max(0,shake-dt*11);flash=Math.max(0,flash-dt);
+  spawnT-=dt;
+  if(spawnT<=0){spawn();spawnT=Math.max(0.75,1.5-level*0.1);}
+  for(var i=bombs.length-1;i>=0;i--){
+    var b=bombs[i];
+    b.y+=b.vy*dt;b.fuse-=dt;
+    if(b.fuse<=0){
+      bombs.splice(i,1);
+      if(target===i){target=-1;buffer='';}else if(target>i)target--;
+      detonate(b.x+26,b.y+22,'引信烧尽');
+      if(!running)return;
+      continue;
+    }
+    if(b.y>cv.height-52){
+      bombs.splice(i,1);
+      if(target===i){target=-1;buffer='';}else if(target>i)target--;
+      detonate(b.x+26,cv.height-46,'炸弹落地');
+      if(!running)return;
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=340*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  if(flash>0){ctx.fillStyle='rgba(255,60,60,'+(flash*0.55)+')';ctx.fillRect(0,0,cv.width,cv.height);}
+  ctx.strokeStyle='rgba(255,107,107,.5)';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(0,cv.height-30);ctx.lineTo(cv.width,cv.height-30);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign='center';
+  for(var i=0;i<bombs.length;i++){
+    var b=bombs[i];
+    ctx.fillStyle='#2a1c22';
+    ctx.beginPath();ctx.arc(b.x+26,b.y+22,16,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=i===target?'#ffd76a':'#ff6b6b';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(b.x+26,b.y+6);ctx.quadraticCurveTo(b.x+34,b.y-4,b.x+30,b.y-8);ctx.stroke();
+    ctx.font='bold 19px ui-monospace, Consolas, monospace';
+    var done=(i===target)?buffer:'';
+    var pre=b.text.slice(0,done.length);
+    ctx.fillStyle='#ffd76a';ctx.fillText(pre,b.x+26,b.y+52);
+    ctx.fillStyle='#e8eaf6';ctx.fillText(b.text.slice(done.length),b.x+26+ctx.measureText(pre).width/2-ctx.measureText(b.text).width/2+ctx.measureText(b.text.slice(0,done.length)).width/2,b.y+52);
+    ctx.font='12px system-ui, sans-serif';
+    ctx.fillStyle=b.fuse<3?'#ff6b6b':'#9aa3c0';
+    ctx.fillText('引信 '+b.fuse.toFixed(1)+'s',b.x+26,b.y+70);
+  }
+  ctx.textAlign='left';
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);
+  if(!running)return;
+  draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'全部拆除':'轰然引爆';
+  ovX.textContent='得分 '+score+'\n拆除炸弹 '+kills+' 枚　紧张度 Lv.'+level+'\n坚持 '+Math.round(elapsed)+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='一触即爆';
+ovX.textContent='每颗炸弹都挂着一条单词引线，正确打完整词即拆除。\n铁律：任何一次按错键，立刻引爆一颗炸弹并扣 1 生命！\n炸弹还有 9 秒引信倒计时，落地同样引爆。生命共 3 条。';
+btn.textContent='开始拆弹';
+})();
+</script>
+</body>
+</html>

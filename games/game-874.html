@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拾穗过街</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>拾穗过街</h1>
+<p class="tip">城门紧闭,只有集齐掉落在马路上的 3 穗玉米,大门才会打开!<br>玉米都躺在危险的车道上,得专门冒险绕过去捡。收齐后从城门缺口出城进入下一轮。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>玉米 <b id="sC">0/3</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=14,LOOP=540,OFF=60;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sC=document.getElementById("sC");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var CAR_COLORS=["#e05656","#e8a33d","#3fa66a","#4f8ef7","#b06ee0","#d05fa2","#4bb8c9"];
+var lanes,items,frog,score,lives,got,round,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function makeLane(r){
+  var dir=(r<=5?r:r-6)%2===1?1:-1,speed=rnd(48,100)*(1+round*0.06),cars=[],x0=rnd(0,LOOP),i;
+  for(i=0;i<3;i++)cars.push({x:(x0+i*180+rnd(-32,32)+LOOP)%LOOP,w:rnd(46,78),c:CAR_COLORS[(r+i)%CAR_COLORS.length]});
+  return{r:r,dir:dir,speed:speed,cars:cars};
+}
+function buildLanes(){
+  lanes=[];var r;
+  for(r=1;r<=5;r++)lanes.push(makeLane(r));
+  for(r=7;r<=11;r++)lanes.push(makeLane(r));
+}
+function genItems(){
+  items=[];var tries=0;
+  while(items.length<3&&tries<200){
+    tries++;
+    var r=Math.random()<0.5?1+Math.floor(rnd(0,5)):7+Math.floor(rnd(0,5));
+    var c=Math.floor(rnd(0,10)),dup=false,i;
+    for(i=0;i<items.length;i++)if(items[i].r===r&&items[i].c===c)dup=true;
+    if(!dup)items.push({r:r,c:c});
+  }
+}
+function updHud(){sS.textContent=score;sL.textContent=lives;sC.textContent=got+"/3";}
+function resetFrog(){frog={c:5,r:13,x:5.5*CELL,y:13*CELL};moving=false;}
+function reset(){score=0;lives=3;got=0;round=1;deadT=0;buildLanes();genItems();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+"。");}
+}
+function arrive(){
+  var i;
+  for(i=0;i<items.length;i++){
+    if(items[i].r===frog.r&&items[i].c===frog.c){
+      items.splice(i,1);got++;score+=60;updHud();break;
+    }
+  }
+  if(frog.r===0&&got>=3){
+    score+=250+round*30;round++;got=0;
+    buildLanes();genItems();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));
+  if(r===0&&got<3)return;
+  if(c===frog.c&&r===frog.r)return;
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var i,j,ln;
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j];
+      car.x=(car.x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+      var cx=car.x-OFF,cy=ln.r*CELL;
+      if(Math.abs(cx+car.w/2-frog.x)<car.w/2+11&&frog.y+34>cy+4&&frog.y+8<cy+36){die("被车撞了!");return;}
+    }
+  }
+  if(moving){
+    mt+=dt/0.12;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }
+}
+function drawCorn(x,y){
+  ctx.fillStyle="#f4d03f";
+  ctx.beginPath();ctx.ellipse(x,y,7,11,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c79a12";ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(x-4,y-8);ctx.lineTo(x-2,y+9);ctx.moveTo(x+4,y-8);ctx.lineTo(x+2,y+9);ctx.stroke();
+  ctx.fillStyle="#3fae5f";
+  ctx.beginPath();ctx.ellipse(x-8,y+4,5,9,-0.6,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(x+8,y+4,5,9,0.6,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var r,i,j,ln;
+  for(r=0;r<ROWS;r++){
+    ctx.fillStyle=(r===0||r===6||r>=12)?"#1e3b26":"#232741";
+    ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  for(i=0;i<COLS;i++){
+    if(got<3||i<4||i>5){
+      ctx.fillStyle="#6b5a3a";
+      ctx.fillRect(i*CELL+2,0,CELL-4,38);
+      ctx.fillStyle="#57492e";
+      for(j=0;j<3;j++)ctx.fillRect(i*CELL+6,6+j*11,CELL-12,4);
+    }
+  }
+  if(got>=3){
+    ctx.fillStyle="#ffd668";ctx.font="11px system-ui";ctx.textAlign="center";
+    ctx.fillText("城门已开",210,24);
+  }
+  ctx.strokeStyle="#3a4470";ctx.lineWidth=2;ctx.setLineDash([14,18]);
+  for(i=0;i<lanes.length;i++){ln=lanes[i];ctx.beginPath();ctx.moveTo(0,ln.r*CELL+20);ctx.lineTo(420,ln.r*CELL+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];var cy=ln.r*CELL;
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j],cx=car.x-OFF;
+      if(cx>420||cx+car.w<0)continue;
+      ctx.fillStyle=car.c;rr(cx+2,cy+6,car.w-4,28,7);ctx.fill();
+      ctx.fillStyle="rgba(20,24,48,.55)";rr(cx+car.w/2-7,cy+11,14,8,3);ctx.fill();
+    }
+  }
+  for(i=0;i<items.length;i++)drawCorn((items[i].c+0.5)*CELL,items[i].r*CELL+20);
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,200,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,250);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("3 穗玉米都在车道上 · 集齐后从城门缺口出城",210,280);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("拾穗过街","直接到家?不行,城门关着!3 穿玉米散落在车流里,先冒险把它们全部捡起,城门才会为你打开。每轮玉米都会换地方。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

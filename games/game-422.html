@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>滑铲特工</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04202e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>滑铲特工</h1>
+  <p class="hint">空格/↑ 跳过矮箱 · 按住 ↓/S 滑铲钻过激光 · 触屏:点右半跳,按住左半滑铲</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>状态 <b id="st">奔跑</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">滑铲特工</h2>
+      <p id="ovDesc">潜入基地的特工一路狂奔:矮箱子要跳过去,红色激光栏要贴地滑铲钻过,动作切换要果断!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSt=$("st"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s422");
+var state="menu",dist,score,speed,obs,px,py,vy,grounded,jumpHeld,slideHeld,sliding,nextGap;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=300;obs=[];px=90;py=GY-42;vy=0;grounded=true;
+  jumpHeld=false;slideHeld=false;sliding=false;nextGap=460;
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elSt.textContent=sliding?"滑铲":"奔跑";}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;sliding=false;}
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s422",best);elBest.textContent=best;}
+  ovTitle.textContent="任务失败";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function playerBox(){
+  if(sliding)return{x:px-8,y:GY-20,w:44,h:20};
+  return{x:px,y:py,w:26,h:42};
+}
+function update(dt){
+  var s=dt/1000,i,o,b;
+  speed=Math.min(600,300+dist*0.018);
+  dist+=speed*s;score=Math.floor(dist/10);
+  sliding=grounded&&slideHeld;
+  if(!grounded){
+    var g=2200;
+    if(vy<0&&jumpHeld)g=1150;
+    if(slideHeld)g=3600;
+    vy+=g*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var r=Math.random();
+    if(r<0.42)obs.push({x:W+30,type:"crate",w:26,h:32});
+    else if(r<0.72)obs.push({x:W+30,type:"laser",w:20,h:0});
+    else if(r<0.88){
+      obs.push({x:W+30,type:"crate",w:24,h:30});
+      obs.push({x:W+130,type:"laser",w:20,h:0});
+      nextGap=150;
+    }else obs.push({x:W+30,type:"crate2",w:26,h:56});
+    if(nextGap<=0)nextGap=220+Math.random()*280+speed*0.32;
+  }
+  b=playerBox();
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-90){obs.splice(i,1);continue;}
+    var oy,oh;
+    if(o.type==="laser"){oy=132;oh=94;}
+    else{oy=GY-o.h;oh=o.h;}
+    if(b.x+b.w>o.x+3&&b.x<o.x+o.w-3&&b.y+b.h>oy+3&&b.y<oy+oh-3){
+      gameOver(o.type==="laser"?"被激光栏拦下——该滑铲的时候别犹豫!":"撞上了封锁箱——该跳的时候要果断!");
+      return;
+    }
+  }
+  updateHud();
+}
+function drawObstacle(o){
+  if(o.type==="laser"){
+    ctx.fillStyle="#33405e";
+    rr(o.x-4,0,28,132,4);ctx.fill();
+    ctx.fillStyle="#4a5a80";
+    ctx.fillRect(o.x-1,120,22,10);
+    ctx.strokeStyle="rgba(255,80,90,.9)";ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(o.x+10,130);ctx.lineTo(o.x+10,226);ctx.stroke();
+    ctx.strokeStyle="rgba(255,160,170,.8)";ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(o.x+8,132);ctx.lineTo(o.x+8,224);ctx.stroke();
+    ctx.lineWidth=1;
+  }else{
+    ctx.fillStyle="#5b6b8f";
+    rr(o.x,GY-o.h,o.w,o.h,4);ctx.fill();
+    ctx.fillStyle="#3d4a68";
+    ctx.fillRect(o.x+3,GY-o.h+4,o.w-6,3);
+    ctx.fillRect(o.x+3,GY-o.h+o.h/2,o.w-6,3);
+  }
+}
+function drawAgent(){
+  var i;
+  ctx.save();
+  if(sliding){
+    ctx.fillStyle="#38bdf8";
+    rr(px-8,GY-18,42,16,7);ctx.fill();
+    ctx.fillStyle="#0b2a3d";
+    ctx.fillRect(px+22,GY-15,6,3);
+    ctx.strokeStyle="rgba(56,189,248,.4)";
+    for(i=0;i<3;i++){ctx.beginPath();ctx.moveTo(px-14-i*10,GY-14+i*5);ctx.lineTo(px-30-i*12,GY-14+i*5);ctx.stroke();}
+  }else{
+    ctx.fillStyle="#38bdf8";
+    rr(px,py+12,26,28,6);ctx.fill();
+    rr(px+7,py,19,17,5);ctx.fill();
+    ctx.fillStyle="#7ddcff";
+    ctx.fillRect(px+13,py+5,10,4);
+    ctx.fillStyle="#1e7fb0";
+    ctx.fillRect(px+4,py+38,8,5);ctx.fillRect(px+15,py+38,8,5);
+  }
+  ctx.restore();
+}
+function draw(){
+  var i,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#101726");grd.addColorStop(1,"#1a2333");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(56,189,248,.08)";ctx.lineWidth=1;
+  for(i=1;i<7;i++){ctx.beginPath();ctx.moveTo(0,i*40);ctx.lineTo(W,i*40);ctx.stroke();}
+  ctx.fillStyle="#20293c";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#38bdf8";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%70;
+  ctx.fillStyle="rgba(255,255,255,.1)";
+  for(i=0;i<11;i++)ctx.fillRect(i*70-dsh,GY+14,30,3);
+  for(i=0;i<obs.length;i++)drawObstacle(obs[i]);
+  drawAgent();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function jumpKey(k){return k===" "||k==="ArrowUp"||k==="w"||k==="W";}
+function slideKey(k){return k==="ArrowDown"||k==="s"||k==="S";}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(jumpKey(k)){jumpHeld=true;if(!e.repeat)doJump();}
+  if(slideKey(k))slideHeld=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(jumpKey(k))jumpHeld=false;
+  if(slideKey(k))slideHeld=false;
+});
+function zoneJump(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientX-rect.left)>rect.width*0.45;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  if(zoneJump(t)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  e.preventDefault();jumpHeld=false;slideHeld=false;
+},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  if(zoneJump(e)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+});
+document.addEventListener("mouseup",function(){jumpHeld=false;slideHeld=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

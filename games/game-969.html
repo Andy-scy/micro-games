@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>气球刺战</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>气球刺战</h1>
+<div id="tip">护住自己的气球,用车头长针刺爆对方的!玩家1:WASD 驾驶 · 玩家2:方向键驾驶 · 气球飘在你身后,车身或针尖碰到对方气球即爆 · 先胜 2 回合者夺冠</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">气球刺战</div><div id="ovS">每辆车拖着一只气球,气球用绳子系在车顶<br>玩家1:WASD 驾驶 · 玩家2:方向键驾驶<br>用车头长针刺爆对方气球,或直接用车身撞爆它<br>自己的气球被刺爆则输掉回合,先胜 2 回合者夺冠</div><button id="ovB">开始对战</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var keys={},st;
+function mkC(i){var x=i===0?150:570;return{x:x,y:300,vx:0,vy:0,fx:i===0?1:-1,fy:0};}
+function mkB(i){var c=st.c[i];return{x:c.x,y:c.y-60,vx:0,vy:0};}
+function reset(){
+ st={ph:"count",cd:70,score:[0,0],round:1,msg:"",msgT:0,c:[mkC(0),mkC(1)],b:[null,null],parts:[]};
+ st.b=[mkB(0),mkB(1)];
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function burst(x,y,col){
+ var i;
+ for(i=0;i<14;i++){
+  var a=Math.random()*6.2832,sp=1+Math.random()*3;
+  st.parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,t:38,col:col});
+ }
+}
+function moveC(i,dt){
+ var p=st.c[i],ix=0,iy=0;
+ if(i===0){if(keys["a"])ix--;if(keys["d"])ix++;if(keys["w"])iy--;if(keys["s"])iy++;}
+ else{if(keys["arrowleft"])ix--;if(keys["arrowright"])ix++;if(keys["arrowup"])iy--;if(keys["arrowdown"])iy++;}
+ if(ix!==0||iy!==0){var l=Math.hypot(ix,iy);p.fx=ix/l;p.fy=iy/l;p.vx+=ix/l*0.34*dt;p.vy+=iy/l*0.34*dt;}
+ var fr=Math.pow(0.93,dt);p.vx*=fr;p.vy*=fr;
+ var v=Math.hypot(p.vx,p.vy);if(v>3.6){p.vx*=3.6/v;p.vy*=3.6/v;}
+ p.x+=p.vx*dt;p.y+=p.vy*dt;
+ if(p.x<20){p.x=20;p.vx=Math.abs(p.vx)*0.65;}
+ if(p.x>700){p.x=700;p.vx=-Math.abs(p.vx)*0.65;}
+ if(p.y<56){p.y=56;p.vy=Math.abs(p.vy)*0.65;}
+ if(p.y>440){p.y=440;p.vy=-Math.abs(p.vy)*0.65;}
+}
+function moveB(i,dt){
+ var b=st.b[i],c=st.c[i];
+ b.vx+=(c.x-b.x)*0.02*dt;b.vy+=(c.y-54-b.y)*0.02*dt;
+ var fr=Math.pow(0.94,dt);b.vx*=fr;b.vy*=fr;
+ b.x+=b.vx*dt;b.y+=b.vy*dt;
+ if(b.x<22){b.x=22;b.vx=Math.abs(b.vx)*0.5;}
+ if(b.x>698){b.x=698;b.vx=-Math.abs(b.vx)*0.5;}
+ if(b.y<40){b.y=40;b.vy=Math.abs(b.vy)*0.5;}
+ if(b.y>436){b.y=436;b.vy=-Math.abs(b.vy)*0.5;}
+}
+function dist(ax,ay,bx,by){return Math.hypot(ax-bx,ay-by);}
+function step(dt){
+ var i;
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){
+  for(i=0;i<2;i++){moveC(i,dt);moveB(i,dt);}
+  var t0x=st.c[0].x+st.c[0].fx*32,t0y=st.c[0].y+st.c[0].fy*32;
+  var t1x=st.c[1].x+st.c[1].fx*32,t1y=st.c[1].y+st.c[1].fy*32;
+  var wins=[];
+  if(dist(t0x,t0y,st.b[1].x,st.b[1].y)<19||dist(st.c[0].x,st.c[0].y,st.b[1].x,st.b[1].y)<38)wins.push(0);
+  if(dist(t1x,t1y,st.b[0].x,st.b[0].y)<19||dist(st.c[1].x,st.c[1].y,st.b[0].x,st.b[0].y)<38)wins.push(1);
+  if(wins.length===1){
+   var w=wins[0];
+   st.score[w]++;st.ph="rend";st.msgT=100;
+   burst(st.b[1-w].x,st.b[1-w].y,w===0?"#f6ad55":"#4fd1c5");
+   st.msg=(w===0?"橙方":"蓝方")+"的气球被刺爆!";
+  }else if(wins.length===2){
+   st.ph="rend";st.msgT=100;
+   burst(st.b[0].x,st.b[0].y,"#4fd1c5");burst(st.b[1].x,st.b[1].y,"#f6ad55");
+   st.msg="同时刺爆,重赛!";
+  }
+ }else if(st.ph==="rend"){
+  st.msgT-=dt;
+  if(st.msgT<=0){
+   if(st.score[0]>=2||st.score[1]>=2){
+    st.ph="over";
+    show(st.score[0]>=2?"蓝方气球王!":"橙方气球王!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{st.round++;reset();}
+  }
+ }
+ for(i=st.parts.length-1;i>=0;i--){
+  var p=st.parts[i];
+  p.x+=p.vx*dt;p.y+=p.vy*dt;p.t-=dt;
+  if(p.t<=0)st.parts.splice(i,1);
+ }
+}
+function drawCraft(i){
+ var c=st.c[i],col=i===0?"#4fd1c5":"#f6ad55";
+ ctx.save();ctx.translate(c.x,c.y);
+ ctx.rotate(Math.atan2(c.fy,c.fx));
+ ctx.fillStyle=col;
+ ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-12,-11);ctx.lineTo(-6,0);ctx.lineTo(-12,11);ctx.closePath();ctx.fill();
+ ctx.strokeStyle="#0f1220";ctx.lineWidth=2;ctx.stroke();
+ ctx.restore();
+ ctx.strokeStyle=col;ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(c.x+c.fx*16,c.y+c.fy*16);ctx.lineTo(c.x+c.fx*32,c.y+c.fy*32);ctx.stroke();
+}
+function drawBalloon(i){
+ var b=st.b[i],c=st.c[i],col=i===0?"#7fe3da":"#ffd39a";
+ ctx.strokeStyle="rgba(255,255,255,.35)";ctx.lineWidth=1.5;
+ ctx.beginPath();ctx.moveTo(b.x,b.y+16);
+ ctx.quadraticCurveTo((b.x+c.x)/2,(b.y+c.y)/2+16,c.x,c.y-6);
+ ctx.stroke();
+ ctx.beginPath();ctx.arc(b.x,b.y,16,0,6.2832);
+ ctx.fillStyle=col;ctx.fill();
+ ctx.strokeStyle=i===0?"#4fd1c5":"#f6ad55";ctx.lineWidth=2;ctx.stroke();
+ ctx.fillStyle="rgba(255,255,255,.65)";
+ ctx.beginPath();ctx.arc(b.x-5,b.y-5,4,0,6.2832);ctx.fill();
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ ctx.strokeStyle="rgba(90,110,170,.3)";ctx.lineWidth=2;
+ ctx.strokeRect(20,56,680,384);
+ var i;
+ for(i=0;i<2;i++)drawBalloon(i);
+ for(i=0;i<2;i++)drawCraft(i);
+ for(i=0;i<st.parts.length;i++){
+  var p=st.parts[i];
+  ctx.globalAlpha=Math.min(1,p.t/20);
+  ctx.fillStyle=p.col;
+  ctx.fillRect(p.x-2,p.y-2,4,4);
+  ctx.globalAlpha=1;
+ }
+ ctx.font="bold 15px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";ctx.fillText("蓝方 "+st.score[0],14,10);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";ctx.fillText(st.score[1]+" 橙方",706,10);
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";
+ ctx.fillText("第 "+st.round+" 回合 · 先胜 2 回合",360,10);
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 42px system-ui";
+  ctx.fillText("保护自己的气球!",360,190);
+  ctx.font="bold 26px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/24)),360,248);
+ }
+ if(st.ph==="rend"){
+  ctx.fillStyle="#ff5c7a";ctx.font="bold 32px system-ui";
+  ctx.fillText(st.msg,360,210);
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ keys[k]=true;
+});
+window.addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

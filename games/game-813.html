@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰箱管家</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#67e8f9;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#67e8f9;font-size:16px}
+.stage{position:relative;background:#0e1f26;border:2px solid #1c3a44;border-radius:12px;padding:12px}
+.sec{font-size:12px;color:#8b90b0;margin:2px 0 6px}
+.queue{display:flex;gap:6px;align-items:center;min-height:40px;flex-wrap:wrap}
+.qi{width:36px;height:36px;border-radius:8px;background:#132c35;border:1px solid #24505e;display:flex;align-items:center;justify-content:center;font-size:19px}
+.qi.first{border-color:#67e8f9;box-shadow:0 0 10px rgba(103,232,249,.5)}
+.shelf{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stk813{background:#132330;border:2px solid #1f4453;border-radius:10px;padding:10px;text-align:center}
+.stk813 .top{display:flex;align-items:center;justify-content:center;gap:8px}
+.stk813 .ic{font-size:24px}
+.stk813 .nm{font-size:13px;color:#c7cbe8}
+.stk813 .cnt{font-size:16px;font-weight:700;color:#67e8f9}
+.stk813 .sbar{height:8px;border-radius:4px;background:#0b1520;overflow:hidden;margin:6px 8px}
+.stk813 .sbar i{display:block;height:100%;background:#67e8f9}
+.stk813 .sbar.low i{background:#f87171}
+.stk813 button{margin-top:4px;background:#22d3ee;color:#082830;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.stk813 button:active{transform:scale(.95)}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#67e8f9;color:#082830;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>冰箱管家</h1>
+  <p class="hint">后厨每 2 秒多自动出单消耗食材,上方会<b style="color:#67e8f9">预告接下来 5 单</b><br>缺货就砸招牌(扣命),提前按 $10 进 6 份货,90 秒多赚流水!</p>
+  <div class="hud">
+    <span>金币 <b id="score">$0</b></span>
+    <span>出餐 <b id="served">0</b></span>
+    <span>时间 <b id="time">90</b>秒</span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="sec">即将到来的订单(最左边的下一单)</div>
+    <div class="queue" id="queue"></div>
+    <div class="sec">冰箱库存(低于警戒线要赶紧补!)</div>
+    <div class="shelf" id="shelf"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">冰箱管家</h2>
+      <p id="ovDesc">订单队列会提前预告需求,每单卖出 +$8。点食材卡下的进货按钮花 $10 补 6 份,但金币不足时买不了。库存见底每单扣一条命,看看你 90 秒能赚出多少流水!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var KIND=[["🥬","青菜"],["🥩","肥牛"],["🍅","番茄"],["🐟","鲜鱼"]];
+var elScore=$("score"),elServed=$("served"),elTime=$("time"),elLife=$("life"),elBest=$("best");
+var queueEl=$("queue"),shelfEl=$("shelf"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s813");
+var state="menu",stock,queue,coins,served,lives,timeLeft,orderT,lastT,msgT;
+var stkEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  for(var i=0;i<KIND.length;i++){
+    var d=document.createElement("div");
+    d.className="stk813";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<div class="top"><span class="ic">'+KIND[i][0]+'</span><span class="nm">'+KIND[i][1]+'</span><span class="cnt">0</span></div>'
+      +'<div class="sbar"><i></i></div><button data-a="buy">进货 +6($10)</button>';
+    shelfEl.appendChild(d);
+    stkEls.push(d);
+  }
+}
+function pickType(){
+  var w=[1,1,1,1],i,tot=0,r;
+  for(i=0;i<4;i++){w[i]+=Math.floor(served/6);tot+=w[i];}
+  r=Math.random()*tot;
+  for(i=0;i<4;i++){r-=w[i];if(r<=0)return i;}
+  return 3;
+}
+function reset(){
+  stock=[6,4,5,3];
+  queue=[];for(var i=0;i<5;i++)queue.push(pickType());
+  coins=30;served=0;lives=3;timeLeft=90;orderT=1.2;
+  msg.textContent="";msgT=0;render();updateHud();
+}
+function updateHud(){
+  elScore.textContent="$"+coins;elServed.textContent=served;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function render(){
+  var i;
+  var h="";
+  for(i=0;i<queue.length;i++){
+    h+='<div class="qi'+(i===0?" first":"")+'">'+KIND[queue[i]][0]+"</div>";
+  }
+  queueEl.innerHTML=h;
+  for(i=0;i<4;i++){
+    var e=stkEls[i];
+    e.children[0].children[2].textContent=stock[i];
+    var bar=e.children[1];
+    bar.className="sbar"+(stock[i]<=3?" low":"");
+    bar.children[0].style.width=Math.min(100,stock[i]/20*100)+"%";
+  }
+}
+function buy(i){
+  if(state!=="playing")return;
+  if(coins<10){showMsg("金币不足,先出餐赚钱!","#e8b06a");return;}
+  coins-=10;
+  stock[i]=Math.min(20,stock[i]+6);
+  showMsg(KIND[i][1]+" +6,花了 $10","#67e8f9");
+  render();updateHud();
+}
+function gameOver(){
+  state="over";
+  if(coins>best){best=coins;saveBest("mg_s813",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="90 秒共出餐 "+served+" 单。管好冰箱,钱自然来!";
+  ovScore.style.display="block";
+  ovScore.textContent="金币 $"+coins+" · 最佳 $"+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  timeLeft-=dts;
+  if(timeLeft<=0){timeLeft=0;updateHud();gameOver();return;}
+  orderT-=dts;
+  if(orderT<=0){
+    orderT=Math.max(1.6,2.6-served*0.02);
+    var k=queue.shift();
+    queue.push(pickType());
+    if(stock[k]>0){
+      stock[k]--;served++;coins+=8;
+    }else{
+      lives--;
+      showMsg(KIND[k][1]+"缺货,客人白跑一趟!","#f87171");
+      updateHud();
+      if(lives<=0){render();gameOver();return;}
+    }
+  }
+  render();updateHud();
+}
+shelfEl.addEventListener("click",function(e){
+  var n=e.target;
+  var a=n.getAttribute&&n.getAttribute("data-a");
+  if(!a)return;
+  var card=n;
+  while(card&&card!==shelfEl&&!card.getAttribute("data-i"))card=card.parentNode;
+  if(card&&card!==shelfEl)buy(parseInt(card.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var map={"1":0,"2":1,"3":2,"4":3};
+  if(map[e.key]!==undefined&&state==="playing"){buy(map[e.key]);e.preventDefault();}
+  else if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

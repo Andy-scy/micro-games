@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰湖滑行</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>冰湖滑行</h1>
+<p class="tip">冰面上刹不住车!每按一次方向,青蛙会一路滑行直到撞上岩石或岸边。<br>滑过冰裂缝没事,但停在上面就会掉进去。用最少的滑行次数登岸,越省越多加分!</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>本关滑行 <b id="sM">0</b> 次</span></div>
+<canvas id="cv" width="420" height="480"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow">
+<button class="btn" id="bR">重新开始</button>
+<button class="btn" id="bS">换一张冰面(-40分)</button>
+</div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=12,PAR=12;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sM=document.getElementById("sM");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var grid,frog,score,lives,level,moves,deadT,state,gt=0;
+var moving=false,sx0=0,sy0=0,sx1=0,sy1=0,mt=0,mdur=0.1;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function genLevel(){
+  grid=[];var r,c;
+  for(r=1;r<=10;r++){
+    grid[r]=[];
+    for(c=0;c<COLS;c++)grid[r][c]="ice";
+  }
+  var placed,i,rc;
+  placed=0;
+  while(placed<12){
+    r=1+Math.floor(rnd(0,10));c=Math.floor(rnd(0,10));
+    if(grid[r][c]==="ice"){grid[r][c]="rock";placed++;}
+  }
+  placed=0;
+  while(placed<7){
+    r=1+Math.floor(rnd(0,10));c=Math.floor(rnd(0,10));
+    if(grid[r][c]==="ice"){grid[r][c]="crack";placed++;}
+  }
+}
+function updHud(){sS.textContent=score;sL.textContent=lives;sM.textContent=moves;}
+function resetFrog(){frog={c:4,r:11,x:4.5*CELL,y:11*CELL};moving=false;}
+function reset(){score=0;lives=3;level=1;moves=0;deadT=0;genLevel();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.8;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",滑到第 "+level+" 关。");}
+}
+function arrive(tc,tr){
+  moves++;updHud();
+  if(tr===0){
+    score+=150+Math.max(0,PAR-moves)*10;level++;moves=0;
+    genLevel();resetFrog();updHud();
+    return;
+  }
+  if(tr>=1&&tr<=10&&grid[tr][tc]==="crack")die("停在了冰裂缝上,掉下去了!");
+}
+function slide(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var dc=d==="left"?-1:(d==="right"?1:0);
+  var dr=d==="up"?-1:(d==="down"?1:0);
+  var c=frog.c,r=frog.r,steps=0;
+  while(true){
+    var nc=c+dc,nr=r+dr;
+    if(nc<0||nc>9||nr<0||nr>11)break;
+    if(nr>=1&&nr<=10&&grid[nr][nc]==="rock")break;
+    c=nc;r=nr;steps++;
+    if(nr===0||nr===11)break;
+  }
+  if(steps===0)return;
+  sx0=frog.x;sy0=frog.y;sx1=(c+0.5)*CELL;sy1=r*CELL;
+  mdur=0.06+0.032*steps;mt=0;moving=true;
+  frog.c=c;frog.r=r;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  if(moving){
+    mt+=dt/mdur;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=sx0+(sx1-sx0)*mt;frog.y=sy0+(sy1-sy0)*mt;
+    if(!moving)arrive(frog.c,frog.r);
+  }
+}
+function draw(){
+  var r,c;
+  ctx.fillStyle="#1e3b26";ctx.fillRect(0,0,420,CELL);ctx.fillRect(0,11*CELL,420,CELL);
+  for(r=1;r<=10;r++){
+    for(c=0;c<COLS;c++){
+      var t=grid[r][c],x=c*CELL,y=r*CELL;
+      if(t==="rock"){
+        ctx.fillStyle="#2b3149";ctx.fillRect(x,y,CELL,CELL);
+        ctx.fillStyle="#5d6885";rr(x+5,y+5,30,30,9);ctx.fill();
+        ctx.fillStyle="#7b86a5";rr(x+9,y+9,14,12,5);ctx.fill();
+      }else if(t==="crack"){
+        ctx.fillStyle="#0c1226";ctx.fillRect(x,y,CELL,CELL);
+        ctx.strokeStyle="#3d4a7a";ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(x+8,y+10);ctx.lineTo(x+20,y+18);ctx.lineTo(x+14,y+30);ctx.lineTo(x+30,y+26);
+        ctx.moveTo(x+20,y+18);ctx.lineTo(x+32,y+12);
+        ctx.stroke();
+      }else{
+        ctx.fillStyle="#31538a";ctx.fillRect(x,y,CELL,CELL);
+        ctx.fillStyle="rgba(190,225,255,.09)";
+        if((r+c)%3===0)ctx.fillRect(x+6,y+8,20,7);
+        if((r*3+c)%4===0)ctx.fillRect(x+16,y+24,14,5);
+        ctx.strokeStyle="rgba(10,20,45,.6)";ctx.lineWidth=1;
+        ctx.strokeRect(x+0.5,y+0.5,CELL-1,CELL-1);
+      }
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#8f97c0";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("岩石=刹车 · 深洞=停留即坠落",8,12);
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,150,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」上冰",210,196);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("每步都会滑到撞墙为止 · 别停在裂缝上",210,226);
+    ctx.fillText("滑行次数越少,过关加分越多",210,248);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();slide(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();slide(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+document.getElementById("bS").addEventListener("click",function(){
+  if(state!=="play")return;
+  score=Math.max(0,score-40);moves=0;genLevel();resetFrog();updHud();
+});
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("冰湖滑行","整片湖面都是溜冰场:每次移动都会滑行到撞上岩石或岸边为止。冰裂缝滑过去没事,停在上面就完。省下滑行次数换高分!","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

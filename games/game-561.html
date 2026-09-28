@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掷猪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:26px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.sc{flex:1;text-align:center;min-width:150px;padding:10px}
+.nm{font-size:14px;color:#cdd6f4;margin-bottom:4px}
+.big{font-size:24px;font-weight:800;color:#ffd166}
+.mut{color:#9aa3c0;font-size:13px}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:58px;height:58px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.active{outline:2px solid #ffd166}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>掷猪</h1>
+  <p class="tips">与电脑轮流掷一颗骰子,先攒满 100 总分者胜。掷出 1 点:本轮已攒分数全部清零并换人;随时可「收分落袋」把本轮分数存入总分。胆子越大,涨分越快!</p>
+  <div class="row">
+    <div class="card sc" id="c0"><div class="nm">你</div><div class="big" id="t0">0</div><div class="mut">本轮 <b id="p0">0</b> 分</div></div>
+    <div class="card sc" id="c1"><div class="nm">电脑</div><div class="big" id="t1">0</div><div class="mut">本轮 <b id="p1">0</b> 分</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="die"></div></div>
+    <div class="big" id="pot" style="margin-top:8px">本轮 0 分</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="roll">继续掷</button>
+      <button class="btn sec" id="hold">收分落袋</button>
+    </div>
+  </div>
+  <div class="card log" id="log">你先手,点「继续掷」开始!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var GOAL=100;
+var tot=[0,0],pot=0,turn=0,busy=false,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function anim(el,fin,cb){
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<600){ if(t-last>75){last=t;setDie(el,rnd());} requestAnimationFrame(step); }
+    else{ setDie(el,fin); cb(); }
+  }
+  requestAnimationFrame(step);
+}
+function draw(){
+  $('t0').textContent=tot[0];$('t1').textContent=tot[1];
+  $('p0').textContent=(turn===0&&!over)?pot:0;
+  $('p1').textContent=(turn===1&&!over)?pot:0;
+  $('c0').classList.toggle('active',turn===0&&!over);
+  $('c1').classList.toggle('active',turn===1&&!over);
+  $('pot').textContent='本轮 '+pot+' 分';
+}
+function say(m){$('log').textContent=m}
+function setBtns(){
+  var my=(turn===0&&!busy&&!over);
+  $('roll').disabled=!my;
+  $('hold').disabled=!my||pot===0;
+}
+function endTurn(msg){
+  pot=0;turn=1-turn;draw();setBtns();
+  if(msg)say(msg);
+  if(turn===1)setTimeout(aiAct,750);
+}
+function win(w){
+  over=true;draw();setBtns();
+  $('ovt').textContent=w===0?'你赢啦!':'电脑获胜';
+  $('ovp').innerHTML='最终比分 — 你 <b>'+tot[0]+'</b> : 电脑 <b>'+tot[1]+'</b><br>'+(w===0?'胆大心细,恭喜拿下这一局!':'电脑先攒满了 100 分,再战一回?');
+  $('overlay').classList.add('show');
+}
+$('roll').onclick=function(){
+  if(busy||over||turn!==0)return;
+  busy=true;setBtns();
+  var v=rnd();
+  anim($('die'),v,function(){
+    if(v===1){ endTurn('掷出了 1 点!本轮 '+pot+' 分化为乌有,轮到电脑。'); }
+    else{ pot+=v;draw();say('掷出 '+v+' 点,本轮已有 '+pot+' 分。继续还是收手?');busy=false;setBtns(); }
+  });
+};
+$('hold').onclick=function(){
+  if(busy||over||turn!==0||pot===0)return;
+  var gain=pot;tot[0]+=pot;
+  if(tot[0]>=GOAL){draw();win(0);return}
+  endTurn('你收入 '+gain+' 分,总分 '+tot[0]+'。轮到电脑。');
+};
+function aiAct(){
+  if(over)return;
+  var v=rnd();
+  anim($('die'),v,function(){
+    if(v===1){ endTurn('电脑掷出了 1,本轮清零!轮到你。'); return; }
+    pot+=v;draw();
+    var want=20+Math.floor(Math.random()*8);
+    if(tot[1]+pot>=GOAL||pot>=want){
+      var gain=pot;tot[1]+=pot;
+      if(tot[1]>=GOAL){draw();win(1);return}
+      endTurn('电脑收下 '+gain+' 分,总分 '+tot[1]+'。轮到你!');
+    }else{ setTimeout(aiAct,550); }
+  });
+}
+$('again').onclick=function(){
+  tot=[0,0];pot=0;turn=0;busy=false;over=false;
+  $('overlay').classList.remove('show');
+  setDie($('die'),1);draw();setBtns();
+  say('新的一局,你先手。点「继续掷」开始!');
+};
+setDie($('die'),1);draw();setBtns();
+</script>
+</body>
+</html>

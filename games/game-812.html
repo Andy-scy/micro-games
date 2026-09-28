@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外卖指挥官</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative;background:#0f1b26;border:2px solid #1c3346;border-radius:12px;padding:12px}
+.sec{font-size:12px;color:#8b90b0;margin:2px 0 6px}
+.burners{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.brn{background:#15283a;border:2px solid #23445e;border-radius:10px;padding:10px;text-align:center;cursor:pointer;min-height:96px}
+.brn .bic{font-size:24px;min-height:30px}
+.brn .bar{height:10px;border-radius:5px;background:#0b1220;overflow:hidden;margin:6px 8px}
+.brn .bar i{display:block;height:100%;width:0;background:#38bdf8}
+.brn .lb{font-size:12px;color:#8b90b0}
+.brn.ready{border-color:#4ade80;box-shadow:0 0 14px rgba(74,222,128,.5);animation:pul .9s infinite}
+@keyframes pul{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+.feed{display:flex;flex-direction:column;gap:8px;min-height:150px}
+.o{display:flex;align-items:center;gap:10px;background:#fdf6e3;color:#333;border-radius:10px;padding:8px 10px}
+.o .oic{font-size:24px}
+.o .mid{flex:1}
+.o .nm{font-size:14px;font-weight:700}
+.o .pay{font-size:12px;color:#a0522d;font-weight:700}
+.o .ebar{height:6px;border-radius:3px;background:#d9c79a;overflow:hidden;margin-top:4px}
+.o .ebar i{display:block;height:100%;background:#e67e22}
+.o .btns{display:flex;gap:6px}
+.o button{border:none;border-radius:8px;padding:7px 10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.o .acc{background:#2fa84f;color:#fff}
+.o .rej{background:#c9553f;color:#fff}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#082436;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>外卖指挥官</h1>
+  <p class="hint">外卖单会限时消失:大单钱多但占灶久!<b style="color:#38bdf8">点接单抢占灶位</b>,烤好后点灶台取餐<br>只有 2 口灶,接单要看取舍;好了不取超时算崩单扣命!</p>
+  <div class="hud">
+    <span>金钱 <b id="score">$0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="sec">灶台(变绿即出餐,点击取餐)</div>
+    <div class="burners" id="burners"></div>
+    <div class="sec">待处理外卖单(6 秒内不处理自动流失)</div>
+    <div class="feed" id="feed"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">外卖指挥官</h2>
+      <p id="ovDesc">订单越贵烧得越久,两口灶就是你的全部产能:接单前想想值不值得占灶!出餐后 3 秒内点击灶台取餐,超时崩单扣一条命,崩 3 次平台就把你下架了。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var TPL=[["🥡","小份便当",2.2,12],["🍜","汤面订单",3.5,20],["🍱","双拼套餐",5,32],["🍲","宴席大单",7,50]];
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var burnersEl=$("burners"),feedEl=$("feed"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s812");
+var state="menu",feed,burners,score,combo,lives,spawnT,nextId,lastT,msgT;
+var brnEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  for(var i=0;i<2;i++){
+    var d=document.createElement("div");
+    d.className="brn";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<div class="bic">⚫</div><div class="bar"><i></i></div><div class="lb">灶台空闲</div>';
+    burnersEl.appendChild(d);
+    brnEls.push({box:d,ic:d.children[0],fill:d.children[1].children[0],lb:d.children[2]});
+  }
+}
+function reset(){
+  feed=[];burners=[{o:null},{o:null}];
+  score=0;combo=0;lives=3;spawnT=0.6;nextId=1;
+  msg.textContent="";msgT=0;renderAll();updateHud();
+}
+function updateHud(){
+  elScore.textContent="$"+score;elCombo.textContent=combo;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function newCard(){
+  var t=(Math.random()*TPL.length)|0;
+  return {id:nextId++,tpl:t,t:6};
+}
+function renderAll(){
+  var i;
+  for(i=0;i<2;i++){
+    var b=burners[i],e=brnEls[i],o=b.o;
+    if(!o){e.box.className="brn";e.ic.textContent="⚫";e.fill.style.width="0";e.lb.textContent="灶台空闲";}
+    else{
+      var tp=TPL[o.tpl];
+      if(o.st==="cook"){
+        e.box.className="brn";
+        e.ic.textContent=tp[0];
+        e.fill.style.width=Math.min(100,o.t/tp[2]*100)+"%";
+        e.lb.textContent=tp[1]+" 烹饪中";
+      }else{
+        e.box.className="brn ready";
+        e.ic.textContent=tp[0];
+        e.fill.style.width="100%";
+        e.lb.textContent="出餐!快取 ("+o.readyT.toFixed(1)+"s)";
+      }
+    }
+  }
+  var h="";
+  for(i=0;i<feed.length;i++){
+    var c=feed[i],tp=TPL[c.tpl];
+    h+='<div class="o"><div class="oic">'+tp[0]+'</div><div class="mid"><div class="nm">'+tp[1]
+      +'</div><div class="pay">报酬 $'+tp[3]+' · 占灶 '+tp[2]+'秒</div><div class="ebar"><i style="width:'+(c.t/6*100)+'%"></i></div></div>'
+      +'<div class="btns"><button class="acc" data-a="acc" data-i="'+c.id+'">接单</button><button class="rej" data-a="rej" data-i="'+c.id+'">拒单</button></div></div>';
+  }
+  if(!feed.length)h='<div style="color:#8b90b0;font-size:13px;text-align:center;padding:18px">暂时没有新订单…</div>';
+  feedEl.innerHTML=h;
+}
+function findCard(id){
+  for(var i=0;i<feed.length;i++)if(feed[i].id===id)return i;
+  return -1;
+}
+function accept(id){
+  var idx=findCard(id);
+  if(idx<0)return;
+  var bi=-1,i;
+  for(i=0;i<2;i++)if(!burners[i].o){bi=i;break;}
+  if(bi<0){showMsg("灶台全满,先想想取舍!","#e8b06a");return;}
+  burners[bi].o={tpl:feed[idx].tpl,t:0,st:"cook",readyT:3};
+  feed.splice(idx,1);
+  renderAll();
+}
+function reject(id){
+  var idx=findCard(id);
+  if(idx>=0){feed.splice(idx,1);renderAll();}
+}
+function takeBurner(i){
+  if(state!=="playing")return;
+  var b=burners[i];
+  if(!b.o||b.o.st!=="ready")return;
+  var pay=TPL[b.o.tpl][3];
+  combo++;pay+=combo*3;
+  score+=pay;
+  showMsg("准时送出 +$"+pay,"#4ade80");
+  b.o=null;
+  renderAll();updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s812",best);}
+  ovTitle.textContent="平台下架通知";
+  ovDesc.textContent="崩单三次,外卖平台暂停了你的接单资格。";
+  ovScore.style.display="block";
+  ovScore.textContent="流水 $"+score+" · 最佳 $"+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  var i;
+  for(i=feed.length-1;i>=0;i--){
+    feed[i].t-=dts;
+    if(feed[i].t<=0)feed.splice(i,1);
+  }
+  spawnT-=dts;
+  if(spawnT<=0){
+    spawnT=Math.max(1.5,2.8-score*0.01);
+    if(feed.length<4)feed.push(newCard());
+  }
+  for(i=0;i<2;i++){
+    var b=burners[i];
+    if(b.o){
+      if(b.o.st==="cook"){
+        b.o.t+=dts;
+        if(b.o.t>=TPL[b.o.tpl][2])b.o.st="ready";
+      }else{
+        b.o.readyT-=dts;
+        if(b.o.readyT<=0){
+          b.o=null;lives--;combo=0;
+          showMsg("出餐超时,崩单了!","#f87171");
+          updateHud();
+          if(lives<=0){renderAll();gameOver();return;}
+        }
+      }
+    }
+  }
+  renderAll();
+}
+burnersEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==burnersEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==burnersEl)takeBurner(parseInt(n.getAttribute("data-i"),10));
+});
+feedEl.addEventListener("click",function(e){
+  var n=e.target;
+  var a=n.getAttribute&&n.getAttribute("data-a");
+  if(!a)return;
+  var id=parseInt(n.getAttribute("data-i"),10);
+  if(a==="acc")accept(id);else reject(id);
+});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

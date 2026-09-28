@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>红黑连击 幸运翻倍</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 18px;font-size:16px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:680px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#meter{width:100%;max-width:420px;height:14px;border-radius:8px;background:#0a0d18;overflow:hidden}
+#mfill{height:100%;width:0;background:linear-gradient(90deg,#4cc9f0,#ffd166,#ff6b6b);transition:width .2s}
+#stage{min-height:120px;display:flex;align-items:center;justify-content:center}
+.card{width:78px;height:112px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .25s ease}
+@keyframes pop{from{transform:scale(.5) rotate(-8deg);opacity:.2}to{transform:scale(1) rotate(0);opacity:1}}
+.card.red{color:#d62839}
+.card .r{font-size:26px;font-weight:800}
+.card .s{font-size:40px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;min-height:30px}
+.chip{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
+.chip.r{background:#d62839}.chip.b{background:#1c2030;border:1px solid #556}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>红黑连击 · 幸运翻倍</h1>
+<p id="how">猜下一张牌是红还是黑。猜对连击 +1，得分 = 10 × 连击倍数；每满 5 连击触发「翻倍抉择」：稳拿双倍或押上全部连击赌四倍。猜错扣一颗心并清零连击，3 心用完结束，得分 300 即胜利。</p>
+<div id="bar"><span>得分 <b id="sc">0</b></span><span>连击 <b id="cb">0</b></span><span>生命 <b id="lv">♥♥♥</b></span><span>胜利线 300</span></div>
+<div id="table">
+  <div id="meter"><div id="mfill"></div></div>
+  <div id="stage"></div>
+  <div id="msg"></div>
+  <div id="btns">
+    <button id="red" class="acc" style="background:#d62839;border-color:#d62839;color:#fff">押红</button>
+    <button id="blk" class="acc" style="background:#1c2030;border-color:#556;color:#fff">押黑</button>
+    <button id="safe" disabled>稳拿双倍</button>
+    <button id="dare" disabled>赌四倍</button>
+  </div>
+  <div id="hist"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],cur=null,score=0,combo=0,lives=3,phase='bet',pending=0,timer=null;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function draw(){if(deck.length===0)refill();return deck.pop();}
+function isRed(c){return c.s==='♥'||c.s==='♦';}
+function cardHTML(c,back){
+  if(back)return '<div class="card back"><span>·</span></div>';
+  return '<div class="card'+(isRed(c)?' red':'')+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('sc').textContent=score;$('cb').textContent=combo;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'·';
+  $('lv').textContent=h;
+  $('mfill').style.width=Math.min(100,combo*10)+'%';
+  $('stage').innerHTML=cur?cardHTML(cur,false):'<div class="card back"><span>·</span></div>';
+  var on=(phase==='bet');
+  $('red').disabled=$('blk').disabled=!on;
+  var gamble=(phase==='gamble');
+  $('safe').disabled=$('dare').disabled=!gamble;
+  var hh='';for(var k=0;k<history.length;k++){hh+='<div class="chip '+(history[k]?'r':'b')+'">'+(history[k]?'红':'黑')+'</div>';}
+  $('hist').innerHTML=hh;
+}
+function msg(s){$('msg').textContent=s;}
+var history=[];
+function guess(col){
+  if(phase!=='bet')return;
+  var nx=draw();
+  var correct=(col==='red')===isRed(nx);
+  history.unshift(isRed(nx));if(history.length>14)history.pop();
+  if(correct){
+    cur=nx;combo++;var gain=10*Math.min(combo,10);
+    msg('中了！+'+gain+' 分（连击 ×'+combo+'）');
+    score+=gain;
+    if(combo>0&&combo%5===0){
+      pending=combo;phase='gamble';
+      msg('满 '+combo+' 连击！翻倍抉择：稳拿双倍或赌四倍');
+      render();return;
+    }
+  }else{
+    combo=0;lives--;
+    msg('猜错了！'+(lives>0?'失去一颗心':'最后一颗心也没了'));
+    if(lives<=0){end(false,'红黑无常，运气用尽');return;}
+  }
+  cur=nx;render();
+  if(score>=300){end(true,'得分冲上 '+score+'，幸运星就是你！');return;}
+}
+function gamble(quad){
+  if(phase!=='gamble')return;
+  if(quad){
+    var ok=Math.random()<0.5;
+    if(ok){score+=20*Math.min(pending,10);combo=pending;msg('豪赌成功！连击保住，额外 +'+(20*Math.min(pending,10))+' 分');}
+    else{combo=0;lives--;msg('豪赌失败！连击清零'+(lives>0?'，失去一颗心':''));}
+  }else{
+    score+=10*Math.min(pending,10);combo=pending;
+    msg('稳稳落袋 +'+(10*Math.min(pending,10))+' 分');
+  }
+  phase='bet';
+  if(lives<=0){end(false,'红黑无常，运气用尽');return;}
+  if(score>=300){end(true,'得分冲上 '+score+'，幸运星就是你！');return;}
+  render();
+}
+function end(win,info){
+  phase='done';render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终得分：'+score;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(timer){clearTimeout(timer);timer=null;}
+  refill();cur=draw();score=0;combo=0;lives=3;phase='bet';history=[];
+  $('over').classList.add('hide');msg('第一张已亮出，押下一张的颜色！');render();
+}
+$('red').onclick=function(){guess('red');};
+$('blk').onclick=function(){guess('blk');};
+$('safe').onclick=function(){gamble(false);};
+$('dare').onclick=function(){gamble(true);};
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

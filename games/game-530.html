@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>点石成金</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#90f1ef;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#90f1ef;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#90f1ef}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#90f1ef;color:#04333a;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>点石成金</h1>
+  <p class="hint">点空格花 1 星尘放块 · 点方块花等量星尘直接催熟<br>同行或同列凑足三个同数,会被吸到一起合体!<br>120 秒内点出 256 龙晶即胜</p>
+  <div class="hud">
+    <span>星尘 <b id="dust">4</b></span>
+    <span>下一块 <b id="next">·</b></span>
+    <span>时间 <b id="time">120</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="300" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">点石成金</h2>
+      <p id="ovP">星尘会随时间生长\n攒够就催化方块,三点连线自动聚合!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var N=5,CELL=54,BX=15,BY=15;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#ffd166'];
+var NAME=['','原石','铜晶','银晶','金晶','翡翠','蓝钻','赤炎','龙晶'];
+var grid=[],dust=4,cur=1,nxt=1,timeLeft=120,score=0,state='ready';
+var flashes=[],msg='',msgT=0;
+function val(e){return Math.pow(2,e);}
+function addScore(n){score+=n;$('score').textContent=score;}
+function flash(r,c,e){flashes.push({r:r,c:c,t:0,e:e});}
+function newGrid(){var g=[],r,c;for(r=0;r<N;r++){g.push([]);for(c=0;c<N;c++)g[r].push(0);}return g;}
+function rollNext(){cur=nxt;nxt=Math.random()<0.8?1:2;$('next').textContent=String(val(nxt));}
+function resolve(r,c){
+  var guard=0,changed=true;
+  while(changed&&guard<20){
+    guard++;changed=false;
+    var e=grid[r][c],cc,rr,mates,i;
+    mates=[];
+    for(cc=0;cc<N;cc++)if(cc!==c&&grid[r][cc]===e)mates.push([r,cc]);
+    if(mates.length>=2){
+      for(i=0;i<mates.length;i++){grid[mates[i][0]][mates[i][1]]=0;flash(mates[i][0],mates[i][1],e);}
+      grid[r][c]=e+1;flash(r,c,e+1);
+      addScore(val(e+1)*6);dust=Math.min(15,dust+1);
+      changed=true;continue;
+    }
+    mates=[];
+    for(rr=0;rr<N;rr++)if(rr!==r&&grid[rr][c]===e)mates.push([rr,c]);
+    if(mates.length>=2){
+      for(i=0;i<mates.length;i++){grid[mates[i][0]][mates[i][1]]=0;flash(mates[i][0],mates[i][1],e);}
+      grid[r][c]=e+1;flash(r,c,e+1);
+      addScore(val(e+1)*6);dust=Math.min(15,dust+1);
+      changed=true;
+    }
+  }
+  var m=0,rr2,cc2;
+  for(rr2=0;rr2<N;rr2++)for(cc2=0;cc2<N;cc2++)if(grid[rr2][cc2]>m)m=grid[rr2][cc2];
+  if(m>=8)win();
+}
+function clickAt(x,y){
+  if(state!=='play')return;
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=N||c<0||c>=N)return;
+  if(grid[r][c]===0){
+    if(Math.floor(dust)<1){say('星尘不足,等它积攒');return;}
+    dust-=1;
+    grid[r][c]=cur;
+    flash(r,c,cur);
+    rollNext();
+    resolve(r,c);
+  }else{
+    var e=grid[r][c];
+    if(e>=8)return;
+    if(Math.floor(dust)<e){say('催化需要 '+e+' 星尘');return;}
+    dust-=e;
+    grid[r][c]=e+1;
+    flash(r,c,e+1);
+    addScore(val(e+1)*3);
+    resolve(r,c);
+  }
+}
+function say(s){msg=s;msgT=1.4;}
+function win(){
+  state='over';
+  $('ovT').textContent='龙晶出世!';
+  $('ovP').textContent='你把顽石点化成了 256 龙晶,点石成金!';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function fail(){
+  state='over';
+  $('ovT').textContent='时限已到';
+  $('ovP').textContent='龙晶未能诞生,再试一次!';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  grid=newGrid();dust=4;timeLeft=120;score=0;flashes=[];
+  cur=Math.random()<0.8?1:2;nxt=Math.random()<0.8?1:2;
+  $('dust').textContent='4';$('next').textContent=String(val(nxt));$('time').textContent='120';$('score').textContent='0';
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function update(dt){
+  var i;
+  dust=Math.min(15,dust+dt/1.6);
+  $('dust').textContent=String(Math.floor(dust));
+  timeLeft-=dt;
+  $('time').textContent=Math.ceil(Math.max(0,timeLeft));
+  if(timeLeft<=0){fail();return;}
+  if(msgT>0)msgT-=dt;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,300,300);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,300,300);
+  var r,c,i;
+  ctx.strokeStyle='rgba(255,255,255,.06)';
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+N*CELL);ctx.stroke();}
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+N*CELL,BY+i*CELL);ctx.stroke();}
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    var e=grid.length?grid[r][c]:0;
+    if(e>0){
+      ctx.fillStyle=CCOL[Math.min(e,8)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,10);ctx.fill();
+      if(e>=8){
+        ctx.save();ctx.strokeStyle='rgba(255,209,102,'+(0.5+0.4*Math.sin(Date.now()/150))+')';
+        ctx.lineWidth=3;roundRect(BX+c*CELL+1,BY+r*CELL+1,CELL-2,CELL-2,11);ctx.stroke();ctx.restore();
+      }
+      ctx.fillStyle='rgba(255,255,255,.92)';
+      ctx.font='700 '+Math.min(22,12+e)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(val(e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2-4);
+      ctx.fillStyle='rgba(20,16,6,.75)';
+      ctx.font='9px system-ui';
+      ctx.fillText(NAME[e],BX+c*CELL+CELL/2,BY+r*CELL+CELL-13);
+    }else{
+      ctx.strokeStyle='rgba(144,241,239,.12)';
+      ctx.strokeRect(BX+c*CELL+8,BY+r*CELL+8,CELL-16,CELL-16);
+    }
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*6,BY+f.r*CELL+3-pr*6,CELL-6+pr*12,CELL-6+pr*12,10);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'&&msgT>0){
+    ctx.fillStyle='rgba(255,150,150,'+Math.min(1,msgT*2)+')';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText(msg,150,BY-4);
+  }else if(state==='play'){
+    ctx.fillStyle='rgba(144,241,239,.6)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('空格:放置(1 尘) · 方块:催化(等量尘)',150,BY-4);
+  }
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*300/rc.width,(e.clientY-rc.top)*300/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*300/rc.width,(t.clientY-rc.top)*300/rc.height);
+  e.preventDefault();
+},{passive:false});
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

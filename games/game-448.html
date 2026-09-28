@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>标准九洞</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 16px;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#4ade80;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>标准九洞</h1>
+  <p class="hint">拖拽反向出杆 · 连打 9 洞比拼总杆,单洞 7 杆上限自动拾球 · 与标准杆 26 一较高下</p>
+  <div class="hud">
+    <span>洞 <b id="hl">1</b>/9</span>
+    <span>本洞 <b id="st">0</b>/7</span>
+    <span>总杆 <b id="tt">0</b></span>
+    <span>标准杆 <b>26</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">标准九洞</h2>
+      <p id="ovDesc">一场正经的迷你高尔夫计分赛:九个布局各异的小洞等你挑战,总标准杆 26。每洞限时 7 杆,超杆自动记 7 杆并进入下一洞。打完九洞,看看你比标准杆低多少!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始比赛</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var W=480,H=600,R=8,HR=14,MAXDRAG=170,MAXV=1.05;
+var elHl=$("hl"),elSt=$("st"),elTt=$("tt"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var BORDER=[
+  {x:0,y:0,w:480,h:12},{x:0,y:588,w:480,h:12},{x:0,y:0,w:12,h:600},{x:468,y:0,w:12,h:600}
+];
+var COURSE=[
+  {par:2,b:[240,540],h:[240,100],w:[]},
+  {par:2,b:[240,540],h:[240,120],w:[{x:120,y:310,w:240,h:14}]},
+  {par:3,b:[100,540],h:[380,110],w:[{x:150,y:150,w:14,h:270},{x:316,y:240,w:14,h:270}]},
+  {par:3,b:[240,540],h:[110,120],w:[{x:60,y:390,w:360,h:14}]},
+  {par:4,b:[80,540],h:[400,100],w:[{x:200,y:120,w:14,h:370},{x:266,y:250,w:14,h:240}]},
+  {par:3,b:[240,540],h:[390,110],w:[{x:100,y:250,w:280,h:14}]},
+  {par:2,b:[240,540],h:[110,100],w:[{x:233,y:210,w:14,h:210}]},
+  {par:4,b:[60,540],h:[400,90],w:[{x:80,y:190,w:320,h:14},{x:180,y:350,w:220,h:14}]},
+  {par:3,b:[60,540],h:[400,110],w:[{x:150,y:300,w:190,h:90}]}
+];
+var state="menu",strokes=0,par=2,total=0,holeIdx=0;
+var hole={x:240,y:100};
+var ball={x:240,y:540,vx:0,vy:0,move:false};
+var prePos={x:240,y:540};
+var walls=[],aim=false,aimP={x:0,y:0},bounces=0,trail=[],msgT=0;
+function say(t){elMsg.textContent=t;msgT=1800;}
+function circleRect(px,py,r){
+  var cx=Math.max(r.x,Math.min(px,r.x+r.w)),cy=Math.max(r.y,Math.min(py,r.y+r.h));
+  var dx=px-cx,dy=py-cy;
+  return dx*dx+dy*dy<R*R;
+}
+function wallAt(px,py){
+  for(var i=0;i<walls.length;i++){if(circleRect(px,py,walls[i]))return true;}
+  return false;
+}
+function surfaceAt(x,y){return{fr:0.986,rest:0.78};}
+function forces(sdt){}
+function adjustShot(pw){return pw;}
+function onStroke(){}
+function loadHole(){
+  var c=COURSE[holeIdx];
+  par=c.par;
+  walls=BORDER.concat(c.w);
+  hole={x:c.h[0],y:c.h[1]};
+  ball.x=c.b[0];ball.y=c.b[1];ball.vx=0;ball.vy=0;ball.move=false;
+  strokes=0;bounces=0;trail.length=0;
+  updateHud();
+}
+function updateHud(){
+  elHl.textContent=(holeIdx+1);
+  elSt.textContent=strokes;
+  elTt.textContent=total;
+}
+function holeCheck(){
+  var dx=hole.x-ball.x,dy=hole.y-ball.y;
+  if(dx*dx+dy*dy<(HR-3)*(HR-3)&&Math.hypot(ball.vx,ball.vy)<0.55){onSunk();return true;}
+  return false;
+}
+function extra(){return holeCheck();}
+function finishGame(){
+  state="win";
+  var diff=total-26;
+  var rank=diff<=-4?"职业级发挥!":diff<=-1?"低于标准杆,漂亮!":diff===0?"正好平标准杆":diff<=3?"略高于标准杆,继续加油":"再多练练推杆吧";
+  showOv("九洞完赛","九洞全部完成!"+rank,"总杆 "+total+" · 标准杆 26 · 成绩 "+(diff>0?"+":"")+diff,"再来一局");
+}
+function onSunk(){
+  total+=strokes;
+  updateHud();
+  if(holeIdx>=8){finishGame();return;}
+  holeIdx++;
+  loadHole();
+  say("第 "+(holeIdx+1)+" 洞 · 标准杆 "+par);
+}
+function onStop(){
+  if(strokes>=7){
+    total+=7;
+    updateHud();
+    if(holeIdx>=8){finishGame();return;}
+    say("单洞 7 杆上限,记 7 杆");
+    holeIdx++;
+    loadHole();
+  }
+}
+function shoot(dx,dy,pw){
+  pw=adjustShot(pw);
+  strokes++;updateHud();
+  prePos.x=ball.x;prePos.y=ball.y;
+  ball.vx=dx*MAXV*pw;ball.vy=dy*MAXV*pw;
+  ball.move=true;bounces=0;onStroke();
+}
+function sub(sdt){
+  var sf=surfaceAt(ball.x,ball.y);
+  var nx=ball.x+ball.vx*sdt;
+  if(wallAt(nx,ball.y)&&!wallAt(ball.x,ball.y)){ball.vx=-ball.vx*sf.rest;bounces++;}
+  else ball.x=nx;
+  var ny=ball.y+ball.vy*sdt;
+  if(wallAt(ball.x,ny)&&!wallAt(ball.x,ball.y)){ball.vy=-ball.vy*sf.rest;bounces++;}
+  else ball.y=ny;
+  var k=Math.pow(sf.fr,sdt/16.7);
+  ball.vx*=k;ball.vy*=k;
+  forces(sdt);
+  if(extra())return;
+  trail.push({x:ball.x,y:ball.y,l:320});
+  if(trail.length>40)trail.shift();
+  if(Math.hypot(ball.vx,ball.vy)<0.015){ball.vx=0;ball.vy=0;ball.move=false;onStop();}
+}
+function tick(dt){
+  if(!ball.move)return;
+  var sp=Math.hypot(ball.vx,ball.vy);
+  var n=Math.max(1,Math.ceil(sp*dt/4)),sdt=dt/n,i;
+  for(i=0;i<n;i++){sub(sdt);if(!ball.move)break;}
+}
+function anim(dt){
+  var i;
+  for(i=trail.length-1;i>=0;i--){trail[i].l-=dt;if(trail[i].l<=0)trail.splice(i,1);}
+  if(msgT>0){msgT-=dt;if(msgT<=0)elMsg.textContent="";}
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="play")tick(dt);
+  anim(dt);
+  draw();
+}
+function drawAim(){
+  if(!aim)return;
+  var dx=ball.x-aimP.x,dy=ball.y-aimP.y,d=Math.hypot(dx,dy);
+  if(d<14)return;
+  var pw=Math.min(1,d/MAXDRAG),ux=dx/d,uy=dy/d;
+  var len=30+pw*130,ax=ball.x+ux*len,ay=ball.y+uy*len;
+  ctx.strokeStyle="rgba(240,244,255,0.8)";ctx.lineWidth=3;ctx.setLineDash([7,7]);
+  ctx.beginPath();ctx.moveTo(ball.x+ux*12,ball.y+uy*12);ctx.lineTo(ax,ay);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle="#fbbf24";
+  ctx.beginPath();ctx.moveTo(ax+ux*11,ay+uy*11);ctx.lineTo(ax-uy*6,ay+ux*6);ctx.lineTo(ax+uy*6,ay-ux*6);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=pw>0.85?"#f87171":"#4ade80";ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,14.5,-Math.PI/2,-Math.PI/2+pw*Math.PI*2);ctx.stroke();
+}
+function roundRectPath(x,y,w,h,r){
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d2b1e";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.025)";
+  for(i=0;i<13;i++)if(i%2===0)ctx.fillRect(12,12+i*45,456,45);
+  ctx.fillStyle="rgba(0,0,0,0.25)";
+  ctx.beginPath();ctx.arc(hole.x,hole.y,HR+5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#050d09";
+  ctx.beginPath();ctx.arc(hole.x,hole.y,HR,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#2f5d46";ctx.lineWidth=2;ctx.stroke();
+  ctx.strokeStyle="#e2e8f0";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(hole.x,hole.y);ctx.lineTo(hole.x,hole.y-36);ctx.stroke();
+  ctx.fillStyle="#f87171";
+  ctx.beginPath();ctx.moveTo(hole.x,hole.y-36);ctx.lineTo(hole.x+22,hole.y-28);ctx.lineTo(hole.x,hole.y-20);ctx.closePath();ctx.fill();
+  for(i=0;i<walls.length;i++){
+    var w0=walls[i];
+    ctx.fillStyle="#39415f";
+    roundRectPath(w0.x,w0.y,w0.w,w0.h,5);ctx.fill();
+    ctx.strokeStyle="#525d85";ctx.lineWidth=1;ctx.stroke();
+  }
+  for(i=0;i<trail.length;i++){
+    var tr=trail[i];
+    ctx.globalAlpha=tr.l/320*0.3;
+    ctx.fillStyle="#e8eaf6";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  drawAim();
+  ctx.fillStyle="#f5f7ff";ctx.shadowColor="#f5f7ff";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,R,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(90,110,160,0.5)";
+  ctx.beginPath();ctx.arc(ball.x-2.5,ball.y-2.5,2.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(200,210,240,0.5)";ctx.font="bold 13px system-ui";
+  ctx.fillText("第 "+(holeIdx+1)+" 洞 · PAR "+par,22,34);
+}
+function showOv(title,desc,score,btnText){
+  ovT.textContent=title;ovD.textContent=desc;
+  ovS.style.display=score?"block":"none";ovS.textContent=score||"";
+  btn.textContent=btnText;
+  ov.classList.remove("hide");
+}
+function evPos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function canAim(){return state==="play"&&!ball.move;}
+function fire(){
+  var dx=ball.x-aimP.x,dy=ball.y-aimP.y,d=Math.hypot(dx,dy);
+  if(d<14)return;
+  shoot(dx/d,dy/d,Math.min(1,d/MAXDRAG));
+}
+cv.addEventListener("mousedown",function(e){if(!canAim())return;aim=true;aimP=evPos(e);e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(aim)aimP=evPos(e);});
+window.addEventListener("mouseup",function(){if(!aim)return;aim=false;fire();});
+cv.addEventListener("touchstart",function(e){if(!canAim())return;aim=true;aimP=evPos(e.touches[0]);e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(aim){aimP=evPos(e.touches[0]);e.preventDefault();}},{passive:false});
+function endTouch(){if(aim){aim=false;fire();}}
+cv.addEventListener("touchend",endTouch);
+cv.addEventListener("touchcancel",endTouch);
+function startGame(){
+  total=0;holeIdx=0;msgT=0;
+  loadHole();
+  state="play";ov.classList.add("hide");elMsg.textContent="";
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+loadHole();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

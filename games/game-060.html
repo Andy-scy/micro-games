@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>粘拍投掷</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;gap:10px}
+h1{margin:2px 0;font-size:22px;letter-spacing:4px;color:#5eead4}
+#wrap{position:relative;width:min(96vw,860px)}
+canvas{display:block;width:100%;height:auto;border-radius:14px;background:#141830;box-shadow:0 0 0 1px #262b4a;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(10,12,26,.86);border-radius:14px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#msg{font-size:16px;line-height:2;white-space:pre-line}
+#row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.btn{background:#2dd4bf;color:#04211d;border:none;border-radius:10px;padding:10px 26px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:700}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>粘拍投掷</h1>
+<div id="wrap">
+<canvas id="cv" width="800" height="500"></canvas>
+<div id="overlay"><div id="msg"></div><div id="row"></div></div>
+</div>
+<script>
+'use strict';
+var W=800,H=500,WIN=7;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var overlay=document.getElementById('overlay'),msg=document.getElementById('msg'),row=document.getElementById('row');
+var state='menu';
+var player={x:26,y:H/2-55,w:14,h:110,py:H/2-55,pv:0};
+var ai={x:W-40,y:H/2-55,w:14,h:110,py:H/2-55,pv:0};
+var ball={x:W/2,y:H/2,vx:0,vy:0,r:9};
+var sp=0,sa=0,serveT=0,holder=null,holdT=0,aiHold=60,aiTargetY=H/2;
+var keys={},mouseY=null;
+
+function mkBtn(text,fn){
+  var b=document.createElement('button');
+  b.className='btn';b.textContent=text;
+  b.addEventListener('click',fn);
+  row.appendChild(b);
+  return b;
+}
+var bStart=mkBtn('开始游戏',function(){start();});
+function showMenu(){
+  state='menu';
+  msg.textContent='磁性球拍：球会被吸附在拍面！\n吸附越久威力越大，挥拍方向决定投掷角度。\n按 空格 或 点击/点按 画布把球投出。先得 7 分者胜。\n移动：鼠标/触屏滑动，或 ↑↓（W/S）。';
+  bStart.textContent='开始游戏';
+  overlay.classList.remove('hide');
+}
+function start(){
+  sp=0;sa=0;keys={};mouseY=null;holder=null;holdT=0;
+  player.y=H/2-player.h/2;player.py=player.y;player.pv=0;
+  ai.y=H/2-ai.h/2;ai.py=ai.y;ai.pv=0;
+  serve(Math.random()<0.5?1:-1);
+  state='play';
+  overlay.classList.add('hide');
+}
+function serve(dir){
+  ball.x=W/2;ball.y=H/2+(Math.random()*160-80);
+  var spd=5.4;
+  var a=Math.random()*0.6-0.3;
+  ball.vx=Math.cos(a)*spd*dir;
+  ball.vy=Math.sin(a)*spd;
+  serveT=45;holder=null;holdT=0;
+}
+function endGame(win){
+  state='end';
+  msg.textContent=(win?'胜利！神投手':'败北…投术还需磨练')+'\n最终比分 '+sp+' : '+sa;
+  bStart.textContent='再来一局';
+  overlay.classList.remove('hide');
+}
+function afterPoint(dir){
+  if(sp>=WIN){endGame(true);}
+  else if(sa>=WIN){endGame(false);}
+  else{serve(dir);}
+}
+function power(){
+  return Math.min(1,holdT/70);
+}
+function playerThrow(){
+  if(state!=='play'||holder!=='p'){return;}
+  var p=power();
+  var ang=Math.max(-0.65,Math.min(0.65,player.pv*0.045));
+  var spd=5+4.8*p;
+  ball.vx=Math.cos(ang)*spd;
+  ball.vy=Math.sin(ang)*spd;
+  holder=null;holdT=0;
+}
+function aiThrow(){
+  var p=power();
+  var ang=Math.random()*1.0-0.5;
+  var spd=4.8+4.2*p;
+  ball.vx=-Math.cos(ang)*spd;
+  ball.vy=Math.sin(ang)*spd;
+  holder=null;holdT=0;
+}
+function stickCheck(p,who,dir){
+  if(holder){return;}
+  if(ball.vx*dir>=0){return;}
+  if(ball.x+ball.r<p.x||ball.x-ball.r>p.x+p.w||ball.y+ball.r<p.y||ball.y-ball.r>p.y+p.h){return;}
+  holder=who;holdT=0;
+  if(who==='a'){
+    aiHold=45+Math.random()*55;
+    aiTargetY=player.y+player.h/2>H/2?110:H-110;
+  }
+}
+function update(dt){
+  player.py=player.y;ai.py=ai.y;
+  var pv=0;
+  if(keys.up){pv=-1;}else if(keys.down){pv=1;}
+  if(pv!==0){mouseY=null;player.y+=pv*7.2*dt;}
+  else if(mouseY!==null){player.y+=(mouseY-(player.y+player.h/2))*Math.min(1,0.3*dt);}
+  player.y=Math.max(6,Math.min(H-player.h-6,player.y));
+  player.pv=(player.y-player.py)/dt;
+  var ty;
+  if(holder==='a'){ty=aiTargetY;}
+  else if(ball.vx>0){ty=ball.y;}
+  else{ty=H/2;}
+  var diff=ty-(ai.y+ai.h/2);
+  ai.y+=Math.max(-4.9*dt,Math.min(4.9*dt,diff*0.14));
+  ai.y=Math.max(6,Math.min(H-ai.h-6,ai.y));
+  ai.pv=(ai.y-ai.py)/dt;
+  if(serveT>0){serveT-=dt;return;}
+  if(holder){
+    holdT+=dt;
+    var hp=holder==='p'?player:ai;
+    ball.x=holder==='p'?hp.x+hp.w+ball.r:hp.x-ball.r;
+    ball.y=hp.y+hp.h/2;
+    if(holder==='a'&&holdT>aiHold){aiThrow();}
+    else if(holder==='p'&&holdT>240){playerThrow();}
+    return;
+  }
+  ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+  if(ball.y<ball.r){ball.y=ball.r;ball.vy=Math.abs(ball.vy);}
+  if(ball.y>H-ball.r){ball.y=H-ball.r;ball.vy=-Math.abs(ball.vy);}
+  stickCheck(player,'p',1);stickCheck(ai,'a',-1);
+  if(ball.x<-30){sa++;afterPoint(-1);}
+  else if(ball.x>W+30){sp++;afterPoint(1);}
+}
+function pad(p,color){ctx.fillStyle=color;ctx.fillRect(p.x,p.y,p.w,p.h);}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(232,234,246,.14)';
+  ctx.lineWidth=3;ctx.setLineDash([10,14]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign='center';
+  ctx.font='bold 52px system-ui';
+  ctx.fillStyle='rgba(232,234,246,.85)';
+  ctx.fillText(sp,W/2-70,68);
+  ctx.fillText(sa,W/2+70,68);
+  ctx.font='13px system-ui';
+  ctx.fillStyle='#5eead4';
+  ctx.fillText('吸附蓄力后投掷 · 先得 7 分',W/2,H-14);
+  pad(player,'#38bdf8');pad(ai,'#f472b6');
+  if(holder){
+    var p=power();
+    ctx.strokeStyle=p>0.85?'#f87171':(p>0.5?'#facc15':'#5eead4');
+    ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.arc(ball.x,ball.y,ball.r+7,-Math.PI/2,-Math.PI/2+p*Math.PI*2);
+    ctx.stroke();
+    if(holder==='p'){
+      ctx.font='15px system-ui';ctx.fillStyle='#5eead4';
+      ctx.fillText('按 空格 / 点击画布 投出',W/2,H-40);
+    }else{
+      ctx.font='15px system-ui';ctx.fillStyle='#f472b6';
+      ctx.fillText('对手蓄力中…',W/2,44);
+    }
+    ctx.fillStyle='#f8fafc';
+    ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  }else if(serveT>0){
+    if(Math.floor(serveT/12)%2===0){
+      ctx.fillStyle='#facc15';
+      ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.font='20px system-ui';ctx.fillStyle='#facc15';
+    ctx.fillText('准备…',W/2,H/2-46);
+  }else{
+    ctx.fillStyle='#f8fafc';
+    ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(2.5,Math.max(0.2,(t-last)/16.7));
+  last=t;
+  if(state==='play'){update(dt);}
+  draw();
+  requestAnimationFrame(loop);
+}
+window.addEventListener('keydown',function(e){
+  if(e.key===' '){playerThrow();e.preventDefault();}
+  else if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=true;e.preventDefault();}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=false;}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=false;}
+});
+function ptrY(e){
+  var r=cv.getBoundingClientRect();
+  var cy=e.touches&&e.touches[0]?e.touches[0].clientY:e.clientY;
+  mouseY=(cy-r.top)*(H/r.height);
+}
+cv.addEventListener('mousemove',ptrY);
+cv.addEventListener('mousedown',playerThrow);
+cv.addEventListener('touchstart',function(e){e.preventDefault();ptrY(e);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();ptrY(e);},{passive:false});
+cv.addEventListener('touchend',function(){playerThrow();});
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

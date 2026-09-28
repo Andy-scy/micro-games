@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>柠檬水小摊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#7dd3fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+#queue{display:flex;gap:8px;justify-content:center;min-height:86px;background:#131728;border-radius:12px;padding:8px;margin-bottom:8px;flex-wrap:wrap}
+.cust{width:56px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:4px;cursor:pointer;text-align:center;user-select:none}
+.cust .face{font-size:22px;line-height:1.2}
+.cust .pbar{height:6px;background:#0b0e1a;border-radius:3px;overflow:hidden;margin-top:3px}
+.cust .pfill{height:100%;background:#4ade80;width:100%}
+.cust.hurry .pfill{background:#f87171}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>柠檬水小摊</h1>
+  <p class="hint">进货柠檬 → 榨成柠檬水 → 点顾客卖出 · 天气影响客流,口碑决定售价 · 累计赚 <b>1200</b> 金币获胜</p>
+  <div class="hud">
+    <span>金币 <b id="hMoney">10</b></span>
+    <span>柠檬 <b id="hLem">8</b>/<span id="hLemCap">20</span></span>
+    <span>柠檬水 <b id="hCup">0</b>/<span id="hCupCap">12</span></span>
+    <span>口碑 <b id="hRep">5</b> · 售价 <b id="hPrice">3</b></span>
+    <span>天气 <b id="hWx">晴朗</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="queue"></div>
+  <div class="acts">
+    <button class="btn" id="btnBuy">进货柠檬 (2金+5个)</button>
+    <button class="btn gold" id="btnJuice">榨柠檬水</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">柠檬水小摊</h2>
+    <p id="ovDesc">点「进货柠檬」补原料,点「榨柠檬水」把柠檬变成杯子,再点排队的顾客卖出赚钱。天气时好时坏影响客流,卖得快口碑涨、售价高;缺货会让顾客生气离开。攒 1200 金币你就是街头饮料大王!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开张营业</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elLem=$("hLem"),elLemCap=$("hLemCap"),elCup=$("hCup"),elCupCap=$("hCupCap"),elRep=$("hRep"),elPrice=$("hPrice"),elWx=$("hWx"),elMsg=$("msg");
+var queueEl=$("queue"),btnBuy=$("btnBuy"),btnJuice=$("btnJuice"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=1200;
+var wxNames=["晴朗","多云","下雨"],wxBase=[1.8,2.8,4.6];
+var ups=[
+ {nm:"电动榨汁机",ds:"每次榨汁 +1 杯",base:60,mult:2,max:8},
+ {nm:"手绘广告牌",ds:"客流速度 +12%",base:90,mult:2,max:6},
+ {nm:"超大水壶",ds:"柠檬与柠檬水容量上升",base:120,mult:2,max:4}
+];
+var money,lemons,cups,rep,wx,wxT,spawnT,queue,upLv,state,msgT,rows=[],faces=["😀","🙂","😋","🤩","😎"];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function lemonCap(){return 20+8*upLv[2];}
+function cupCap(){return 12+6*upLv[2];}
+function price(){return 2+Math.floor(rep/4);}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildShop(){
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function spawnCust(){
+  var d=document.createElement("div");
+  d.className="cust";
+  d.innerHTML='<div class="face">'+faces[Math.floor(Math.random()*faces.length)]+'</div><div class="pbar"><div class="pfill"></div></div>';
+  var c={el:d,pat:12,max:12};
+  d.addEventListener("click",function(){serve(c);});
+  queueEl.appendChild(d);
+  queue.push(c);
+}
+function removeCust(c){var i=queue.indexOf(c);if(i>=0)queue.splice(i,1);if(c.el.parentNode)c.el.parentNode.removeChild(c.el);}
+function serve(c){
+  if(state!=="play")return;
+  if(cups>0){
+    cups--;money+=price();rep=Math.min(20,rep+1);
+    removeCust(c);
+  }else{
+    rep=Math.max(0,rep-2);removeCust(c);
+    say("没货了!顾客生气走了…");
+  }
+}
+btnBuy.addEventListener("click",function(){
+  if(state!=="play")return;
+  if(money<2){say("金币不够进货!");return;}
+  if(lemons>=lemonCap()){say("柠檬已经堆满啦!");return;}
+  money-=2;lemons=Math.min(lemonCap(),lemons+5);
+});
+btnJuice.addEventListener("click",function(){
+  if(state!=="play")return;
+  var make=Math.min(2+upLv[0],Math.floor(lemons/2),cupCap()-cups);
+  if(make<=0){say(lemons<2?"柠檬不足,快进货!":"杯子已装满,先卖再说!");return;}
+  lemons-=make*2;cups+=make;
+});
+function startGame(){
+  money=10;lemons=8;cups=0;rep=5;wx=0;wxT=18;spawnT=1.2;upLv=[0,0,0];msgT=0;
+  queue=[];queueEl.innerHTML="";
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var i;
+  elMoney.textContent=fmt(money);elLem.textContent=lemons;elLemCap.textContent=lemonCap();
+  elCup.textContent=cups;elCupCap.textContent=cupCap();
+  elRep.textContent=rep;elPrice.textContent=price();elWx.textContent=wxNames[wx];
+  for(i=0;i<queue.length;i++){
+    var pc=queue[i].pat/queue[i].max*100;
+    var f=queue[i].el.querySelector(".pfill");
+    f.style.width=pc+"%";
+    queue[i].el.classList.toggle("hurry",pc<35);
+  }
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,i;
+  wxT-=ds;
+  if(wxT<=0){
+    wxT=18;var nw=Math.floor(Math.random()*3);
+    if(nw!==wx){wx=nw;say("天气变了:"+wxNames[wx]+(wx===2?" 客人变少…":" 客人来了!"));}
+  }
+  spawnT-=ds;
+  if(spawnT<=0){
+    spawnT=Math.max(0.7,wxBase[wx]*(1-0.12*upLv[1]))*(0.8+Math.random()*0.4);
+    if(queue.length<5)spawnCust();
+  }
+  for(i=queue.length-1;i>=0;i--){
+    var c=queue[i];
+    c.pat-=ds;
+    if(c.pat<=0){rep=Math.max(0,rep-1);removeCust(c);say("顾客等太久走掉了…");}
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(money>=WIN){
+    state="over";
+    showOv("街头饮料大王!","小摊日均流水破千,排队的人绕了半个街区!","累计赚得 "+fmt(money)+" 金币 · 口碑 "+rep,"再来一局");
+  }
+}
+function showOv(t2,d,s,bt){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display=s?"block":"none";
+  btn.textContent=bt;ov.classList.remove("hide");
+}
+money=10;lemons=8;cups=0;rep=5;wx=0;wxT=18;spawnT=1.2;queue=[];upLv=[0,0,0];state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

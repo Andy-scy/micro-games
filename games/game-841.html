@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六宫数独</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px;display:flex;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(6,48px);grid-auto-rows:48px;gap:2px;background:#0f1220;border:2px solid #4a5578;border-radius:6px;overflow:hidden}
+.cell{background:#1c2240;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;cursor:pointer;user-select:none}
+.cell.given{background:#242b52;color:#8f9bd9;cursor:default}
+.cell.sel{background:#31408f}
+.cell.same{background:#28325f}
+.cell.bad{color:#ff7b8a;background:#3a2340}
+.cell.br{border-right:2px solid #4a5578}
+.cell.bb{border-bottom:2px solid #4a5578}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+#nums .btn{width:48px;font-size:18px;font-weight:700}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>六宫数独</h1>
+<p class="tip">每行、每列、每个 2×3 宫内,1–6 各出现一次。<br>点击格子选中,再用数字键或下方按钮填入。</p>
+<div class="hud"><span id="hTime">用时 0 秒</span><span id="hStep">填写 0 次</span></div>
+<div class="panel"><div id="board"></div></div>
+<div class="btnrow" id="nums"></div>
+<div class="btnrow"><button class="btn" id="bErase">清除</button><button class="btn" id="bHint">提示(3)</button><button class="btn pri" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const N=6,CELLS=36;
+let sol=[],puz=[],cur=[],sel=-1,hints=3,steps=0,sec=0,timer=null,over=false;
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function okAt(g,r,c,d){
+  for(let i=0;i<N;i++){if(g[r][i]===d||g[i][c]===d)return false;}
+  const br=Math.floor(r/2)*2,bc=Math.floor(c/3)*3;
+  for(let i=br;i<br+2;i++)for(let j=bc;j<bc+3;j++){if(g[i][j]===d)return false;}
+  return true;
+}
+function genFull(){
+  const g=Array.from({length:N},()=>new Array(N).fill(0));
+  (function bt(p){
+    if(p===CELLS)return true;
+    const r=Math.floor(p/N),c=p%N;
+    for(const d of shuffle([1,2,3,4,5,6])){
+      if(okAt(g,r,c,d)){g[r][c]=d;if(bt(p+1))return true;g[r][c]=0;}
+    }
+    return false;
+  })(0);
+  return g;
+}
+function countSol(g,limit){
+  let p=-1;
+  for(let i=0;i<CELLS;i++){if(g[Math.floor(i/N)][i%N]===0){p=i;break;}}
+  if(p<0)return 1;
+  const r=Math.floor(p/N),c=p%N;let cnt=0;
+  for(let d=1;d<=N;d++){
+    if(okAt(g,r,c,d)){g[r][c]=d;cnt+=countSol(g,limit-cnt);g[r][c]=0;if(cnt>=limit)break;}
+  }
+  return cnt;
+}
+function genPuzzle(){
+  sol=genFull();
+  const g=sol.map(row=>row.slice());
+  const order=shuffle([...Array(CELLS).keys()]);
+  let givens=CELLS;
+  for(const p of order){
+    if(givens<=10)break;
+    const r=Math.floor(p/N),c=p%N,bak=g[r][c];
+    g[r][c]=0;
+    if(countSol(g,2)!==1){g[r][c]=bak;}else{givens--;}
+  }
+  puz=g.map(row=>row.slice());
+  cur=g.map(row=>row.slice());
+}
+const board=document.getElementById("board");
+const cells=[];
+function buildBoard(){
+  board.innerHTML="";
+  cells.length=0;
+  for(let i=0;i<CELLS;i++){
+    const d=document.createElement("div");
+    const r=Math.floor(i/N),c=i%N;
+    d.className="cell";
+    if(c%3===2&&c<N-1)d.classList.add("br");
+    if(r%2===1&&r<N-1)d.classList.add("bb");
+    d.addEventListener("click",()=>{if(!over&&puz[r][c]===0){sel=i;render();}});
+    board.appendChild(d);
+    cells.push(d);
+  }
+}
+function render(){
+  const selV=sel>=0?cur[Math.floor(sel/N)][sel%N]:0;
+  for(let i=0;i<CELLS;i++){
+    const r=Math.floor(i/N),c=i%N,v=cur[r][c],d=cells[i];
+    d.textContent=v>0?String(v):"";
+    d.classList.toggle("given",puz[r][c]>0);
+    d.classList.toggle("sel",i===sel);
+    d.classList.toggle("same",v>0&&v===selV&&i!==sel);
+    let bad=false;
+    if(v>0){const bak=cur[r][c];cur[r][c]=0;bad=!okAt(cur,r,c,v);cur[r][c]=bak;}
+    d.classList.toggle("bad",bad);
+  }
+}
+function setVal(v){
+  if(over||sel<0)return;
+  const r=Math.floor(sel/N),c=sel%N;
+  if(puz[r][c]>0||cur[r][c]===v)return;
+  cur[r][c]=v;steps++;updHud();render();
+  if(checkWin())winGame();
+}
+function erase(){
+  if(over||sel<0)return;
+  const r=Math.floor(sel/N),c=sel%N;
+  if(puz[r][c]===0&&cur[r][c]>0){cur[r][c]=0;render();}
+}
+function useHint(){
+  if(over||hints<=0)return;
+  let t=sel;
+  if(t<0){for(let i=0;i<CELLS;i++){if(cur[Math.floor(i/N)][i%N]===0){t=i;break;}}}
+  if(t<0)return;
+  const r=Math.floor(t/N),c=t%N;
+  if(puz[r][c]>0||cur[r][c]===sol[r][c])return;
+  cur[r][c]=sol[r][c];hints--;steps++;updHud();sel=t;render();
+  if(checkWin())winGame();
+}
+function checkWin(){
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+    if(cur[r][c]===0)return false;
+    const bak=cur[r][c];cur[r][c]=0;
+    const ok=okAt(cur,r,c,bak);
+    cur[r][c]=bak;
+    if(!ok)return false;
+  }
+  return true;
+}
+function updHud(){
+  document.getElementById("hStep").textContent="填写 "+steps+" 次";
+  document.getElementById("bHint").textContent="提示("+hints+")";
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function winGame(){
+  over=true;clearInterval(timer);
+  show("破解成功!","用时 "+sec+" 秒 · 填写 "+steps+" 次 · 使用提示 "+(3-hints)+" 次");
+}
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hTime").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(){
+  over=false;sel=-1;hints=3;steps=0;sec=0;
+  genPuzzle();buildBoard();render();updHud();
+  document.getElementById("hTime").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  startTimer();
+}
+const numsEl=document.getElementById("nums");
+for(let d=1;d<=6;d++){
+  const b=document.createElement("button");
+  b.className="btn";b.textContent=String(d);
+  b.addEventListener("click",()=>setVal(d));
+  numsEl.appendChild(b);
+}
+document.getElementById("bErase").addEventListener("click",erase);
+document.getElementById("bHint").addEventListener("click",useHint);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+document.addEventListener("keydown",e=>{
+  if(over)return;
+  if(e.key>="1"&&e.key<="6")setVal(parseInt(e.key,10));
+  else if(e.key==="Backspace"||e.key==="Delete"||e.key==="0")erase();
+  else if(e.key.indexOf("Arrow")===0){
+    e.preventDefault();
+    if(sel<0){sel=0;}
+    else{
+      const r=Math.floor(sel/N),c=sel%N;
+      if(e.key==="ArrowUp")sel=((r+5)%N)*N+c;
+      else if(e.key==="ArrowDown")sel=((r+1)%N)*N+c;
+      else if(e.key==="ArrowLeft")sel=r*N+((c+5)%N);
+      else sel=r*N+((c+1)%N);
+    }
+    render();
+  }
+});
+init();
+</script>
+</body>
+</html>

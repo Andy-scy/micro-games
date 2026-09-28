@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰王争霸</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:50px;height:50px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45);cursor:pointer}
+.die.lock{outline:3px solid #ffd166;box-shadow:0 0 12px rgba(255,209,102,.5)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+#cats{display:flex;flex-wrap:wrap;gap:6px}
+.cat{flex:1 1 30%;min-width:150px;display:flex;justify-content:space-between;align-items:center;background:#232a48;border:0;border-radius:8px;padding:8px 10px;color:#cdd6f4;font-size:13px;cursor:pointer}
+.cat b{color:#ffd166}
+.cat.used{background:#171b30;color:#5b6485;cursor:default}
+.cat.ok{box-shadow:inset 0 0 0 1px #4cc9f0}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:40px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰王争霸</h1>
+  <p class="tips">经典五骰计分:每回合最多掷 3 次,点击骰子可锁定不重掷;13 个计分类别各只能用一次,点选类别记入当前骰面。上部六类合计 ≥63 额外奖励 35 分,终局 ≥200 分即胜利!</p>
+  <div class="card">
+    <div class="row"><div class="die" id="s0"></div><div class="die" id="s1"></div><div class="die" id="s2"></div><div class="die" id="s3"></div><div class="die" id="s4"></div></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="roll">掷骰</button>
+      <span class="mut">第 <b id="rnd">1</b>/13 回合 · 剩余掷数 <b id="rl">3</b></span>
+    </div>
+  </div>
+  <div class="card"><div id="cats"></div></div>
+  <div class="card log" id="log">第一掷已自动进行,锁定想要的骰子再掷!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var CATN=['1 点','2 点','3 点','4 点','5 点','6 点','三条','四条','葫芦','小顺','大顺','快艇','机会'];
+var dice=[1,2,3,4,5],lock=[false,false,false,false,false],rolls=3,round=1;
+var score=[0,0,0,0,0,0,0,0,0,0,0,0,0],used=[false,false,false,false,false,false,false,false,false,false,false,false,false];
+var over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function counts(d){var c=[0,0,0,0,0,0,0];for(var i=0;i<5;i++)c[d[i]]++;return c}
+function runLen(d){var c=counts(d),cur=0,best=0;for(var i=1;i<=6;i++){if(c[i]>0){cur++;if(cur>best)best=cur}else cur=0}return best}
+function calc(i,d){
+  var c=counts(d),s=0,j;
+  for(j=0;j<5;j++)s+=d[j];
+  if(i<6)return c[i+1]*(i+1);
+  if(i===6){for(j=1;j<=6;j++)if(c[j]>=3)return s;return 0}
+  if(i===7){for(j=1;j<=6;j++)if(c[j]>=4)return s;return 0}
+  if(i===8){var t=false,p=false;for(j=1;j<=6;j++){if(c[j]===3)t=true;if(c[j]===2)p=true}return(t&&p)?25:0}
+  if(i===9)return runLen(d)>=4?30:0;
+  if(i===10)return runLen(d)>=5?40:0;
+  if(i===11){for(j=1;j<=6;j++)if(c[j]===5)return 50;return 0}
+  return s;
+}
+function drawDice(){
+  for(var i=0;i<5;i++){var el=$('s'+i);setDie(el,dice[i]);el.classList.toggle('lock',lock[i])}
+}
+function buildCats(){
+  var box=$('cats');box.innerHTML='';
+  for(var i=0;i<13;i++){
+    var b=document.createElement('button');b.className='cat';
+    var val=calc(i,dice);
+    var txt='<span>'+CATN[i]+'</span>';
+    if(used[i])txt+='<b>'+score[i]+'</b>';
+    else{txt+='<b>'+val+'</b>';if(val>0)b.classList.add('ok')}
+    if(used[i])b.classList.add('used');
+    b.innerHTML=txt;
+    b.onclick=(function(k){return function(){
+      if(over||used[k])return;
+      score[k]=calc(k,dice);used[k]=true;
+      round++;drawDice();buildCats();updTop();
+      if(round>13){finish();return}
+      lock=[false,false,false,false,false];rolls=3;
+      autoRoll();
+    }})(i);
+    box.appendChild(b);
+  }
+}
+function updTop(){$('rnd').textContent=Math.min(round,13);$('rl').textContent=rolls}
+function doRoll(){
+  var any=false,i;
+  for(i=0;i<5;i++)if(!lock[i])any=true;
+  if(!any){$('log').textContent='至少要留一颗骰子重掷,或直接选择计分类别。';return}
+  var t0=performance.now(),last=0;
+  $('roll').disabled=true;
+  function step(t){
+    if(t-t0<550){
+      if(t-last>70){last=t;for(var i=0;i<5;i++)if(!lock[i])setDie($('s'+i),rnd());}
+      requestAnimationFrame(step);
+    }else{
+      for(i=0;i<5;i++)if(!lock[i])dice[i]=rnd();
+      rolls--;drawDice();buildCats();updTop();
+      $('roll').disabled=(rolls===0);
+      $('log').textContent=rolls===0?'三次机会用完,请点选一个类别记分(可记 0 分)。':'还可掷 '+rolls+' 次,点骰子锁定,或直接选类别。';
+    }
+  }
+  requestAnimationFrame(step);
+}
+function autoRoll(){
+  rolls=3;updTop();
+  for(var i=0;i<5;i++){dice[i]=rnd();lock[i]=false}
+  rolls=2;drawDice();buildCats();updTop();
+  $('roll').disabled=false;
+  $('log').textContent='第 '+round+' 回合:第一掷完成,锁骰再掷或直接选类别。';
+}
+function finish(){
+  over=true;
+  var up=0,lo=0,i;
+  for(i=0;i<6;i++)up+=score[i];
+  for(i=6;i<13;i++)lo+=score[i];
+  var bonus=up>=63?35:0,total=up+bonus+lo;
+  var title=total>=250?'骰王降临!':total>=200?'胜利!':total>=150?'还不错':'挑战失败';
+  $('ovt').textContent=title;
+  $('ovp').innerHTML='总分 <b>'+total+'</b>(上部 '+up+(bonus?' + 奖励 35':'')+' + 下部 '+lo+')<br>目标线 200 分,冲击 250 成为骰王!';
+  $('overlay').classList.add('show');
+}
+$('roll').onclick=function(){if(!over&&rolls>0)doRoll()};
+(function(){for(var i=0;i<5;i++){(function(k){$('s'+k).onclick=function(){
+  if(over||rolls===0)return;lock[k]=!lock[k];drawDice();
+}})(i)}})();
+$('again').onclick=function(){
+  dice=[1,2,3,4,5];lock=[false,false,false,false,false];rolls=3;round=1;
+  score=[0,0,0,0,0,0,0,0,0,0,0,0,0];
+  used=[false,false,false,false,false,false,false,false,false,false,false,false,false];
+  over=false;$('overlay').classList.remove('show');
+  autoRoll();
+};
+autoRoll();
+</script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真假闪击</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#ff5c8a;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ff5c8a}
+.tbarWrap{height:12px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:12px}
+#tbar{height:100%;width:100%;background:#ff5c8a;border-radius:6px}
+#q{font-size:18px;line-height:1.7;text-align:center;min-height:72px;margin-bottom:14px}
+#btns{display:flex;gap:12px}
+.jdg{flex:1;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:12px;padding:18px 0;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit}
+.jdg:active{transform:scale(.97)}
+#t{border-color:#4cc9f0;color:#4cc9f0}
+#f{border-color:#ffd166;color:#ffd166}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:12px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ff5c8a;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ff5c8a;color:#2a0a14;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>真假闪击</h1>
+  <p class="tips">常识判断闪击战:每句只有 2.5 秒,立刻判定"对"或"错"(键盘 1=对、2=错)。答对连击加分,答错或超时记一次振出,3 振立即结束!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="st">0</div></div>
+    <div class="stat"><div class="mut">振出</div><div class="big" id="hp">✖✖✖</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="btns">
+      <button class="jdg" id="t">对 ✔</button>
+      <button class="jdg" id="f">错 ✘</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">真假闪击</h2><p id="ovp">· 每句常识陈述限时 2.5 秒<br>· 点击「对 / 错」或按键盘 1(对)、2(错)<br>· 答对 +50,连击每层额外 +10(最多 +50)<br>· 答错或超时记 1 次振出并展示真相<br>· 3 次振出立即结束,看你能闪击多少句!</p><button class="btn" id="obtn">开始闪击</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{s:'鲸鱼是鱼类。',ok:false},
+{s:'蜜蜂采花蜜酿成蜂蜜。',ok:true},
+{s:'月亮自己会发光。',ok:false},
+{s:'地球绕着太阳转。',ok:true},
+{s:'猫头鹰白天最活跃。',ok:false},
+{s:'企鹅生活在南极地区。',ok:true},
+{s:'植物在没有光的地方也能一直进行光合作用。',ok:false},
+{s:'中国的首都是北京。',ok:true},
+{s:'蛇的体温会随环境变化。',ok:true},
+{s:'十二生肖里有兔。',ok:true},
+{s:'水的化学式是 H₂O。',ok:true},
+{s:'长颈鹿脖子的骨头数量和人的一样多。',ok:true},
+{s:'打雷时先看到闪电后听到雷声,是因为光速比声速快。',ok:true},
+{s:'铅笔芯的主要成分是铅。',ok:false},
+{s:'蝙蝠靠回声定位辨别方向。',ok:true},
+{s:'声音无法在真空中传播。',ok:true},
+{s:'香蕉树其实是一种大型草本植物。',ok:true},
+{s:'大熊猫的主食是肉。',ok:false},
+{s:'光年是时间单位。',ok:false},
+{s:'中国传统婚礼常用红色布置。',ok:true},
+{s:'恐龙灭绝大约发生在几千年前。',ok:false},
+{s:'章鱼有三个心脏。',ok:true},
+{s:'一斤等于五百克。',ok:true},
+{s:'太阳从西边落下。',ok:true},
+{s:'骆驼的驼峰里储存的是水。',ok:false},
+{s:'企鹅是哺乳动物。',ok:false},
+{s:'乒乓球常被称为中国的"国球"。',ok:true},
+{s:'雨后彩虹是光的折射色散现象。',ok:true},
+{s:'春节是农历正月初一。',ok:true},
+{s:'竹子其实是草本植物,不是树。',ok:true},
+{s:'汽水里的气泡主要是二氧化碳。',ok:true},
+{s:'鸵鸟遇到危险会把头埋进沙子里。',ok:false},
+{s:'每年的 2 月都是 28 天。',ok:false},
+{s:'圆周率是无限不循环小数。',ok:true},
+{s:'无线充电主要利用电磁感应原理。',ok:true},
+{s:'岳飞是南宋抗金名将。',ok:true},
+{s:'蜘蛛是昆虫。',ok:false},
+{s:'声音在水中传播比在空气中慢。',ok:false},
+{s:'骰子相对两面的点数之和都是七。',ok:true},
+{s:'二十四节气源于中国古代历法。',ok:true},
+{s:'北极和南极都有企鹅生活。',ok:false}
+];
+var QLEN=2.5;
+var order=[],qi=0,score=0,streak=0,strikes=0,rightCnt=0,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;order=shuffle(BANK.slice());qi=0;
+  score=0;streak=0;strikes=0;rightCnt=0;over=false;playing=true;locked=false;
+  $('sc').textContent='0';$('st').textContent='0';$('hp').textContent='✖✖✖';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(qi>=order.length)order=order.concat(shuffle(BANK.slice()));
+  var it=order[qi];qi++;
+  locked=false;qLeft=QLEN;
+  $('tbar').style.width='100%';
+  $('q').textContent=it.s;
+  $('msg').textContent='';
+}
+function answer(v){
+  if(!playing||over||locked)return;
+  var it=order[qi-1];
+  locked=true;
+  if(v===it.ok){
+    streak++;rightCnt++;
+    var gain=50+Math.min(streak-1,5)*10;
+    score+=gain;
+    $('sc').textContent=score;$('st').textContent=streak;
+    $('msg').textContent='判定正确!+'+gain+' 分';
+  }else{
+    strikes++;streak=0;
+    $('st').textContent='0';
+    $('hp').textContent=(3-strikes)>0?new Array(3-strikes+1).join('✖'):'—';
+    $('msg').textContent='判定失误!正确答案:'+(it.ok?'对':'错');
+  }
+  schedule(function(){
+    if(!playing||over)return;
+    if(strikes>=3){finish();return;}
+    showQ();
+  },950);
+}
+function finish(){
+  playing=false;over=true;
+  var rank=score>=1500?'闪电侠!':(score>=800?'反应敏捷!':'热身完毕!');
+  $('ovt').textContent='三振出局…';
+  $('ovp').innerHTML='共判定 <b>'+qi+'</b> 句,答对 <b>'+rightCnt+'</b> 句<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 保持冷静,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('t').addEventListener('click',function(){answer(true)});
+$('f').addEventListener('click',function(){answer(false)});
+$('obtn').addEventListener('click',startGame);
+document.addEventListener('keydown',function(e){
+  if(e.key==='1')answer(true);
+  if(e.key==='2')answer(false);
+});
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)answer(-1);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

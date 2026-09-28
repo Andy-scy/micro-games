@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>稳塔抽积木</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;cursor:pointer;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>稳塔抽积木</h1>
+<div id="tip">轮流从木塔抽一块,谁抽塌谁输!红色=松动(晃动 +16~26),黄色=中等(+24~34),蓝色=紧固(+32~42)· 顶层完整的一层禁止抽动 · 晃动值满 100% 塔倒,抽塔者输 · 先胜 2 回合者夺冠(点击积木抽块)</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">稳塔抽积木</div><div id="ovS">木塔每块积木颜色暗示它的松紧程度<br>点击一块积木把它抽走,晃动值会上涨<br>顶层完整的一层不能抽;晃动值满 100% 塔倒,抽的人输<br>轮到你却无块可抽也判负 · 先胜 2 回合者夺冠</div><button id="ovB">开始抽塔</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var LAYERS=18,BW=62,BH=16,PITCH=18,X0=264,BASE=430;
+var st;
+function mkLayer(){
+ var arr=[],c;
+ for(c=0;c<3;c++){
+  var r=Math.random(),v,col;
+  if(r<0.42){v=16+Math.random()*10;col="#ff5c7a";}
+  else if(r<0.77){v=24+Math.random()*10;col="#f6c945";}
+  else{v=32+Math.random()*10;col="#4f8ff7";}
+  arr.push({v:v,col:col});
+ }
+ return arr;
+}
+function topLayer(){
+ var i,c;
+ for(i=LAYERS-1;i>=0;i--){
+  for(c=0;c<3;c++)if(st.tower[i][c]!==null)return i;
+ }
+ return -1;
+}
+function hasAllowed(){
+ return topLayer()>0;
+}
+function reset(){
+ st={score:[0,0],round:1,turn:0,tower:[],inst:0,wob:0,ph:"play",bannerT:0,msg:"",time:0};
+ var i;
+ for(i=0;i<LAYERS;i++)st.tower.push(mkLayer());
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function pull(layer,col){
+ var blk=st.tower[layer][col];
+ if(blk===null)return;
+ var puller=st.turn;
+ st.tower[layer][col]=null;
+ st.inst+=blk.v;
+ st.wob=26;
+ st.turn=1-st.turn;
+ if(st.inst>=100){
+  st.score[1-puller]++;st.ph="rend";st.bannerT=120;
+  st.msg="哗啦!塔倒了!"+(puller===0?"蓝方":"橙方")+"失手,送对手一分!";
+ }else if(!hasAllowed()){
+  st.score[1-st.turn]++;st.ph="rend";st.bannerT=120;
+  st.msg="无块可抽!轮到 "+(st.turn===0?"蓝方":"橙方")+" 行动,判负!";
+ }
+}
+function step(dt){
+ st.time+=dt;
+ if(st.wob>0)st.wob*=Math.pow(0.92,dt);
+ if(st.ph==="rend"){
+  st.bannerT-=dt;
+  if(st.bannerT<=0){
+   if(st.score[0]>=2||st.score[1]>=2){
+    st.ph="over";
+    show(st.score[0]>=2?"蓝方稳如泰山!":"橙方稳如泰山!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{
+    var s0=st.score[0],s1=st.score[1],r=st.round+1;
+    reset();st.score=[s0,s1];st.round=r;st.turn=(r-1)%2;
+   }
+  }
+ }
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ var ox=Math.sin(st.time*0.35)*(st.inst*0.05+st.wob*0.5);
+ var i,c,top=topLayer();
+ for(i=0;i<LAYERS;i++){
+  for(c=0;c<3;c++){
+   var x=X0+ox+c*64,y=BASE-(i+1)*PITCH;
+   var blk=st.tower[i][c];
+   if(blk!==null){
+    ctx.fillStyle=blk.col;
+    ctx.fillRect(x,y,BW,BH);
+    ctx.strokeStyle="rgba(15,18,32,.55)";ctx.lineWidth=2;
+    ctx.strokeRect(x+1,y+1,BW-2,BH-2);
+    if(i===top){
+     ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=2;
+     ctx.beginPath();ctx.moveTo(x+4,y+2);ctx.lineTo(x+BW-4,y+2);ctx.stroke();
+    }
+   }else{
+    ctx.strokeStyle="rgba(255,255,255,.12)";ctx.lineWidth=1;
+    ctx.setLineDash([4,4]);
+    ctx.strokeRect(x+2,y+2,BW-4,BH-4);
+    ctx.setLineDash([]);
+   }
+  }
+ }
+ ctx.fillStyle="#3d4a78";
+ ctx.fillRect(X0-14,BASE,220,10);
+ ctx.font="bold 13px system-ui";ctx.textBaseline="top";ctx.textAlign="center";
+ ctx.fillStyle="#8b93b0";
+ ctx.fillText("顶层白线以上禁止抽动",X0+96,BASE+16);
+ ctx.fillStyle="#0d1122";ctx.fillRect(210,14,300,18);
+ var pct=Math.min(100,st.inst);
+ var grd=ctx.createLinearGradient(210,0,510,0);
+ grd.addColorStop(0,"#3f8f4f");grd.addColorStop(0.6,"#f6c945");grd.addColorStop(1,"#ff5c7a");
+ ctx.fillStyle=grd;
+ ctx.fillRect(212,16,296*pct/100,14);
+ ctx.fillStyle="#e9edf8";ctx.font="bold 12px system-ui";
+ ctx.fillText("晃动值 "+Math.round(pct)+"%",360,50);
+ ctx.font="bold 15px system-ui";ctx.textAlign="left";
+ ctx.fillStyle="#4fd1c5";ctx.fillText("蓝方 "+st.score[0],20,14);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";
+ ctx.fillText(st.score[1]+" 橙方",700,14);
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";
+ ctx.fillText("第 "+st.round+" 回合 · 轮到 "+(st.turn===0?"蓝方":"橙方")+" · 先胜 2 回合",360,80);
+ if(st.ph==="rend"){
+  ctx.fillStyle="#ff5c7a";ctx.font="bold 26px system-ui";
+  ctx.fillText(st.msg,360,120);
+ }
+}
+cv.addEventListener("click",function(e){
+ if(st.ph!=="play")return;
+ var r=cv.getBoundingClientRect();
+ var mx=(e.clientX-r.left)/r.width*720;
+ var my=(e.clientY-r.top)/r.height*480;
+ var layer=Math.floor((BASE-my)/PITCH);
+ var col=Math.floor((mx-X0)/64);
+ if(layer<0||layer>=LAYERS||col<0||col>=3)return;
+ if(mx<X0||mx>X0+192)return;
+ if(st.tower[layer][col]===null)return;
+ if(layer>=topLayer())return;
+ pull(layer,col);
+});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop2);
+var last=0;
+function loop2(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop2);
+}
+</script>
+</body>
+</html>

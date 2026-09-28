@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双翼僚机</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#8ce99a;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#8ce99a;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#8ce99a;color:#0b2a13;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#8ce99a;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>双翼僚机</h1>
+<p class="tip">←→↑↓/WASD 或按住拖动移动,空格 / 按住屏幕开火。两架僚机会自动跟飞并持续开火,但它们各只有 2 点装甲,阵亡后要等 9 秒重生。带着完整编队拿到 800 分获胜。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">双翼僚机</h2>
+<p id="ovX">长机火力有限,僚机才是主力输出。让僚机挡枪,还是让僚机输出?编队的艺术在于取舍。</p>
+<button id="btn">带领编队</button>
+</div></div>
+</div>
+<div class="hud"><span>得分<b id="hS">0</b></span><span>僚机<b id="hW">2</b></span><span>生命<b id="hH">3</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hS=document.getElementById("hS"),hW=document.getElementById("hW"),hH=document.getElementById("hH");
+var GOAL=800,RESPAWN=9;
+var state="ready",score=0,hp=3,inv=0,cool=0,t=0,spawn=0.9;
+var ship={x:W/2,y:H-80};
+var drones=[
+  {side:-1,x:W/2-48,y:H-46,hp:2,ft:0.3,resp:0},
+  {side:1,x:W/2+48,y:H-46,hp:2,ft:0.9,resp:0}
+];
+var bullets=[],ebullets=[],enemies=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*24+8});}
+function reset(){
+  score=0;hp=3;inv=0;cool=0;t=0;spawn=0.7;
+  ship.x=W/2;ship.y=H-80;
+  for(var k=0;k<2;k++){
+    drones[k].side=k===0?-1:1;
+    drones[k].x=ship.x+drones[k].side*48;
+    drones[k].y=ship.y+34;
+    drones[k].hp=2;
+    drones[k].ft=0.3+k*0.3;
+    drones[k].resp=0;
+  }
+  bullets=[];ebullets=[];enemies=[];parts=[];
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"编队凯旋":"长机坠毁";
+  ovX.textContent="最终得分:"+score+(win?" · 三机编队完好而归,指挥有方!":" · 僚机不是挡箭牌,但有时也不得不让它们挡。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;inv-=dt;cool-=dt;spawn-=dt;
+  var sp=280;
+  if(keys.ArrowLeft||keys.a)ship.x-=sp*dt;
+  if(keys.ArrowRight||keys.d)ship.x+=sp*dt;
+  if(keys.ArrowUp||keys.w)ship.y-=sp*dt;
+  if(keys.ArrowDown||keys.s)ship.y+=sp*dt;
+  if(pressed){
+    ship.x+=(px-ship.x)*Math.min(1,dt*10);
+    ship.y+=(py-ship.y)*Math.min(1,dt*10);
+  }
+  ship.x=Math.max(20,Math.min(W-20,ship.x));
+  ship.y=Math.max(H*0.4,Math.min(H-40,ship.y));
+  for(i=0;i<2;i++){
+    var d=drones[i];
+    if(d.hp<=0){
+      d.resp-=dt;
+      if(d.resp<=0){
+        d.hp=2;
+        d.x=ship.x+d.side*48;
+        d.y=ship.y+34;
+        boom(d.x,d.y,8,"#8ce99a");
+      }
+      continue;
+    }
+    var tx=ship.x+d.side*48,ty=ship.y+34;
+    d.x+=(tx-d.x)*Math.min(1,dt*6);
+    d.y+=(ty-d.y)*Math.min(1,dt*6);
+    d.ft-=dt;
+    if(d.ft<=0){
+      d.ft=0.55;
+      bullets.push({x:d.x,y:d.y-12,dmg:1});
+    }
+  }
+  if((keys[" "]||keys.z||pressed)&&cool<=0){
+    cool=0.24;
+    bullets.push({x:ship.x,y:ship.y-18,dmg:2});
+  }
+  if(spawn<=0){
+    spawn=Math.max(0.6,1.5-score*0.0007);
+    var heavy=Math.random()<0.25;
+    enemies.push({x:40+Math.random()*(W-80),y:-30,vy:heavy?55:115+Math.random()*40,hp:heavy?4:2,ph:Math.random()*6.283,heavy:heavy});
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    bullets[bi].y-=520*dt;
+    if(bullets[bi].y<-20)bullets.splice(bi,1);
+  }
+  for(i=enemies.length-1;i>=0;i--){
+    var e=enemies[i];
+    e.y+=e.vy*dt;
+    e.x+=Math.sin(t*2.6+e.ph)*55*dt;
+    if(e.y>H+30){enemies.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(e.x-ship.x)<22&&Math.abs(e.y-ship.y)<22){
+      enemies.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+    for(j=0;j<2;j++){
+      var dr=drones[j];
+      if(dr.hp>0&&Math.abs(e.x-dr.x)<20&&Math.abs(e.y-dr.y)<20){
+        enemies.splice(i,1);
+        dr.hp--;
+        boom(dr.x,dr.y,6,"#8ce99a");
+        if(dr.hp<=0){dr.resp=RESPAWN;boom(dr.x,dr.y,16,"#ff6b6b");}
+        break;
+      }
+    }
+  }
+  if(Math.random()<dt*0.55&&enemies.length){
+    var e3=enemies[Math.floor(Math.random()*enemies.length)];
+    var dx=ship.x-e3.x,dy=ship.y-e3.y,dd=Math.sqrt(dx*dx+dy*dy)||1;
+    ebullets.push({x:e3.x,y:e3.y+12,vx:dx/dd*180,vy:dy/dd*180});
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var b=ebullets[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-10||b.x>W+10||b.y>H+10){ebullets.splice(i,1);continue;}
+    var hitD=false;
+    for(j=0;j<2;j++){
+      var dr2=drones[j];
+      if(dr2.hp>0&&Math.abs(b.x-dr2.x)<13&&Math.abs(b.y-dr2.y)<13){
+        dr2.hp--;
+        boom(dr2.x,dr2.y,5,"#8ce99a");
+        if(dr2.hp<=0){dr2.resp=RESPAWN;boom(dr2.x,dr2.y,16,"#ff6b6b");}
+        hitD=true;
+        break;
+      }
+    }
+    if(hitD){ebullets.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(b.x-ship.x)<11&&Math.abs(b.y-ship.y)<13){
+      ebullets.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,12,"#ff6b6b");
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    for(j=enemies.length-1;j>=0;j--){
+      var e2=enemies[j];
+      var rr=e2.heavy?24:18;
+      var dx2=bl.x-e2.x,dy2=bl.y-e2.y;
+      if(dx2*dx2+dy2*dy2<rr*rr){
+        bullets.splice(bi,1);
+        e2.hp-=bl.dmg;
+        if(e2.hp<=0){
+          boom(e2.x,e2.y,12,"#ffd166");
+          score+=e2.heavy?40:20;
+          enemies.splice(j,1);
+        }
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(inv<=0&&hp<=0){gameOver(false);return;}
+  if(score>=GOAL)gameOver(true);
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#8ce99a";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-2,bullets[i].y-10,4,12);
+  ctx.fillStyle="#ff9f43";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4,0,6.283);ctx.fill();
+  }
+  for(i=0;i<enemies.length;i++){
+    var e=enemies[i];
+    ctx.save();ctx.translate(e.x,e.y);
+    if(e.heavy){
+      ctx.fillStyle="#c0456c";
+      ctx.fillRect(-18,-14,36,28);
+    }else{
+      ctx.fillStyle="#ff6b6b";
+      ctx.beginPath();ctx.moveTo(0,14);ctx.lineTo(-14,-10);ctx.lineTo(14,-10);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.restore();
+  }
+  for(i=0;i<2;i++){
+    var d=drones[i];
+    if(d.hp<=0){
+      ctx.strokeStyle="#8ce99a";
+      ctx.setLineDash([4,4]);
+      ctx.beginPath();
+      ctx.arc(ship.x+d.side*48,ship.y+34,8,0,6.283*(1-d.resp/RESPAWN));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      continue;
+    }
+    ctx.save();ctx.translate(d.x,d.y);
+    ctx.fillStyle=d.hp>1?"#8ce99a":"#5a9a66";
+    ctx.beginPath();ctx.moveTo(0,-11);ctx.lineTo(-9,9);ctx.lineTo(9,9);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"&&!(inv>0&&Math.floor(inv*12)%2===0)){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle="#8ce99a";
+    ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(-14,14);ctx.lineTo(0,6);ctx.lineTo(14,14);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  for(var k=0;k<stars.length;k++){
+    var st=stars[k];
+    st.y+=st.v*dt;
+    if(st.y>H){st.y=-2;st.x=Math.random()*W;}
+  }
+  if(state==="play")update(dt);
+  draw();
+  var alive=0;
+  for(var q=0;q<2;q++)if(drones[q].hp>0)alive++;
+  hS.textContent=score;
+  hW.textContent=alive===2?"2/2":(alive===1?"1/2(重生中)":"0/2(重生中)");
+  hH.textContent=hp;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

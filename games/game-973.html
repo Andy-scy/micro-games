@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分粥博弈</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;--card:#1b2138;--gold:#f6c945;--bad:#b06ce0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:640px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:10px;line-height:1.7;}
+#card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+#hud{display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:700;margin-bottom:12px;}
+#role{text-align:center;color:var(--gold);min-height:20px;font-weight:700;margin-bottom:10px;}
+#coins{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;min-height:56px;margin-bottom:12px;}
+.coin{width:46px;height:46px;border-radius:50%;background:var(--gold);color:#5c4404;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;cursor:pointer;border:3px solid #c79b1d;transition:transform .15s;user-select:none;}
+.coin.bad{background:var(--bad);color:#2a0f3d;border-color:#7a3fa8;}
+.coin.sel{transform:translateY(-8px);box-shadow:0 0 0 3px #4fd1c5;}
+.coin.fixed{cursor:default;}
+#pinfo{text-align:center;color:var(--dim);font-size:13px;min-height:20px;margin-bottom:10px;}
+#piles{display:none;gap:14px;margin-bottom:12px;}
+#piles.show{display:flex;}
+.pile{flex:1;background:#10152b;border:2px solid #2a3354;border-radius:12px;padding:10px;min-height:110px;}
+.pile h3{font-size:14px;text-align:center;margin-bottom:8px;}
+.pile .net{text-align:center;font-weight:900;font-size:20px;margin-bottom:6px;}
+.pile .inside{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;}
+.pile .coin{width:34px;height:34px;font-size:14px;}
+#btns{text-align:center;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+button.mbtn{background:#4fd1c5;border:none;color:#06222b;font-size:15px;font-weight:700;padding:10px 26px;border-radius:999px;cursor:pointer;font-family:inherit;}
+button.mbtn.alt{background:#f6ad55;}
+button.mbtn.gray{background:#2a3354;color:var(--txt);}
+#banner{text-align:center;font-weight:700;font-size:15px;min-height:24px;margin-top:12px;color:#f6c945;}
+#again{display:none;margin:10px auto 0;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>分粥博弈</h1>
+<div id="tip">经典「我分你选」:10 枚金币中有 2 枚是毒币(每个 -2)· 分粥者把金币分成两堆,选粥者先挑一堆,剩下归分粥者 · 分得不均就会被对方拿走更好的一堆!· 每轮交换角色,共 5 轮,总分高者胜</div>
+<div id="card">
+ <div id="hud"><span id="sc1">玩家1:0</span><span id="rT">第 1/5 轮</span><span id="sc2">玩家2:0</span></div>
+ <div id="role"></div>
+ <div id="coins"></div>
+ <div id="pinfo"></div>
+ <div id="piles">
+  <div class="pile" id="pileA"><h3>A 堆</h3><div class="net" id="netA"></div><div class="inside" id="inA"></div></div>
+  <div class="pile" id="pileB"><h3>B 堆</h3><div class="net" id="netB"></div><div class="inside" id="inB"></div></div>
+ </div>
+ <div id="btns">
+  <button class="mbtn" id="btnCut">确认分堆</button>
+  <button class="mbtn" id="btnA" style="display:none">拿走 A 堆</button>
+  <button class="mbtn alt" id="btnB" style="display:none">拿走 B 堆</button>
+  <button class="mbtn gray" id="again" style="display:none">再来一局</button>
+ </div>
+ <div id="banner"></div>
+</div>
+</div>
+<script>
+"use strict";
+var coinsEl=document.getElementById("coins"),roleEl=document.getElementById("role"),pinfoEl=document.getElementById("pinfo");
+var pilesEl=document.getElementById("piles"),inA=document.getElementById("inA"),inB=document.getElementById("inB");
+var netA=document.getElementById("netA"),netB=document.getElementById("netB");
+var btnCut=document.getElementById("btnCut"),btnA=document.getElementById("btnA"),btnB=document.getElementById("btnB"),again=document.getElementById("again");
+var sc1=document.getElementById("sc1"),sc2=document.getElementById("sc2"),rT=document.getElementById("rT"),banner=document.getElementById("banner");
+var st;
+function coinEl(idx,small,fixed){
+ var d=document.createElement("div");
+ var bad=st.rotten.indexOf(idx)>=0;
+ d.className="coin"+(bad?" bad":"")+(fixed?" fixed":"");
+ d.textContent=bad?"毒":"金";
+ if(small){d.style.width="34px";d.style.height="34px";d.style.fontSize="14px";}
+ return d;
+}
+function net(list){
+ var n=0,i;
+ for(i=0;i<list.length;i++)n+=st.rotten.indexOf(list[i])>=0?-1:1;
+ return n;
+}
+function reset(){
+ st={round:1,score:[0,0],ph:"cut",cutter:0,rotten:[],sel:[],piles:null,bannerT:0};
+ again.style.display="none";
+ newRound();
+}
+function newRound(){
+ st.rotten=[];
+ while(st.rotten.length<2){
+  var r=Math.floor(Math.random()*10);
+  if(st.rotten.indexOf(r)<0)st.rotten.push(r);
+ }
+ st.sel=[];st.piles=null;
+ st.cutter=(st.round%2===1)?0:1;
+ st.ph="cut";
+ render();
+ banner.textContent="分粥者点击金币分入 A 堆,其余进 B 堆;两堆都不能为空";
+}
+function render(){
+ var i;
+ sc1.textContent="玩家1:"+st.score[0];
+ sc2.textContent="玩家2:"+st.score[1];
+ rT.textContent="第 "+st.round+"/5 轮";
+ coinsEl.innerHTML="";
+ if(st.ph==="cut"){
+  pilesEl.classList.remove("show");
+  btnCut.style.display="inline-block";
+  btnA.style.display="none";btnB.style.display="none";
+  roleEl.textContent="本轮:玩家"+(st.cutter+1)+" 分粥,玩家"+((1-st.cutter)+1)+" 待会先选";
+  for(i=0;i<10;i++){
+   var d=coinEl(i,false,false);
+   if(st.sel.indexOf(i)>=0)d.classList.add("sel");
+   d.addEventListener("click",toggleCoin(i));
+   coinsEl.appendChild(d);
+  }
+  var rest=[];
+  for(i=0;i<10;i++)if(st.sel.indexOf(i)<0)rest.push(i);
+  pinfoEl.textContent="A 堆 "+st.sel.length+" 枚(净 "+net(st.sel)+") · B 堆 "+rest.length+" 枚(净 "+net(rest)+")";
+ }else{
+  btnCut.style.display="none";
+  pilesEl.classList.add("show");
+  inA.innerHTML="";inB.innerHTML="";
+  var rest2=[];
+  for(i=0;i<10;i++)if(st.piles.a.indexOf(i)<0)rest2.push(i);
+  for(i=0;i<st.piles.a.length;i++)inA.appendChild(coinEl(st.piles.a[i],true,true));
+  for(i=0;i<rest2.length;i++)inB.appendChild(coinEl(rest2[i],true,true));
+  netA.textContent="净 "+net(st.piles.a);
+  netB.textContent="净 "+net(rest2);
+  if(st.ph==="pick"){
+   roleEl.textContent="本轮:玩家"+(st.cutter+1)+" 分粥,玩家"+((1-st.cutter)+1)+" 先选一堆!";
+   btnA.style.display="inline-block";btnB.style.display="inline-block";
+   btnA.textContent="拿走 A 堆(净 "+net(st.piles.a)+")";
+   btnB.textContent="拿走 B 堆(净 "+net(rest2)+")";
+  }
+  if(st.ph==="result"){
+   roleEl.textContent="本轮结果已结算";
+   btnA.style.display="none";btnB.style.display="none";
+  }
+ }
+}
+function toggleCoin(i){
+ return function(){
+  if(st.ph!=="cut")return;
+  var k=st.sel.indexOf(i);
+  if(k>=0)st.sel.splice(k,1);else st.sel.push(i);
+  render();
+ };
+}
+function doCut(){
+ if(st.ph!=="cut")return;
+ if(st.sel.length===0||st.sel.length===10){
+  banner.textContent="两堆都不能为空,重新分!";
+  return;
+ }
+ var rest=[],i;
+ for(i=0;i<10;i++)if(st.sel.indexOf(i)<0)rest.push(i);
+ st.piles={a:st.sel.slice(),b:rest};
+ st.ph="pick";
+ render();
+ banner.textContent="选粥者,挑一堆吧!贪心未必赢,想想毒币在哪堆";
+}
+function choose(k){
+ if(st.ph!=="pick")return;
+ var chooser=1-st.cutter;
+ var chosen=k===0?st.piles.a:st.piles.b;
+ var rest=[],i;
+ for(i=0;i<10;i++)if(chosen.indexOf(i)<0)rest.push(i);
+ var n1=net(chosen),n2=net(rest);
+ st.score[chooser]+=n1;
+ st.score[st.cutter]+=n2;
+ st.ph="result";
+ render();
+ banner.textContent="玩家"+(chooser+1)+"拿走"+(k===0?"A":"B")+"堆(净 "+n1+"),玩家"+(st.cutter+1)+"得另一堆(净 "+n2+")";
+ st.bannerT=130;
+}
+function nextRound(){
+ if(st.round>=5){
+  st.ph="over";
+  var s0=st.score[0],s1=st.score[1];
+  banner.textContent=s0===s1?"五轮战罢,平局!":(s0>s1?"玩家1 以 "+s0+" : "+s1+" 获胜!":"玩家2 以 "+s1+" : "+s0+" 获胜!");
+  again.style.display="inline-block";
+  return;
+ }
+ st.round++;
+ newRound();
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph==="result"&&st.bannerT>0){
+  st.bannerT-=dt;
+  if(st.bannerT<=0)nextRound();
+ }
+ requestAnimationFrame(loop);
+}
+btnCut.addEventListener("click",doCut);
+btnA.addEventListener("click",function(){choose(0);});
+btnB.addEventListener("click",function(){choose(1);});
+again.addEventListener("click",function(){reset();again.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

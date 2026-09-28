@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>挥刃切割</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04283f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>挥刃切割</h1>
+  <p class="hint">按住划过目标即可切开 · 漏掉 3 个或切到炸弹即失败</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连切 <b id="combo">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="380"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">挥刃切割</h2>
+      <p id="ovDesc">目标会从底部抛向空中,按住鼠标(或手指)快速划过即可切开得分,连切越多单次得分越高!混在其中的黑色炸弹绝对碰不得,切到立即失败;漏掉 3 个目标同样结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=380,KEY="mg_s235",G=1050;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elCombo=$("combo"),elLives=$("lives"),elBest=$("best");
+var COLORS=["#f59e0b","#4ade80","#38bdf8","#f472b6"];
+var state="menu",score=0,combo=0,comboUntil=0,lives=3,objs=[],parts=[],pops=[],trail=[];
+var spawnAt=0,startAt=0,dragging=false,lastPt=null,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(msg){
+  state="over";
+  dragging=false;
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function launch(t){
+  var sec=(t-startAt)/1000;
+  var n=(sec>12&&Math.random()<0.35)?2:1;
+  var i;
+  for(i=0;i<n;i++){
+    var x=60+Math.random()*(W-120);
+    var rise=250+Math.random()*130;
+    var vx=(240-x)*0.4*(0.5+Math.random());
+    if(vx>160)vx=160;
+    if(vx<-160)vx=-160;
+    objs.push({x:x,y:H+20,vx:vx,vy:-Math.sqrt(2*G*rise),r:19,bomb:Math.random()<0.2,col:COLORS[(Math.random()*COLORS.length)|0],spin:0});
+  }
+  spawnAt=t+Math.max(520,980-sec*16);
+}
+function distSeg(px,py,x1,y1,x2,y2){
+  var dx=x2-x1,dy=y2-y1;
+  var len=dx*dx+dy*dy;
+  var u=len>0?((px-x1)*dx+(py-y1)*dy)/len:0;
+  if(u<0)u=0;
+  if(u>1)u=1;
+  var cx=x1+u*dx,cy=y1+u*dy;
+  return Math.hypot(px-cx,py-cy);
+}
+function juice(x,y,col){
+  var i;
+  for(i=0;i<10;i++){
+    var a=Math.random()*Math.PI*2,sp=60+Math.random()*180;
+    parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-60,r:2+Math.random()*3,col:col,life:1});
+  }
+}
+function popText(x,y,txt){
+  pops.push({x:x,y:y,txt:txt,life:1});
+}
+function trySlice(x1,y1,x2,y2){
+  var i;
+  for(i=objs.length-1;i>=0;i--){
+    var o=objs[i];
+    if(distSeg(o.x,o.y,x1,y1,x2,y2)<o.r+5){
+      if(o.bomb){
+        juice(o.x,o.y,"#ef4444");
+        objs.splice(i,1);
+        endGame("哎呀,切到了炸弹!");
+        return;
+      }
+      var t=performance.now();
+      if(t>comboUntil)combo=0;
+      combo++;
+      comboUntil=t+1200;
+      score+=10+Math.min(20,combo*2);
+      juice(o.x,o.y,o.col);
+      popText(o.x,o.y,"+"+(10+Math.min(20,combo*2)));
+      objs.splice(i,1);
+      updateHud();
+    }
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(state==="playing"){
+    if(t>=spawnAt)launch(t);
+    var i;
+    for(i=objs.length-1;i>=0;i--){
+      var o=objs[i];
+      o.vy+=G*dts;
+      o.x+=o.vx*dts;
+      o.y+=o.vy*dts;
+      o.spin+=dts*6;
+      if(o.y>H+50&&o.vy>0){
+        objs.splice(i,1);
+        if(!o.bomb){
+          lives--;
+          combo=0;
+          updateHud();
+          if(lives<=0){endGame("漏掉了太多目标!");return;}
+        }
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.vy+=700*dts;
+    p.x+=p.vx*dts;
+    p.y+=p.vy*dts;
+    p.life-=dts*1.8;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  for(i=pops.length-1;i>=0;i--){
+    pops[i].y-=40*dts;
+    pops[i].life-=dts*1.6;
+    if(pops[i].life<=0)pops.splice(i,1);
+  }
+  var now=t;
+  while(trail.length&&now-trail[0].t>130)trail.shift();
+  draw(t);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  for(i=0;i<objs.length;i++){
+    var o=objs[i];
+    if(o.bomb){
+      ctx.fillStyle="#1f2937";
+      ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle="#ef4444";ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(o.x-8,o.y-8);ctx.lineTo(o.x+8,o.y+8);
+      ctx.moveTo(o.x+8,o.y-8);ctx.lineTo(o.x-8,o.y+8);
+      ctx.stroke();ctx.lineWidth=1;
+      ctx.fillStyle="#fbbf24";
+      ctx.beginPath();ctx.arc(o.x+o.r*0.7,o.y-o.r*0.9,3,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.fillStyle=o.col;
+      ctx.shadowColor=o.col;ctx.shadowBlur=12;
+      ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="rgba(255,255,255,0.35)";
+      ctx.beginPath();ctx.arc(o.x-o.r*0.3,o.y-o.r*0.35,o.r*0.32,0,Math.PI*2);ctx.fill();
+    }
+  }
+  for(i=0;i<parts.length;i++){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.col;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  if(trail.length>1){
+    for(i=1;i<trail.length;i++){
+      ctx.strokeStyle="rgba(224,242,254,"+(i/trail.length*0.8)+")";
+      ctx.lineWidth=1+i/trail.length*4;
+      ctx.beginPath();
+      ctx.moveTo(trail[i-1].x,trail[i-1].y);
+      ctx.lineTo(trail[i].x,trail[i].y);
+      ctx.stroke();
+    }
+    ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#fbbf24";
+  ctx.font="bold 16px system-ui,sans-serif";
+  ctx.textAlign="center";
+  for(i=0;i<pops.length;i++){
+    ctx.globalAlpha=Math.max(0,pops[i].life);
+    ctx.fillText(pops[i].txt,pops[i].x,pops[i].y);
+  }
+  ctx.globalAlpha=1;
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function movePen(e){
+  if(state!=="playing"||!dragging)return;
+  var p=pos(e);
+  if(lastPt)trySlice(lastPt.x,lastPt.y,p.x,p.y);
+  lastPt=p;
+  trail.push({x:p.x,y:p.y,t:performance.now()});
+  if(trail.length>14)trail.shift();
+}
+cv.addEventListener("mousedown",function(e){dragging=true;lastPt=null;movePen(e);});
+window.addEventListener("mousemove",movePen);
+window.addEventListener("mouseup",function(){dragging=false;lastPt=null;});
+cv.addEventListener("mouseleave",function(){dragging=false;lastPt=null;});
+cv.addEventListener("touchstart",function(e){e.preventDefault();dragging=true;lastPt=null;movePen(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();movePen(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();dragging=false;lastPt=null;},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+function startGame(){
+  score=0;combo=0;lives=3;objs=[];parts=[];pops=[];trail=[];
+  dragging=false;lastPt=null;
+  state="playing";
+  startAt=performance.now();
+  spawnAt=startAt+500;
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旋涡棋盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04202e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>旋涡棋盘</h1>
+  <p class="hint">每走 4 步棋盘顺时针旋转 90° 并重新落位 · 常引发意外连锁 · 30 步内拿到 3000 分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>距旋转还有 <b id="torot">4</b> 步</span>
+    <span>剩余步数 <b id="moves">30</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">旋涡棋盘</h2>
+      <p id="ovDesc">脚下是旋涡!每走 4 步,整个棋盘会带着所有宝石顺时针旋转 90 度——原本竖排的变横排,经常凭空冒出新消除!学会提前 4 步布局,让旋转为你打工。30 步内拿到 3000 分!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var COLS=8,ROWS=8,CELL=60,W=480,H=480;
+var GCOL=["#f87171","#fbbf24","#4ade80","#60a5fa","#c084fc","#fb923c"];
+var GOAL=3000,MOVES=30,PER=25,ROT_EVERY=4;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elTorot=$("torot"),elMoves=$("moves");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var grid,off,sel,score,moves,moveCount,postDone,state,phase,phaseT,swapBack,pendA,pendB,clearSet,clearList;
+var msg="",msgT=0;
+function rnd(n){return (Math.random()*n)|0;}
+function floatMsg(s){msg=s;msgT=1300;}
+function setOff(r,c,dr,dc){off[r][c].x=dc*CELL;off[r][c].y=dr*CELL;}
+function newBoard(){
+  grid=[];off=[];
+  var r,c,v;
+  for(r=0;r<ROWS;r++){
+    var gr=[],orr=[];
+    for(c=0;c<COLS;c++){
+      orr.push({x:0,y:0});
+      v=rnd(6);
+      while((c>=2&&gr[c-1]===v&&gr[c-2]===v)||(r>=2&&grid[r-1][c]===v&&grid[r-2][c]===v))v=rnd(6);
+      gr.push(v);
+    }
+    grid.push(gr);off.push(orr);
+  }
+}
+function rotateBoard(){
+  var ng=[],r,c,nr,nc;
+  for(r=0;r<ROWS;r++){
+    var row=[];
+    for(c=0;c<COLS;c++)row.push(null);
+    ng.push(row);
+  }
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    nr=c;nc=ROWS-1-r;
+    ng[nr][nc]=grid[r][c];
+    off[nr][nc].x=(c-nc)*CELL;
+    off[nr][nc].y=(r-nr)*CELL;
+  }
+  grid=ng;
+}
+function findRuns(){
+  var runs=[],r,c,v,e,i,cells;
+  for(r=0;r<ROWS;r++){
+    c=0;
+    while(c<COLS){
+      v=grid[r][c];
+      if(v===null){c++;continue;}
+      e=c;
+      while(e+1<COLS&&grid[r][e+1]===v)e++;
+      if(e-c>=2){cells=[];for(i=c;i<=e;i++)cells.push([r,i]);runs.push({d:"h",cells:cells});}
+      c=e+1;
+    }
+  }
+  for(c=0;c<COLS;c++){
+    r=0;
+    while(r<ROWS){
+      v=grid[r][c];
+      if(v===null){r++;continue;}
+      e=r;
+      while(e+1<ROWS&&grid[e+1][c]===v)e++;
+      if(e-r>=2){cells=[];for(i=r;i<=e;i++)cells.push([i,c]);runs.push({d:"v",cells:cells});}
+      r=e+1;
+    }
+  }
+  return runs;
+}
+function trySwap(a,b){
+  var t=grid[a.r][a.c];grid[a.r][a.c]=grid[b.r][b.c];grid[b.r][b.c]=t;
+  setOff(a.r,a.c,b.r-a.r,b.c-a.c);setOff(b.r,b.c,a.r-b.r,a.c-b.c);
+}
+function attemptSwap(a,b){
+  sel=null;pendA=a;pendB=b;swapBack=false;
+  trySwap(a,b);phase="swap";phaseT=170;
+}
+function startWave(runs){
+  var map={},i,j,key,rr,cc,gain=0;
+  for(i=0;i<runs.length;i++)for(j=0;j<runs[i].cells.length;j++){
+    key=runs[i].cells[j][0]*COLS+runs[i].cells[j][1];
+    map[key]=true;
+  }
+  clearSet=map;clearList=[];
+  for(key in map){
+    rr=(key/COLS)|0;cc=key%COLS;
+    clearList.push([rr,cc]);
+    gain+=PER;
+  }
+  score+=gain;
+  updateHud();
+  phase="clear";phaseT=200;
+}
+function finishClear(){
+  var key,rr,cc;
+  for(key in clearSet){rr=(key/COLS)|0;cc=key%COLS;grid[rr][cc]=null;}
+  applyGrav(0);
+  phase="fall";phaseT=260;
+}
+function applyGrav(g){
+  var D=[[0,1],[-1,0],[0,-1],[1,0]][g];
+  var vert=D[1]!==0,len=vert?ROWS:COLS,lines=vert?COLS:ROWS;
+  var i,j,r,c,vals,fo;
+  for(i=0;i<lines;i++){
+    vals=[];
+    for(j=0;j<len;j++){
+      r=vert?(D[1]===1?len-1-j:j):i;
+      c=vert?i:(D[0]===1?len-1-j:j);
+      if(grid[r][c]!==null)vals.push({v:grid[r][c],r:r,c:c});
+      grid[r][c]=null;
+    }
+    fo=(len-vals.length)*CELL;
+    for(j=0;j<len;j++){
+      r=vert?(D[1]===1?len-1-j:j):i;
+      c=vert?i:(D[0]===1?len-1-j:j);
+      if(j<vals.length){
+        grid[r][c]=vals[j].v;
+        off[r][c].x=(vals[j].c-c)*CELL;
+        off[r][c].y=(vals[j].r-r)*CELL;
+      }else{
+        grid[r][c]=rnd(6);
+        off[r][c].x=-fo*D[0];
+        off[r][c].y=-fo*D[1];
+      }
+    }
+  }
+}
+function onBadSwap(){}
+function endTurn(){
+  if(!postDone){
+    postDone=true;
+    moves--;moveCount++;
+    updateHud();
+    if(score>=GOAL){gameOver(true);return;}
+    if(moves<=0){gameOver(false);return;}
+    if(moveCount%ROT_EVERY===0){
+      floatMsg("棋盘旋转!");
+      rotateBoard();
+      phase="fall";phaseT=300;
+      return;
+    }
+    phase="idle";
+    return;
+  }
+  postDone=false;
+  phase="idle";
+}
+function gameOver(win){
+  state="over";
+  ovTitle.textContent=win?"旋涡主宰!":"游戏结束";
+  ovDesc.textContent=win?"连旋涡都在为你输送宝石!":"步数耗尽。别忘了每 4 步的一次旋转,提前布好长链!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" / 目标 "+GOAL;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  newBoard();sel=null;score=0;moves=MOVES;moveCount=0;postDone=false;msgT=0;
+  state="play";phase="idle";
+  updateHud();ov.classList.add("hide");
+}
+function update(dt){
+  var i,j,o,f=Math.exp(-dt/55);
+  for(i=0;i<ROWS;i++)for(j=0;j<COLS;j++){
+    o=off[i][j];o.x*=f;o.y*=f;
+    if(o.x>-.6&&o.x<.6)o.x=0;
+    if(o.y>-.6&&o.y<.6)o.y=0;
+  }
+  if(msgT>0)msgT-=dt;
+  if(state!=="play"||phase==="idle")return;
+  phaseT-=dt;
+  if(phaseT>0)return;
+  var runs;
+  if(phase==="swap"){
+    if(swapBack){phase="idle";onBadSwap();}
+    else{
+      runs=findRuns();
+      if(runs.length===0){trySwap(pendA,pendB);swapBack=true;phaseT=170;}
+      else startWave(runs);
+    }
+  }else if(phase==="clear"){
+    finishClear();
+  }else if(phase==="fall"){
+    runs=findRuns();
+    if(runs.length)startWave(runs);
+    else endTurn();
+  }
+}
+function poly(x,y,r,n,rot){
+  var i;ctx.beginPath();
+  for(i=0;i<n;i++){
+    var a=rot+i*Math.PI*2/n;
+    if(i===0)ctx.moveTo(x+r*Math.cos(a),y+r*Math.sin(a));
+    else ctx.lineTo(x+r*Math.cos(a),y+r*Math.sin(a));
+  }
+  ctx.closePath();
+}
+function drawGem(ci,px,py,alpha){
+  var cx=px+CELL/2,cy=py+CELL/2,r=CELL*0.36;
+  ctx.globalAlpha=alpha;
+  ctx.fillStyle=GCOL[ci];
+  if(ci===0){ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);}
+  else if(ci===1)poly(cx,cy,r,3,-Math.PI/2);
+  else if(ci===2)poly(cx,cy,r*0.92,4,0);
+  else if(ci===3)poly(cx,cy,r,4,Math.PI/4);
+  else if(ci===4)poly(cx,cy,r,5,-Math.PI/2);
+  else poly(cx,cy,r*0.95,6,Math.PI/6);
+  ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,.5)";ctx.lineWidth=2;ctx.stroke();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  var r,c,o,i,p;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){if((r+c)%2===0)ctx.fillRect(c*CELL,r*CELL,CELL,CELL);}
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(grid[r][c]===null)continue;
+    if(phase==="clear"&&clearSet&&clearSet[r*COLS+c])continue;
+    o=off[r][c];
+    drawGem(grid[r][c],c*CELL+o.x,r*CELL+o.y,1);
+  }
+  if(phase==="clear"&&clearList){
+    p=1-phaseT/200;
+    for(i=0;i<clearList.length;i++){
+      drawGem(grid[clearList[i][0]][clearList[i][1]],clearList[i][1]*CELL,clearList[i][0]*CELL,1-p);
+    }
+  }
+  if(sel){ctx.strokeStyle="#ffffff";ctx.lineWidth=3;ctx.strokeRect(sel.c*CELL+3,sel.r*CELL+3,CELL-6,CELL-6);}
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/400);
+    ctx.fillStyle="#fbbf24";ctx.font="bold 26px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,H/2);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+function updateHud(){elScore.textContent=score;elTorot.textContent=ROT_EVERY-(moveCount%ROT_EVERY);elMoves.textContent=moves;}
+function cellFromEvent(e){
+  var rect=cv.getBoundingClientRect(),x,y;
+  if(e.changedTouches){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  x=(x-rect.left)*(W/rect.width);y=(y-rect.top)*(H/rect.height);
+  var c=(x/CELL)|0,r=(y/CELL)|0;
+  if(r<0||r>=ROWS||c<0||c>=COLS)return null;
+  return {r:r,c:c};
+}
+function onTap(e){
+  if(state!=="play"||phase!=="idle")return;
+  var cell=cellFromEvent(e);
+  if(e.changedTouches&&e.preventDefault)e.preventDefault();
+  if(!cell)return;
+  if(!sel){sel=cell;return;}
+  if(sel.r===cell.r&&sel.c===cell.c){sel=null;return;}
+  if(Math.abs(sel.r-cell.r)+Math.abs(sel.c-cell.c)===1){attemptSwap({r:sel.r,c:sel.c},{r:cell.r,c:cell.c});}
+  else sel=cell;
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  update(dt);draw();
+}
+newBoard();updateHud();
+btnGo.addEventListener("click",startGame);
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",onTap,{passive:false});
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

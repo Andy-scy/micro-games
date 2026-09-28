@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>磁力收集</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#22d3ee;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#062a33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>磁力收集</h1>
+  <p class="hint">按住屏幕 / 空格 开启磁力,铁球被吸向指针 · 松手滑落</p>
+  <div class="hud">
+    <span>时间 <b id="time">60</b>s</span>
+    <span>能量珠 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">磁力收集</h2>
+      <p id="ovDesc">按住屏幕(或空格)开启电磁铁,铁球会被吸向你的指尖;松手则自由下坠。60 秒内收集尽量多的绿色能量珠,千万别碰到红色尖刺地雷——雷区还会越来越多!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=10;
+function $(id){return document.getElementById(id);}
+var elTime=$("time"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s386");
+var state,score,timeLeft,ball,orbs,mines,pointer,onMag,pulse,spawnT;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function farPos(minD){
+  var i,p,ok;
+  for(i=0;i<24;i++){
+    p={x:rnd(30,W-30),y:rnd(70,H-40)};
+    var dx=p.x-ball.x,dy=p.y-ball.y;
+    if(dx*dx+dy*dy>minD*minD){ok=true;break;}
+  }
+  return p;
+}
+function reset(){
+  score=0;timeLeft=60;
+  ball={x:W/2,y:H/2,vx:0,vy:0};
+  pointer={x:W/2,y:180};onMag=false;pulse=0;spawnT=0;
+  orbs=[];mines=[];
+  var i;
+  for(i=0;i<5;i++)orbs.push({x:rnd(30,W-30),y:rnd(70,H-40),r:8});
+  for(i=0;i<3;i++)mines.push({x:rnd(60,W-60),y:rnd(100,H-80),vx:rnd(-0.14,0.14),vy:rnd(-0.12,0.12),r:12});
+  updateHud();
+}
+function updateHud(){
+  elTime.textContent=Math.ceil(Math.max(0,timeLeft));
+  elSc.textContent=score;elBest.textContent=best;
+}
+function finish(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s386",best);}
+  ovT.textContent=reason.indexOf("时间")===0?"时间到!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="能量珠 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function ptOf(e){
+  var r=cv.getBoundingClientRect(),p=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  return{x:(p.clientX-r.left)*W/r.width,y:(p.clientY-r.top)*H/r.height};
+}
+function magOn(e){
+  if(state!=="playing")return;
+  if(e){var p=ptOf(e);pointer.x=p.x;pointer.y=p.y;}
+  onMag=true;
+  if(e&&e.preventDefault)e.preventDefault();
+}
+function magMove(e){
+  if(state!=="playing"||!onMag||!e.touches)return;
+  var p=ptOf(e);pointer.x=p.x;pointer.y=p.y;
+  e.preventDefault();
+}
+function magOff(){onMag=false;}
+cv.addEventListener("mousedown",magOn);
+window.addEventListener("mousemove",function(e){if(onMag){var p=ptOf(e);pointer.x=p.x;pointer.y=p.y;}});
+window.addEventListener("mouseup",magOff);
+cv.addEventListener("touchstart",magOn,{passive:false});
+cv.addEventListener("touchmove",magMove,{passive:false});
+cv.addEventListener("touchend",magOff);
+document.addEventListener("keydown",function(e){
+  if(e.key===" "){
+    e.preventDefault();
+    if(state!=="playing")startGame();else magOn(null);
+  }
+});
+document.addEventListener("keyup",function(e){if(e.key===" ")magOff();});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(state==="playing"){
+    timeLeft-=dt/1000;
+    if(timeLeft<=0){finish("时间到!你收集了满满一袋能量珠。");updateHud();}
+    var k=0.0004,i;
+    ball.vy+=0.00028*dt;ball.vx*=1-k*dt;ball.vy*=1-k*dt;
+    if(onMag){
+      var dx=pointer.x-ball.x,dy=pointer.y-ball.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d>1){
+        var f=0.0016*Math.max(0.25,Math.min(1.1,1.2-d/420));
+        ball.vx+=dx/d*f*dt;ball.vy+=dy/d*f*dt;
+      }
+    }
+    ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+    if(ball.x<BR){ball.x=BR;ball.vx=Math.abs(ball.vx)*0.7;}
+    if(ball.x>W-BR){ball.x=W-BR;ball.vx=-Math.abs(ball.vx)*0.7;}
+    if(ball.y<BR+40){ball.y=BR+40;ball.vy=Math.abs(ball.vy)*0.7;}
+    if(ball.y>H-BR){ball.y=H-BR;ball.vy=-Math.abs(ball.vy)*0.55;}
+    for(i=orbs.length-1;i>=0;i--){
+      var o=orbs[i],ddx=o.x-ball.x,ddy=o.y-ball.y;
+      if(ddx*ddx+ddy*ddy<(BR+o.r+2)*(BR+o.r+2)){
+        orbs.splice(i,1);score+=10;updateHud();
+        var np=farPos(130);
+        orbs.push({x:np.x,y:np.y,r:8});
+      }
+    }
+    spawnT+=dt;
+    if(spawnT>12000&&mines.length<8){
+      spawnT=0;
+      var mp=farPos(170);
+      mines.push({x:mp.x,y:mp.y,vx:rnd(-0.16,0.16),vy:rnd(-0.14,0.14),r:12});
+    }
+    for(i=0;i<mines.length;i++){
+      var m=mines[i];
+      m.x+=m.vx*dt;m.y+=m.vy*dt;
+      if(m.x<m.r+6){m.x=m.r+6;m.vx=Math.abs(m.vx);}
+      if(m.x>W-m.r-6){m.x=W-m.r-6;m.vx=-Math.abs(m.vx);}
+      if(m.y<m.r+48){m.y=m.r+48;m.vy=Math.abs(m.vy);}
+      if(m.y>H-m.r-6){m.y=H-m.r-6;m.vy=-Math.abs(m.vy);}
+      var mdx=m.x-ball.x,mdy=m.y-ball.y;
+      if(mdx*mdx+mdy*mdy<(BR+m.r-2)*(BR+m.r-2)){finish("碰到了尖刺地雷!磁力操作要更稳哦。");break;}
+    }
+  }
+  draw();
+}
+function draw(){
+  var i,j;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(34,211,238,0.06)";ctx.lineWidth=1;
+  for(i=0;i<W;i+=40){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,H);ctx.stroke();}
+  for(j=0;j<H;j+=40){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(W,j);ctx.stroke();}
+  ctx.fillStyle="rgba(34,211,238,0.08)";ctx.fillRect(0,0,W,40);
+  ctx.fillStyle="#8b90b0";ctx.font="12px system-ui";ctx.textAlign="center";
+  ctx.fillText(onMag?"电磁铁:开启":"电磁铁:关闭",W/2,25);
+  ctx.textAlign="left";
+  for(i=0;i<orbs.length;i++){
+    var o=orbs[i],rr=o.r+Math.sin(pulse*2+i)*1.5;
+    ctx.fillStyle="#4ade80";ctx.shadowColor="#4ade80";ctx.shadowBlur=14;
+    ctx.beginPath();ctx.arc(o.x,o.y,rr,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle="rgba(255,255,255,0.7)";
+    ctx.beginPath();ctx.arc(o.x-2,o.y-2,2.4,0,Math.PI*2);ctx.fill();
+  }
+  for(i=0;i<mines.length;i++){
+    var m=mines[i];
+    ctx.fillStyle="#f87171";
+    for(j=0;j<8;j++){
+      var an=j*Math.PI/4+pulse;
+      ctx.beginPath();
+      ctx.moveTo(m.x+Math.cos(an)*m.r*0.7,m.y+Math.sin(an)*m.r*0.7);
+      ctx.lineTo(m.x+Math.cos(an)*(m.r+6),m.y+Math.sin(an)*(m.r+6));
+      ctx.lineTo(m.x+Math.cos(an+0.4)*m.r*0.7,m.y+Math.sin(an+0.4)*m.r*0.7);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#7f1d1d";
+    ctx.beginPath();ctx.arc(m.x,m.y,m.r*0.45,0,Math.PI*2);ctx.fill();
+  }
+  if(onMag){
+    ctx.strokeStyle="rgba(34,211,238,0.5)";ctx.setLineDash([6,6]);ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(ball.x,ball.y);ctx.lineTo(pointer.x,pointer.y);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle="#22d3ee";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(pointer.x,pointer.y,10+Math.sin(pulse*4)*2,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.fillStyle="#cbd5e1";
+  ctx.shadowColor="#cbd5e1";ctx.shadowBlur=8;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#64748b";
+  ctx.beginPath();ctx.arc(ball.x+3,ball.y+3,4,0,Math.PI*2);ctx.fill();
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜像指令</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+#dpad{display:flex;gap:10px;margin-top:10px}
+#dpad button{flex:1;background:#11152a;border:1px solid #232849;border-radius:10px;color:#a78bfa;font-size:24px;padding:10px 0;cursor:pointer;font-family:inherit}
+#dpad button:active{background:#a78bfa;color:#1b1038}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#2e1065;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>镜像指令</h1>
+  <p class="hint">箭头指哪你别按哪 · 必须按【相反】方向!(方向键 / WASD / 下方按钮)</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="streak">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="280"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">镜像指令</h2>
+      <p id="ovDesc">屏幕会亮出指向随机方向的箭头,而你要做的是「镜像反转」:箭头朝上你就按下,朝左你就按右……用方向键 / WASD 或下方按钮作答。窗口越缩越短,按错或超时扣机会!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div id="dpad">
+    <button id="dUp">↑</button>
+    <button id="dDown">↓</button>
+    <button id="dLeft">←</button>
+    <button id="dRight">→</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=280,KEY="mg_s238",CX=240,CY=140;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elStreak=$("streak"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,streak=0,count=0,lives=3,signal=null,nextAt=0;
+var flashUntil=0,flashOk=false,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function windowMs(){return Math.max(620,1600-count*26);}
+function updateHud(){
+  elScore.textContent=score;
+  elStreak.textContent=streak;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(){
+  state="over";
+  signal=null;
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="镜像崩坏";
+  ovDesc.textContent="完成镜像反转 "+count+" 次";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function drawArrow(t){
+  var isGo=state==="playing"&&signal;
+  var col=flashUntil>t?(flashOk?"#4ade80":"#ef4444"):"#a78bfa";
+  ctx.save();
+  ctx.translate(CX,CY);
+  if(isGo)ctx.rotate(signal.dir*Math.PI/2);
+  ctx.fillStyle=col;
+  ctx.shadowColor=col;ctx.shadowBlur=isGo?22:0;
+  ctx.beginPath();
+  ctx.moveTo(0,-58);
+  ctx.lineTo(34,-18);
+  ctx.lineTo(14,-18);
+  ctx.lineTo(14,52);
+  ctx.lineTo(-14,52);
+  ctx.lineTo(-14,-18);
+  ctx.lineTo(-34,-18);
+  ctx.closePath();ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.restore();
+  ctx.strokeStyle="rgba(59,69,124,0.5)";
+  ctx.beginPath();ctx.arc(CX,CY,96,0,Math.PI*2);ctx.stroke();
+  if(isGo){
+    var frac=1-(t-signal.born)/windowMs();
+    if(frac<0)frac=0;
+    ctx.strokeStyle=frac>0.35?"#4ade80":"#f87171";
+    ctx.lineWidth=6;
+    ctx.beginPath();
+    ctx.arc(CX,CY,96,-Math.PI/2,-Math.PI/2+Math.PI*2*frac);
+    ctx.stroke();ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#8b90b0";
+  ctx.font="14px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText("按相反方向!",CX,H-16);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  lastT=t;
+  if(state==="playing"){
+    if(!signal&&t>=nextAt)signal={dir:(Math.random()*4)|0,born:t};
+    if(signal&&t-signal.born>windowMs()){
+      signal=null;
+      lives--;
+      streak=0;
+      flashUntil=t+250;flashOk=false;
+      nextAt=t+450;
+      updateHud();
+      if(lives<=0){endGame();return;}
+    }
+  }
+  ctx.clearRect(0,0,W,H);
+  drawArrow(t);
+}
+function input(d){
+  if(state!=="playing")return;
+  var t=performance.now();
+  if(!signal)return;
+  if(d===(signal.dir+2)%4){
+    count++;
+    streak++;
+    score+=10+Math.min(12,streak);
+    flashUntil=t+200;flashOk=true;
+    signal=null;
+    nextAt=t+220;
+  }else{
+    lives--;
+    streak=0;
+    flashUntil=t+300;flashOk=false;
+    signal=null;
+    nextAt=t+500;
+    if(lives<=0){endGame();return;}
+  }
+  updateHud();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=-1;
+  if(e.key==="ArrowUp"||e.key==="w"||e.key==="W")d=0;
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")d=1;
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S")d=2;
+  else if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")d=3;
+  if(d>=0){e.preventDefault();input(d);}
+});
+$("dUp").addEventListener("click",function(){input(0);});
+$("dDown").addEventListener("click",function(){input(2);});
+$("dLeft").addEventListener("click",function(){input(3);});
+$("dRight").addEventListener("click",function(){input(1);});
+function startGame(){
+  score=0;streak=0;count=0;lives=3;signal=null;
+  nextAt=performance.now()+600;
+  state="playing";
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

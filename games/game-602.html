@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符号侦探</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#60a5fa;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:14px}
+.hud b{color:#60a5fa;font-size:16px}
+.eq{text-align:center;font-size:44px;font-weight:800;letter-spacing:3px;margin:26px 0 30px;min-height:58px;color:#e8eaf6}
+.eq .blank{display:inline-block;min-width:54px;border-bottom:3px dashed #60a5fa;color:#60a5fa}
+.ops{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.ops button{background:#232949;color:#e8eaf6;border:2px solid transparent;border-radius:12px;padding:14px 0;font-size:26px;font-weight:800;cursor:pointer;font-family:inherit}
+.ops button:active{transform:scale(.94)}
+.ops button.right{background:#14351f;border-color:#4ade80;color:#4ade80}
+.ops button.wrong{background:#3a1620;border-color:#f87171;color:#f87171}
+.msg{text-align:center;font-size:14px;min-height:20px;color:#8b90b0;margin-bottom:4px}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0b1e33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>符号侦探</h1>
+  <p class="hint">算式缺了一个运算符 · 点选 + − × ÷ 补全等式 · 键盘可按 + − * / · 共 20 题</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/20 题</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="combo">0</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+  </div>
+  <div class="stage">
+    <div class="eq" id="eq">7 <span class="blank">?</span> 3 = 10</div>
+    <div class="ops" id="ops">
+      <button data-o="+">+</button>
+      <button data-o="-">−</button>
+      <button data-o="×">×</button>
+      <button data-o="÷">÷</button>
+    </div>
+    <div class="msg" id="msg">选出能让等式成立的唯一符号</div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">符号侦探</h2>
+      <p id="ovD">每道算式都恰好缺一个运算符,而且四个符号中只有一个能让等式成立。连对越多得分越高,答错扣一颗心,三颗心用完出局!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elScore=$("score"),elCombo=$("combo"),elLives=$("lives");
+var elEq=$("eq"),elMsg=$("msg"),opsBox=$("ops");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var TOTAL=20;
+var state,score,combo,lives,no,cur,lock;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function apply(a,op,b){
+  if(op==="+")return a+b;
+  if(op==="-")return a-b;
+  if(op==="×")return a*b;
+  return b!==0&&a%b===0?a/b:NaN;
+}
+function gen(){
+  var tries=0,a,b,c,op;
+  while(tries<300){
+    tries++;
+    a=rnd(2,12);b=rnd(2,9);
+    var ops=["+","-","×","÷"];
+    op=ops[rnd(0,3)];
+    if(op==="-"&&b>=a)continue;
+    if(op==="÷"&&(b===0||a%b!==0||a/b<1))continue;
+    c=apply(a,op,b);
+    if(isNaN(c)||c<0||c>144)continue;
+    var uniq=true,i,o2,v;
+    for(i=0;i<4;i++){
+      o2=ops[i];
+      if(o2===op)continue;
+      v=apply(a,o2,b);
+      if(!isNaN(v)&&v===c){uniq=false;break;}
+    }
+    if(uniq)break;
+  }
+  cur={a:a,b:b,c:c,op:op};
+  elEq.innerHTML=a+" <span class='blank'>?</span> "+b+" = "+c;
+}
+function updHud(){
+  elNo.textContent=no;
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function pick(op,btn){
+  if(state!=="playing"||lock)return;
+  if(lives<=0)return;
+  lock=true;
+  var btns=opsBox.getElementsByTagName("button");
+  var i;
+  if(op===cur.op){
+    btn.className="right";
+    score+=10+combo*2;combo++;
+    setMsg("漂亮!"+cur.a+" "+cur.op+" "+cur.b+" = "+cur.c,"good");
+    updHud();
+    no++;
+    setTimeout(nextQ,650);
+  }else{
+    btn.className="wrong";
+    combo=0;lives--;
+    setMsg("不对哦,再想想!","badc");
+    updHud();
+    setTimeout(function(){lock=false;},450);
+    if(lives<=0){setTimeout(gameOver,650);}
+  }
+}
+function nextQ(){
+  lock=false;
+  var btns=opsBox.getElementsByTagName("button");
+  var i;
+  for(i=0;i<btns.length;i++)btns[i].className="";
+  if(lives<=0)return;
+  if(no>TOTAL){gameOver(true);return;}
+  setMsg("选出能让等式成立的唯一符号","");
+  gen();updHud();
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"全部破解!":"侦探失败…";
+  ovD.textContent=win?"20 道等式全部补全,你是最强符号侦探!":"等式太难,三颗心已用完。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;combo=0;lives=3;no=1;lock=false;
+  ovS.style.display="none";
+  setMsg("选出能让等式成立的唯一符号","");
+  gen();updHud();
+  ov.classList.add("hide");
+}
+opsBox.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute("data-o"))pick(t.getAttribute("data-o"),t);
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  var m={"+":"+","-":"-","*":"×","/":"÷"};
+  var op=m[e.key];
+  if(op){
+    e.preventDefault();
+    var btns=opsBox.getElementsByTagName("button");
+    var i;
+    for(i=0;i<btns.length;i++){
+      if(btns[i].getAttribute("data-o")===op){pick(op,btns[i]);return;}
+    }
+  }else if(e.key==="Enter"||e.key===" "){e.preventDefault();}
+});
+updHud();
+})();
+</script>
+</body>
+</html>

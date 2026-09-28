@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>避红心 低分制胜</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:720px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:720px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+.row{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;min-height:62px}
+.card{width:38px;height:54px;border-radius:6px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.45);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:12px;font-weight:800}
+.card .s{font-size:18px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+.card.dim{opacity:.35;cursor:default}
+.card.lit{outline:2px solid #4cc9f0;cursor:pointer}
+#trick{display:flex;gap:14px;min-height:66px;align-items:center}
+.tslot{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:#9aa3c0}
+#msg{min-height:20px;font-size:14px;color:#ffd166;text-align:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4;white-space:pre-line}
+</style>
+</head>
+<body>
+<h1>避红心 · 低分制胜</h1>
+<p id="how">三人各 17 张（抽掉方块 2）。必须跟出首家花色，没有才能垫牌；每墩由首家花色最大者收走，吃到红心每张 +1 分、黑桃 Q +5 分。17 墩打完总分最低者赢，点亮框的牌出牌。</p>
+<div id="bar"><span>第 <b id="tk">1</b>/17 墩</span><span>你的罚分 <b id="s0">0</b></span><span>AI 甲 <b id="s1">0</b></span><span>AI 乙 <b id="s2">0</b></span></div>
+<div id="table">
+  <div class="lab">AI 甲 <span id="c1">17</span> 张</div>
+  <div class="row" id="row1"></div>
+  <div id="trick"></div>
+  <div class="lab">你的手牌</div>
+  <div class="row" id="row0"></div>
+  <div class="lab">AI 乙 <span id="c2">17</span> 张</div>
+  <div class="row" id="row2"></div>
+  <div id="msg"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+var hands=[[],[],[]],scores=[0,0,0],trick=[],leader=0,trickNo=1,phase='idle',timer=null;
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+2;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function cardHTML(c,cls){
+  if(!c)return '<div class="card back"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card '+cls+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function legalList(who){
+  var h=hands[who];
+  if(trick.length===0)return h.slice();
+  var led=trick[0].card.s;
+  var same=[];
+  for(var i=0;i<h.length;i++)if(h[i].s===led)same.push(h[i]);
+  return same.length?same:h.slice();
+}
+function isLegal(who,c){
+  var L=legalList(who);
+  for(var i=0;i<L.length;i++)if(L[i]===c)return true;
+  return false;
+}
+function render(){
+  $('tk').textContent=Math.min(trickNo,17);
+  $('s0').textContent=scores[0];$('s1').textContent=scores[1];$('s2').textContent=scores[2];
+  $('c1').textContent=hands[1].length;$('c2').textContent=hands[2].length;
+  for(var w=0;w<3;w++){
+    var el=$(w===0?'row0':(w===1?'row1':'row2'));
+    if(w===0){
+      var h=hands[0].slice().sort(function(a,b){return a.s===b.s?vi(a.r)-vi(b.r):(a.s<b.s?-1:1);});
+      hands[0]=h;
+      var html='';
+      for(var i=0;i<h.length;i++){
+        var c=h[i];
+        var ok=isLegal(0,c)&&phase==='play'&&turnIs(0);
+        var cls=(ok?'lit':(phase==='play'?'dim':''));
+        html+=cardHTML(c,cls).replace('<div class="card ','<div class="card ').replace('</div>','</div>');
+      }
+      el.innerHTML=html;
+      var nodes=el.children;
+      for(var k=0;k<nodes.length;k++)nodes[k].setAttribute('data-k',k);
+    }else{
+      var t='';for(var m=0;m<hands[w].length;m++)t+=cardHTML(null,'');
+      el.innerHTML=t;
+    }
+  }
+  var tr='';
+  for(var q=0;q<trick.length;q++){
+    var it=trick[q];
+    tr+='<div class="tslot">'+cardHTML(it.card,'')+'<span>'+(it.who===0?'你':(it.who===1?'甲':'乙'))+'</span></div>';
+  }
+  $('trick').innerHTML=tr;
+}
+function turnIs(w){return nextToPlay()===w;}
+function nextToPlay(){
+  if(trick.length===0)return leader;
+  return (leader+trick.length)%3;
+}
+function msg(s){$('msg').textContent=s;}
+function playCard(who,c){
+  var h=hands[who];
+  h.splice(h.indexOf(c),1);
+  trick.push({who:who,card:c});
+  render();
+  if(trick.length===3){timer=setTimeout(resolve,800);return;}
+  advance();
+}
+function advance(){
+  var nx=nextToPlay();
+  if(nx===0){phase='play';msg('轮到你出牌');render();}
+  else{phase='wait';render();timer=setTimeout(function(){
+    if(phase==='done')return;
+    var c=aiChoose(nx);
+    playCard(nx,c);
+  },750);}
+}
+function aiChoose(who){
+  var h=hands[who];
+  var led=trick.length?trick[0].card.s:null;
+  var legal=legalList(who);
+  var i,c;
+  if(led){
+    var follows=legal[0].s===led;
+    if(!follows){
+      var q=null;
+      for(i=0;i<h.length;i++)if(h[i].s==='♠'&&h[i].r==='Q'){q=h[i];break;}
+      if(q)return q;
+      var hh=null,hv=-1;
+      for(i=0;i<h.length;i++){c=h[i];if(c.s==='♥'&&vi(c.r)>hv){hv=vi(c.r);hh=c;}}
+      if(hh)return hh;
+      var big=h[0];
+      for(i=1;i<h.length;i++)if(vi(h[i].r)>vi(big.r))big=h[i];
+      return big;
+    }
+    var winV=-1;
+    for(i=0;i<trick.length;i++){var t=trick[i];if(t.card.s===led&&vi(t.card.r)>winV)winV=vi(t.card.r);}
+    var under=[];
+    for(i=0;i<legal.length;i++)if(vi(legal[i].r)<winV)under.push(legal[i]);
+    if(under.length){
+      var u=under[0];
+      for(i=1;i<under.length;i++)if(vi(under[i].r)>vi(u.r))u=under[i];
+      return u;
+    }
+  }else{
+    var safe=[];
+    for(i=0;i<legal.length;i++){c=legal[i];if(c.s!=='♥'&&!(c.s==='♠'&&c.r==='Q'))safe.push(c);}
+    if(safe.length)legal=safe;
+  }
+  var low=legal[0];
+  for(i=1;i<legal.length;i++)if(vi(legal[i].r)<vi(low.r))low=legal[i];
+  return low;
+}
+function resolve(){
+  var led=trick[0].card.s;
+  var best=trick[0],i;
+  for(i=1;i<3;i++)if(trick[i].card.s===led&&vi(trick[i].card.r)>vi(best.card.r))best=trick[i];
+  var pen=0;
+  for(i=0;i<3;i++){
+    var c=trick[i].card;
+    if(c.s==='♥')pen+=1;
+    if(c.s==='♠'&&c.r==='Q')pen+=5;
+  }
+  scores[best.who]+=pen;
+  msg((best.who===0?'你':(best.who===1?'AI 甲':'AI 乙'))+' 收下这墩'+(pen?('，罚分 +'+pen):'，无罚分'));
+  trick=[];leader=best.who;trickNo++;
+  render();
+  if(trickNo>17){end();return;}
+  timer=setTimeout(function(){advance();},900);
+}
+function end(){
+  phase='done';
+  var minS=Math.min(scores[0],scores[1],scores[2]);
+  var win=scores[0]===minS;
+  $('ovt').textContent=win?'胜利':'失败';
+  var rankLine='你 '+scores[0]+' 分，AI 甲 '+scores[1]+' 分，AI 乙 '+scores[2]+' 分';
+  $('ovi').textContent=win?('最低罚分制胜！'+rankLine):('红心太多啦。'+rankLine);
+  $('over').classList.remove('hide');
+}
+$('row0').addEventListener('click',function(e){
+  if(phase!=='play'||!turnIs(0))return;
+  var t=e.target;
+  while(t&&!t.classList.contains('card'))t=t.parentElement;
+  if(!t)return;
+  var k=parseInt(t.getAttribute('data-k'),10);
+  if(isNaN(k))return;
+  var c=hands[0][k];
+  if(!isLegal(0,c)){msg('必须跟出 '+trick[0].card.s+' 花色');return;}
+  phase='wait';
+  playCard(0,c);
+});
+$('again').onclick=newGame;
+function newGame(){
+  if(timer){clearTimeout(timer);timer=null;}
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++){
+    if(SUITS[i]==='♦'&&RANKS[j]==='2')continue;
+    d.push({s:SUITS[i],r:RANKS[j]});
+  }
+  shuffle(d);
+  hands=[d.slice(0,17),d.slice(17,34),d.slice(34,51)];
+  scores=[0,0,0];trick=[];leader=0;trickNo=1;
+  $('over').classList.add('hide');
+  msg('你先出牌，任意花色开局');render();
+  advance();
+}
+newGame();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黄金面包房</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#slots{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.slot{position:relative;height:78px;background:#1b2138;border:1px solid #2e3554;border-radius:10px;cursor:pointer;overflow:hidden;text-align:center;user-select:none}
+.slot .zone{position:absolute;left:0;width:100%;height:15%;background:rgba(74,222,128,.35);bottom:0}
+.slot .fill{position:absolute;left:0;bottom:0;width:100%;height:0;background:rgba(251,191,36,.55)}
+.slot .lb{position:relative;z-index:1;font-size:11.5px;padding-top:6px;color:#c7cbe8}
+.slot.empty .lb{color:#8b90b0}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>黄金面包房</h1>
+  <p class="hint">点空格放面团,进度条走进绿色窗口时点击出炉=完美 x 高价 · 烤过头就焦 · 累计赚 <b>3000</b> 金币</p>
+  <div class="hud">
+    <span>金币 <b id="hMoney">25</b></span>
+    <span>烤炉 <b id="hSlots">4</b> 格</span>
+    <span>完美 <b id="hPerfect">0</b> 个</span>
+    <span>面团成本 <b>2</b> 金</span>
+  </div>
+  <div id="msg"></div>
+  <div id="slots"></div>
+  <div class="acts">
+    <button class="btn gold" id="btnDough">放入面团 (2金)</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">黄金面包房</h2>
+    <p id="ovDesc">每格烤炉独立计时:进度条进入绿色窗口(85%-100%)时点击出炉,金黄酥脆卖 15 金;提早取出是半熟只值 6 金;超过 100% 开始掉价,烧到 115% 直接烤焦血本无归。扩炉、提速、雇出炉助手,赚满 3000 金!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">生火开张</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elSlots=$("hSlots"),elPerfect=$("hPerfect"),elMsg=$("msg");
+var slotsEl=$("slots"),btnDough=$("btnDough"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=3000;
+var DOUGH=2;
+var ups=[
+ {nm:"扩建烤炉",ds:"烤炉 +1 格",base:300,mult:2.8,max:3},
+ {nm:"秘制发酵剂",ds:"烘烤速度 +25%",base:150,mult:2.2,max:4},
+ {nm:"出炉助手",ds:"自动取出完美面包",base:250,mult:2.5,max:2}
+];
+var money,slotN,perfect,state,msgT,upLv,hT,slots=[],slotEls=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function slotCount(){return 4+upLv[0];}
+function bakeSpd(){return 30*(1+0.25*upLv[1]);}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.2;}
+function buildUI(){
+  slotsEl.innerHTML="";slotEls=[];
+  var i;
+  for(i=0;i<7;i++){
+    var s=document.createElement("div");
+    s.className="slot empty";
+    s.innerHTML='<div class="zone"></div><div class="fill"></div><div class="lb">空格</div>';
+    (function(idx){s.addEventListener("click",function(){tapSlot(idx);});})(i);
+    slotsEl.appendChild(s);slotEls.push(s);
+  }
+  shopEl.innerHTML="";rows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+var rows=[];
+function insertDough(i){
+  if(money<DOUGH){say("面团钱不够!");return false;}
+  money-=DOUGH;
+  slots[i]={p:0};
+  return true;
+}
+function takeOut(i){
+  var p=slots[i].p,v;
+  if(p<85){v=6;say("半熟面包,凑合卖 "+v+" 金");}
+  else if(p<=100){v=15;perfect++;say("完美出炉!+"+v+" 金!");}
+  else{v=4;say("有点过火了,只值 "+v+" 金…");}
+  money+=v;slots[i]=null;
+}
+function tapSlot(i){
+  if(state!=="play"||i>=slotN())return;
+  if(!slots[i]){insertDough(i);}
+  else takeOut(i);
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+btnDough.addEventListener("click",function(){
+  if(state!=="play")return;
+  var n=slotN(),i;
+  for(i=0;i<n;i++){
+    if(!slots[i]){if(insertDough(i))return;}
+  }
+  say("烤炉满了,先取面包!");
+});
+function startGame(){
+  money=25;perfect=0;upLv=[0,0,0];hT=1.8;msgT=0;
+  slots=[];
+  var i;
+  for(i=0;i<7;i++)slots.push(null);
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var n=slotN(),i;
+  elMoney.textContent=fmt(money);elSlots.textContent=n;elPerfect.textContent=perfect;
+  for(i=0;i<7;i++){
+    var el=slotEls[i],fill=el.querySelector(".fill"),lb=el.querySelector(".lb");
+    if(i>=n){el.className="slot empty";el.style.opacity="0.25";lb.textContent="未建";fill.style.height="0";continue;}
+    el.style.opacity="1";
+    if(!slots[i]){el.className="slot empty";lb.textContent="空格 · 点击放面团";fill.style.height="0";}
+    else{
+      var p=slots[i].p;
+      el.className="slot";
+      fill.style.height=Math.min(100,p)+"%";
+      fill.style.background=p>=85&&p<=100?"rgba(74,222,128,.7)":"rgba(251,191,36,.55)";
+      lb.textContent=p<100?("烘烤 "+Math.floor(p)+"%"):"小心烤焦!";
+    }
+  }
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,i;
+  for(i=0;i<slotN();i++){
+    if(slots[i]){
+      slots[i].p+=bakeSpd()*ds;
+      if(slots[i].p>=115){slots[i]=null;say("一炉面包烤焦了,血本无归…");}
+    }
+  }
+  if(upLv[2]>0){
+    hT-=ds;
+    if(hT<=0){
+      hT=1.8-0.6*upLv[2];
+      for(i=0;i<slotN();i++){
+        if(slots[i]&&slots[i].p>=85&&slots[i].p<=100){money+=15;perfect++;slots[i]=null;break;}
+      }
+    }
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(money>=WIN){
+    state="over";
+    showOv("面包街金字招牌!","出炉的面包金黄喷香,队伍从街口排到街尾!","累计赚得 "+fmt(money)+" 金 · 完美面包 "+perfect+" 个");
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+money=25;perfect=0;upLv=[0,0,0];hT=1.8;state="menu";msgT=0;slotN=0;
+slots=[];
+var _i;
+for(_i=0;_i<7;_i++)slots.push(null);
+buildUI();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

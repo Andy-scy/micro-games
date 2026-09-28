@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>特调记忆师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#c792ea;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#c792ea;font-size:16px}
+.stage{position:relative;background:#1a1430;border:2px solid #33265c;border-radius:12px;padding:18px 12px;text-align:center}
+.status{font-size:16px;font-weight:700;color:#e8eaf6;min-height:26px;margin-bottom:14px}
+.bottles{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.bot{width:78px;height:108px;border-radius:14px;border:3px solid transparent;background:#241c44;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;user-select:none}
+.bot .bic{font-size:30px}
+.bot .bnm{font-size:12px;color:#8b90b0}
+.bot.lit{border-color:#fff;box-shadow:0 0 22px var(--glow);background:var(--bc);transform:scale(1.06)}
+.keys{text-align:center;color:#555b80;font-size:12px;margin-top:10px}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#c792ea}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#c792ea;color:#2a0e3a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>特调记忆师</h1>
+  <p class="hint">吧台会依次亮起一份调饮配方,<b style="color:#c792ea">记住顺序后原样点回来</b><br>回合越多配方越长,配错 3 次就砸招牌!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>回合 <b id="round">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="status" id="status">点击开始,看配方!</div>
+    <div class="bottles" id="bottles"></div>
+    <div class="keys">也可以按键盘 1~5 对应瓶子</div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">特调记忆师</h2>
+      <p id="ovDesc">每一回合吧台会按顺序闪亮一串原料,亮完后由你原样复现。复现成功回合加一、配方加长;复现失败会重新演示同一份配方,错 3 次游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var BOT=[["🍓","草莓","#ff5f7a"],["🍋","柠檬","#ffd23f"],["🌿","薄荷","#4ade80"],["🫐","蓝莓","#7aa2ff"],["🍯","蜜糖","#ffab4d"]];
+var elScore=$("score"),elRound=$("round"),elLife=$("life"),elBest=$("best");
+var statusEl=$("status"),bottlesEl=$("bottles"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s806");
+var state="menu",seq,ip,phase,score,round,lives,gen;
+var tos=[],botEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildBottles(){
+  for(var i=0;i<BOT.length;i++){
+    var d=document.createElement("div");
+    d.className="bot";
+    d.setAttribute("data-i",String(i));
+    d.style.setProperty("--bc",BOT[i][2]);
+    d.style.setProperty("--glow",BOT[i][2]);
+    d.innerHTML='<div class="bic">'+BOT[i][0]+'</div><div class="bnm">'+BOT[i][1]+"</div>";
+    bottlesEl.appendChild(d);
+    botEls.push(d);
+  }
+}
+function clearTos(){for(var i=0;i<tos.length;i++)clearTimeout(tos[i]);tos=[];}
+function reset(){
+  clearTos();gen++;
+  seq=[];ip=0;phase="idle";score=0;round=0;lives=3;
+  statusEl.textContent="点击开始,看配方!";
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elRound.textContent=round;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function flash(i){
+  var b=botEls[i];
+  b.classList.add("lit");
+  tos.push(setTimeout(function(){b.classList.remove("lit");},420));
+}
+function playSeq(){
+  phase="show";ip=0;
+  statusEl.textContent="看好了!记住顺序…";
+  var i=0;
+  var step=function(){
+    if(state!=="playing"||phase!=="show")return;
+    if(i>=seq.length){
+      statusEl.textContent="该你了!照顺序点击配方";
+      phase="input";
+      return;
+    }
+    flash(seq[i]);i++;
+    tos.push(setTimeout(step,700));
+  };
+  tos.push(setTimeout(step,600));
+}
+function nextRound(){
+  round++;
+  var len=Math.min(9,2+round);
+  seq=[];
+  for(var i=0;i<len;i++)seq.push((Math.random()*BOT.length)|0);
+  updateHud();
+  playSeq();
+}
+function clickBot(i){
+  if(state!=="playing"||phase!=="input")return;
+  flash(i);
+  if(seq[ip]===i){
+    ip++;
+    if(ip>=seq.length){
+      var pts=seq.length*10;
+      score+=pts;phase="wait";
+      statusEl.textContent="调制成功!+"+pts;
+      tos.push(setTimeout(function(){if(state==="playing")nextRound();},950));
+      updateHud();
+    }
+  }else{
+    lives--;phase="wait";updateHud();
+    if(lives<=0){gameOver("连错三杯,客人把招牌砸了!");return;}
+    statusEl.textContent="配错了!再看一遍示范…";
+    tos.push(setTimeout(function(){if(state==="playing")playSeq();},950));
+  }
+}
+function gameOver(reason){
+  state="over";phase="idle";
+  if(score>best){best=score;saveBest("mg_s806",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=reason;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){
+  reset();state="playing";ov.classList.add("hide");
+  nextRound();
+}
+bottlesEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==bottlesEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==bottlesEl)clickBot(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var map={"1":0,"2":1,"3":2,"4":3,"5":4};
+  if(map[e.key]!==undefined&&state==="playing"){clickBot(map[e.key]);e.preventDefault();}
+  else if((e.key===" "||e.code==="Space")&&state!=="playing"){e.preventDefault();startGame();}
+});
+btnGo.addEventListener("click",startGame);
+buildBottles();
+reset();
+requestAnimationFrame(function(){});
+})();
+</script>
+</body>
+</html>

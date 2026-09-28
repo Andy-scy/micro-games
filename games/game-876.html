@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>移动巢穴</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>移动巢穴</h1>
+<p class="tip">方向键 / WASD 或下方按钮跳跃。最北岸没有固定的家——三只巢穴在河面上不停左右漂!你必须预判提前量,跳进正在移动的巢穴才算到家,跳偏就会落水。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>轮次 <b id="sR">1</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=14,LOOP=540,OFF=60;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sR=document.getElementById("sR");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var CAR_COLORS=["#e05656","#e8a33d","#3fa66a","#4f8ef7","#b06ee0","#d05fa2","#4bb8c9"];
+var lanes,nests,frog,score,lives,round,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function makeLane(r){
+  var dir=r%2===1?1:-1,speed=rnd(46,92)*(1+round*0.05),cars=[],x0=rnd(0,LOOP),i;
+  for(i=0;i<3;i++)cars.push({x:(x0+i*185+rnd(-30,30)+LOOP)%LOOP,w:rnd(46,76),c:CAR_COLORS[(r+i)%CAR_COLORS.length]});
+  return{r:r,dir:dir,speed:speed,cars:cars};
+}
+function buildLanes(){
+  lanes=[];var r;
+  for(r=1;r<=4;r++)lanes.push(makeLane(r));
+  for(r=6;r<=9;r++)lanes.push(makeLane(r));
+}
+function buildNests(){
+  nests=[];var n=round>=4?2:3,i;
+  for(i=0;i<n;i++){
+    nests.push({x:60+i*(400/n)+rnd(-30,30),v:rnd(42,80)+round*7});
+    if(Math.random()<0.5)nests[i].v=-nests[i].v;
+  }
+}
+function resetFrog(){frog={c:5,r:13,x:5.5*CELL,y:13*CELL};moving=false;}
+function updHud(){sS.textContent=score;sL.textContent=lives;sR.textContent=round;}
+function reset(){score=0;lives=3;round=1;deadT=0;buildLanes();buildNests();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",""+msg+" 最终得分 "+score+",坚持到第 "+round+" 轮。");}
+}
+function arrive(){
+  var i,hit=false;
+  if(frog.r===0){
+    for(i=0;i<nests.length;i++){
+      if(Math.abs(nests[i].x-frog.x)<26)hit=true;
+    }
+    if(hit){
+      score+=200+round*30;round++;
+      buildNests();resetFrog();updHud();
+    }else{
+      die("扑通!跳进了空荡荡的河里。");
+    }
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));
+  if(c===frog.c&&r===frog.r)return;
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  var i,j,ln;
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  for(i=0;i<nests.length;i++){
+    nests[i].x+=nests[i].v*dt;
+    if(nests[i].x<26){nests[i].x=26;nests[i].v=-nests[i].v;}
+    if(nests[i].x>394){nests[i].x=394;nests[i].v=-nests[i].v;}
+  }
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j];
+      car.x=(car.x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+      var cx=car.x-OFF,cy=ln.r*CELL;
+      if(Math.abs(cx+car.w/2-frog.x)<car.w/2+11&&frog.y+34>cy+4&&frog.y+8<cy+36){die("被车撞了!");return;}
+    }
+  }
+  if(moving){
+    mt+=dt/0.12;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }
+}
+function drawNest(x){
+  ctx.fillStyle="#7c5a33";rr(x-24,6,48,30,6);ctx.fill();
+  ctx.fillStyle="#4f9e44";
+  ctx.beginPath();ctx.ellipse(x-10,12,9,7,0,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(x+10,12,9,7,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1c2a19";ctx.beginPath();ctx.ellipse(x,22,10,7,0,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var r,i,j,ln,w;
+  for(r=0;r<ROWS;r++){
+    if(r===0||r===5||r>=10){
+      ctx.fillStyle=r===0?"#1d3d5c":(r===5?"#31435c":"#1e3b26");
+      ctx.fillRect(0,r*CELL,420,CELL);
+    }else{
+      ctx.fillStyle="#232741";ctx.fillRect(0,r*CELL,420,CELL);
+    }
+  }
+  ctx.strokeStyle="rgba(120,180,230,.35)";ctx.lineWidth=2;
+  for(i=0;i<5;i++){
+    ctx.beginPath();
+    w=((gt*30+i*95)%480)-30;
+    ctx.moveTo(w,8);ctx.quadraticCurveTo(w+16,14,w+32,8);
+    ctx.stroke();
+  }
+  ctx.fillStyle="rgba(20,24,48,.5)";ctx.fillRect(0,6,420,34);
+  for(i=0;i<nests.length;i++)drawNest(nests[i].x);
+  ctx.strokeStyle="#3a4470";ctx.lineWidth=2;ctx.setLineDash([14,18]);
+  for(i=0;i<lanes.length;i++){ln=lanes[i];ctx.beginPath();ctx.moveTo(0,ln.r*CELL+20);ctx.lineTo(420,ln.r*CELL+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];var cy=ln.r*CELL;
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j],cx=car.x-OFF;
+      if(cx>420||cx+car.w<0)continue;
+      ctx.fillStyle=car.c;rr(cx+2,cy+6,car.w-4,28,7);ctx.fill();
+      ctx.fillStyle="rgba(20,24,48,.55)";rr(cx+car.w/2-7,cy+11,14,8,3);ctx.fill();
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,200,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,250);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("巢穴会一直漂动,起跳前留好提前量",210,280);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("移动巢穴","这次的巢穴不安分!三只巢穴在北岸河面上来回漂动,必须看准漂移速度、留好提前量,一跳落入巢穴中心才算到家;第 4 轮起巢穴减少到两只并越漂越快。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

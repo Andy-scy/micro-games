@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旋转急停</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>旋转急停</h1>
+  <p class="hint">指针越转越快 · 按空格 / 点击让它停进金色弧区</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连中 <b id="streak">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="420" height="420"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">旋转急停</h2>
+      <p id="ovDesc">指针沿圆环高速旋转,金色弧区每次随机换位且越来越窄。在指针穿过弧区的一瞬按空格或点击屏幕急停!命中弧区得分,连中越多加分越高;脱靶扣一次机会,3 次机会用完结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=420,H=420,KEY="mg_s239",CX=210,CY=210,RR=150;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elStreak=$("streak"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,streak=0,hits=0,lives=3;
+var angle=0,dir=1,omega=150,spinning=true,arcCenter=90,arcHalf=34,nextAt=0;
+var flashUntil=0,flashOk=false,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rad(d){return d*Math.PI/180;}
+function angDist(a,b){
+  var d=Math.abs(a-b)%360;
+  return d>180?360-d:d;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elStreak.textContent=streak;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="指针失控";
+  ovDesc.textContent="成功急停 "+hits+" 次";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function nextRound(t){
+  dir=-dir;
+  omega=Math.min(420,150+hits*16);
+  arcHalf=Math.max(13,34-hits*1.1);
+  arcCenter=Math.random()*360;
+  spinning=true;
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  ctx.strokeStyle="rgba(59,69,124,0.6)";
+  for(i=0;i<12;i++){
+    var a=rad(i*30);
+    ctx.beginPath();
+    ctx.moveTo(CX+Math.cos(a)*(RR-10),CY+Math.sin(a)*(RR-10));
+    ctx.lineTo(CX+Math.cos(a)*(RR+10),CY+Math.sin(a)*(RR+10));
+    ctx.stroke();
+  }
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle=flashOk?"rgba(74,222,128,0.15)":"rgba(239,68,68,0.18)";
+    ctx.fillRect(0,0,W,H);
+  }
+  if(state!=="playing"){
+    ctx.fillStyle="#3b457c";
+    ctx.font="16px system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」",CX,CY);
+    return;
+  }
+  ctx.strokeStyle="#fbbf24";
+  ctx.lineWidth=26;
+  ctx.beginPath();
+  ctx.arc(CX,CY,RR,rad(arcCenter-arcHalf),rad(arcCenter+arcHalf));
+  ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.strokeStyle="#232849";
+  ctx.beginPath();ctx.arc(CX,CY,RR+18,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.arc(CX,CY,RR-18,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle="#e8eaf6";
+  ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.moveTo(CX-Math.cos(rad(angle))*30,CY-Math.sin(rad(angle))*30);
+  ctx.lineTo(CX+Math.cos(rad(angle))*(RR+16),CY+Math.sin(rad(angle))*(RR+16));
+  ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle="#f87171";
+  ctx.beginPath();ctx.arc(CX,CY,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#c7cbe8";
+  ctx.font="13px system-ui,sans-serif";
+  ctx.fillText("速度 "+omega+"°/s",CX,H-18);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state==="playing"){
+    if(spinning)angle=(angle+dir*omega*dt/1000+360)%360;
+    else if(t>=nextAt)nextRound(t);
+  }
+  draw(t);
+}
+function press(){
+  if(state==="menu"||state==="over"){startGame();return;}
+  if(!spinning)return;
+  var t=performance.now();
+  spinning=false;
+  nextAt=t+500;
+  if(angDist(angle,arcCenter)<=arcHalf){
+    hits++;
+    streak++;
+    score+=50+streak*10;
+    flashUntil=t+250;flashOk=true;
+  }else{
+    lives--;
+    streak=0;
+    flashUntil=t+300;flashOk=false;
+    if(lives<=0){endGame();return;}
+  }
+  updateHud();
+}
+cv.addEventListener("mousedown",press);
+cv.addEventListener("touchstart",function(e){e.preventDefault();press();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();press();}
+});
+function startGame(){
+  score=0;streak=0;hits=0;lives=3;
+  angle=0;dir=1;omega=150;spinning=true;
+  arcCenter=Math.random()*360;arcHalf=34;
+  state="playing";
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>吊车摆塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#4dabf7}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#4dabf7;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#4dabf7;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>吊车摆塔</h1>
+<p class="hint">吊臂吊着方块来回摆动 · 点击画面或按空格松绳投放,摆到塔顶正上方再放手</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">吊车摆塔</h2><p id="ovM">塔吊上的方块像钟摆一样晃动,松绳后会沿切线方向飞出再坠落。<br>方块重心必须落在塔顶上,否则整块倾覆;摆得越正,得分越高!</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=560,BH=22;
+var PX=210,PY=70,LN=128,AMP=1.0,OM=2.0;
+var tower,ph,bl,fl,fx,pops,score,state='ready',cam=0;
+var WS=[84,104,124];
+
+function layerC(i){return 'hsl('+((i*16+205)%360)+',55%,58%)';}
+function topB(){return tower[tower.length-1];}
+function reset(){tower=[{x:210,w:150}];ph=0;bl=null;fl=null;fx=[];pops=[];score=0;cam=0;newSwing();}
+function newSwing(){bl={w:WS[Math.floor(Math.random()*WS.length)]};}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#4dabf7',life:1});}
+function release(){
+  if(state!=='play'||!bl)return;
+  var ang=AMP*Math.sin(ph),thd=AMP*OM*Math.cos(ph);
+  fl={x:PX+Math.sin(ang)*LN,y:PY+Math.cos(ang)*LN+16,w:bl.w,vx:LN*Math.cos(ang)*thd,vy:-LN*Math.sin(ang)*thd,passed:false};
+  bl=null;
+}
+function landBlock(f,t,topY){
+  var err=Math.abs(f.x-t.x),pts;
+  if(err<9){pts=25;pop('完美吊装 +25',t.x,topY-16,'#7ee0a3');}
+  else{pts=10;pop('+10',f.x,topY-16,'#9aa3c0');}
+  score+=pts;
+  tower.push({x:f.x,w:f.w});
+  fl=null;newSwing();
+}
+function finish(){
+  state='over';
+  var h=tower.length-1;
+  window.setTimeout(function(){
+    ovT.textContent='吊装失败!';
+    ovS.textContent='最终高度 '+h+' 层 · 得分 '+score;
+    ovM.textContent='方块倾覆了,把握好摆动的节奏再试';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },700);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  ph+=OM*dt;
+  var i;
+  if(fl){
+    fl.vy+=1500*dt;fl.x+=fl.vx*dt;fl.y+=fl.vy*dt;
+    if(fl.x<16)fl.x=16;if(fl.x>W-16)fl.x=W-16;
+    var t=topB(),topY=GROUND-tower.length*BH;
+    if(!fl.passed&&fl.vy>0&&fl.y+11>=topY){
+      var err=Math.abs(fl.x-t.x);
+      if(err<=t.w/2+6){fl.y=topY-11;landBlock(fl,t,topY);}
+      else if(err<(t.w+fl.w)/2){
+        fx.push({x:fl.x,y:topY-11,w:fl.w,vx:fl.x>t.x?140:-140,vy:-90,rot:fl.x>t.x?1.4:-1.4,vr:3,life:1.4,c:layerC(tower.length)});
+        fl=null;finish();
+      }else{fl.passed=true;}
+    }
+    if(fl&&fl.y-11>GROUND){
+      fx.push({x:fl.x,y:GROUND-10,w:fl.w,vx:fl.vx*0.25,vy:-130,rot:1.1,vr:2.5,life:1.2,c:'#8a93c9'});
+      fl=null;finish();
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+  cam=Math.max(0,300-(GROUND-tower.length*BH));
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#101733');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var gy=GROUND-cam;
+  ctx.fillStyle='#1d2447';ctx.fillRect(0,gy,W,H-gy);
+  ctx.fillStyle='#2e3660';ctx.fillRect(0,gy,W,5);
+  var ang=AMP*Math.sin(ph),hx=PX+Math.sin(ang)*LN,hy=PY+Math.cos(ang)*LN;
+  ctx.strokeStyle='#39406e';ctx.lineWidth=8;
+  ctx.beginPath();ctx.moveTo(30,PY);ctx.lineTo(W-30,PY);ctx.stroke();
+  ctx.fillStyle='#2a3158';ctx.fillRect(14,PY-16,20,32);ctx.fillRect(W-34,PY-16,20,32);
+  ctx.strokeStyle='#5b679e';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(PX,PY);ctx.lineTo(hx,hy);ctx.stroke();
+  ctx.fillStyle='#c3cae6';ctx.beginPath();ctx.arc(hx,hy,4,0,6.283);ctx.fill();
+  var i,b,y;
+  var t=topB(),tY=GROUND-tower.length*BH-cam;
+  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=2;rr(t.x-t.w/2,tY+2,t.w,BH-4,5);ctx.stroke();
+  for(i=0;i<tower.length;i++){
+    b=tower[i];y=GROUND-(tower.length-i)*BH-cam;
+    if(y<-BH||y>H)continue;
+    ctx.fillStyle=layerC(i);rr(b.x-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(b.x-b.w/2+4,y+5,Math.max(0,b.w-8),4);
+  }
+  if(bl&&state==='play'){
+    var bx=PX+Math.sin(ang)*LN,by=PY+Math.cos(ang)*LN+16;
+    ctx.fillStyle='#ffa94d';rr(bx-bl.w/2,by-11,bl.w,BH-4,5);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=2;rr(bx-bl.w/2,by-11,bl.w,BH-4,5);ctx.stroke();
+  }
+  if(fl){
+    ctx.fillStyle='#ffa94d';rr(fl.x-fl.w/2,fl.y-11,fl.w,BH-4,5);ctx.fill();
+  }
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cam);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  ctx.textAlign='right';ctx.fillText('高度 '+(tower.length-1)+' 层',W-14,32);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cam);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+function tap(){release();}
+if(window.PointerEvent){cv.addEventListener('pointerdown',function(e){e.preventDefault();tap();});}
+else{cv.addEventListener('mousedown',function(){tap();});cv.addEventListener('touchstart',function(e){e.preventDefault();tap();});}
+window.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowDown'||e.key===' '){e.preventDefault();tap();}});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

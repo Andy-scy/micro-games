@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>加油站大亨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none;cursor:pointer}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>加油站大亨</h1>
+  <p class="tips">经营挑战:点击排队车辆、再点空闲油枪派工;小车给钱快、卡车给钱多。耐心耗尽的客人会砸招牌,90 秒营业额冲 500!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">营业额</div><div class="big" id="sm">¥0</div></div>
+    <div class="stat"><div class="mut">口碑</div><div class="big" id="sr">★★★★★</div></div>
+    <div class="stat"><div class="mut">营业时间</div><div class="big" id="st">90 s</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="460" height="540"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">加油站大亨</h2><p id="ovp">玩法说明:<br>· 先<b>点击排队的车</b>选中,再<b>点击空闲油枪</b>派工<br>· 加满自动驶离付钱:轿车 ¥28 / 越野 ¥42 / 卡车 ¥62<br>· 等候不满 14 秒的客人额外打赏 ¥12<br>· 车顶耐心条见底的客人会愤然离开,<b>口碑 -1</b><br>· 口碑归零 = 倒闭;90 秒营业额 ≥ ¥500 获胜</p><button class="btn" id="obtn">开业</button></div></div>
+<script>
+'use strict';
+var W=460,H=540;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var money,rep,timeLeft,running,arriveT,sel;
+var queue=[],cars=[],pumps=[],pops=[];
+function $i(id){return document.getElementById(id)}
+var TYPES=[
+  {name:'轿车',pay:28,fuel:2.4,c:'#4da3ff',w:34,h:26},
+  {name:'越野',pay:42,fuel:3.4,c:'#51d88a',w:38,h:30},
+  {name:'卡车',pay:62,fuel:4.6,c:'#ff9f43',w:46,h:34}
+];
+function reset(){
+  money=0;rep=5;timeLeft=90;arriveT=0.6;sel=null;
+  queue.length=0;cars.length=0;pops.length=0;
+  pumps.length=0;
+  var i;
+  for(i=0;i<4;i++)pumps.push({x:100+i*90,y:290,busy:false,prog:0});
+  upd();
+}
+function upd(){
+  $i('sm').textContent='¥'+money;
+  var r='';
+  var i;
+  for(i=0;i<rep;i++)r+='★';
+  $i('sr').textContent=r||'破产';
+  $i('st').textContent=Math.ceil(timeLeft)+' s';
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再开一局';
+  $i('overlay').classList.remove('hide');
+}
+function addPop(x,y,txt,c){pops.push({x:x,y:y,txt:txt,c:c,life:1.3});}
+function arrive(){
+  if(queue.length>=6)return;
+  var t=Math.floor(Math.random()*3);
+  var car={type:t,x:-40,y:64,state:'queue',waitT:0,patience:18,fuelT:0,pump:-1,wp:[]};
+  queue.push(car);
+  cars.push(car);
+}
+function moveTo(c,tx,ty,sp,dt){
+  var dx=tx-c.x,dy=ty-c.y;
+  var d=Math.hypot(dx,dy);
+  if(d<sp*dt){c.x=tx;c.y=ty;return true;}
+  c.x+=dx/d*sp*dt;c.y+=dy/d*sp*dt;
+  return false;
+}
+function update(dt){
+  timeLeft-=dt;
+  if(timeLeft<=0){
+    if(money>=500)endRun('生意兴隆!','营业额 <b>¥'+money+'</b>(目标 ¥500)<br>口碑 '+rep+' 星<br>连锁店店长就是你!');
+    else endRun('营收平平','营业额 ¥'+money+'(目标 ¥500)<br>口碑 '+rep+' 星<br>手速再快一点,派工别犹豫!');
+    return;
+  }
+  arriveT-=dt;
+  if(arriveT<=0){arrive();arriveT=2.4+Math.random()*1.8;}
+  var i,c,p;
+  for(i=0;i<queue.length;i++){
+    c=queue[i];
+    c.waitT+=dt;c.patience-=dt;
+    moveTo(c,44+i*46,64,110,dt);
+    if(c.patience<=0){
+      queue.splice(i,1);i--;
+      rep--;
+      c.state='angry';
+      c.wp=[[c.x,20],[-60,20]];
+      addPop(c.x,c.y,'差评!','#ff5c5c');
+      if(rep<=0){
+        endRun('口碑崩盘','营业额 ¥'+money+'<br>客人排队等到暴走……下次多备两条油枪!');
+        return;
+      }
+    }
+  }
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    if(c.state==='angry'){
+      if(moveTo(c,c.wp[0][0],c.wp[0][1],150,dt))cars.splice(i,1);
+      continue;
+    }
+    if(c.state==='toPump'){
+      if(moveTo(c,c.wp[0][0],c.wp[0][1],130,dt)){
+        c.wp.shift();
+        if(c.wp.length===0){c.state='fuel';c.fuelT=TYPES[c.type].fuel;}
+      }
+    }else if(c.state==='fuel'){
+      c.fuelT-=dt;
+      pumps[c.pump].prog=1-c.fuelT/TYPES[c.type].fuel;
+      if(c.fuelT<=0){
+        p=pumps[c.pump];
+        p.busy=false;p.prog=0;
+        c.pump=-1;
+        var pay=TYPES[c.type].pay+(c.waitT<14?12:0);
+        money+=pay;
+        addPop(c.x,c.y-30,'+'+pay+(c.waitT<14?' 打赏':''),'#ffd166');
+        c.state='leave';
+        c.wp=[[c.x,468],[W+60,468]];
+        upd();
+      }
+    }else if(c.state==='leave'){
+      if(moveTo(c,c.wp[0][0],c.wp[0][1],160,dt)){
+        c.wp.shift();
+        if(c.wp.length===0)cars.splice(i,1);
+      }
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){
+    pops[i].y-=26*dt;pops[i].life-=dt;
+    if(pops[i].life<=0)pops.splice(i,1);
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(c){
+  var t=TYPES[c.type];
+  ctx.fillStyle=t.c;
+  rr(c.x-t.w/2,c.y-t.h/2,t.w,t.h,6);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.35)';
+  ctx.fillRect(c.x-t.w/2+5,c.y-t.h/2+4,t.w*0.4,t.h-8);
+  if(c.state==='queue'){
+    ctx.fillStyle='#232a48';
+    rr(c.x-16,c.y-t.h/2-12,32,6,3);ctx.fill();
+    ctx.fillStyle=c.patience>6?'#51d88a':(c.patience>3?'#ffd166':'#ff5c5c');
+    rr(c.x-16,c.y-t.h/2-12,32*Math.max(0,c.patience)/18,6,3);ctx.fill();
+  }
+  if(c===sel){
+    ctx.strokeStyle='#4cc9f0';ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(c.x,c.y,t.w*0.8,0,6.2832);ctx.stroke();
+  }
+}
+function draw(){
+  ctx.fillStyle='#161b31';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#20264a';
+  rr(20,190,W-40,300,10);ctx.fill();
+  ctx.fillStyle='#4cc9f0';
+  rr(20,150,W-40,16,6);ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.25)';
+  for(var s2=0;s2<5;s2++)ctx.fillRect(50+s2*92,166,10,320);
+  ctx.fillStyle='#232a48';ctx.fillRect(0,40,W,48);
+  ctx.font='12px system-ui';ctx.textAlign='left';
+  ctx.fillStyle='#9aa3c0';
+  ctx.fillText('→ 排队区(点车再点油枪)',26,32);
+  ctx.fillStyle='rgba(156,214,255,.8)';
+  ctx.font='12px system-ui';ctx.textAlign='right';
+  ctx.fillText('出口 →',W-26,462);
+  var i,p;
+  for(i=0;i<pumps.length;i++){
+    p=pumps[i];
+    ctx.fillStyle=p.busy?'#ffd166':'#8b93b8';
+    rr(p.x-12,p.y-20,24,40,5);ctx.fill();
+    ctx.fillStyle='#10142a';
+    ctx.fillRect(p.x-8,p.y-14,16,12);
+    ctx.fillStyle='#5c6690';
+    ctx.fillRect(p.x-16,p.y+18,32,4);
+    if(p.busy){
+      ctx.strokeStyle='#ffd166';ctx.lineWidth=4;
+      ctx.beginPath();ctx.arc(p.x,p.y,26,-1.57,-1.57+6.2832*p.prog);ctx.stroke();
+    }
+    ctx.fillStyle='#9aa3c0';ctx.font='11px system-ui';ctx.textAlign='center';
+    ctx.fillText('油枪 '+(i+1),p.x,p.y+38);
+  }
+  for(i=0;i<cars.length;i++){
+    if(cars[i].state!=='queue')drawCar(cars[i]);
+  }
+  for(i=0;i<cars.length;i++){
+    if(cars[i].state==='queue')drawCar(cars[i]);
+  }
+  ctx.font='bold 14px system-ui';ctx.textAlign='center';
+  for(i=0;i<pops.length;i++){
+    ctx.globalAlpha=Math.min(1,pops[i].life);
+    ctx.fillStyle=pops[i].c;
+    ctx.fillText(pops[i].txt,pops[i].x,pops[i].y);
+    ctx.globalAlpha=1;
+  }
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var rect=cv.getBoundingClientRect();
+  var x=(e.clientX-rect.left)*W/rect.width;
+  var y=(e.clientY-rect.top)*H/rect.height;
+  var i,best=null,bd=30;
+  for(i=0;i<queue.length;i++){
+    var d=Math.hypot(queue[i].x-x,queue[i].y-y);
+    if(d<bd){bd=d;best=queue[i];}
+  }
+  if(best){sel=best;return;}
+  if(sel){
+    for(i=0;i<pumps.length;i++){
+      if(!pumps[i].busy&&Math.hypot(pumps[i].x-x,pumps[i].y-y)<40){
+        pumps[i].busy=true;
+        sel.pump=i;
+        sel.state='toPump';
+        sel.wp=[[pumps[i].x,222],[pumps[i].x,352]];
+        var qi=queue.indexOf(sel);
+        if(qi>=0)queue.splice(qi,1);
+        sel=null;
+        return;
+      }
+    }
+  }
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

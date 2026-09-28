@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日鱼汛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>每日鱼汛</h1>
+<p class="tip">今天什么鱼多、鱼王藏在哪,全看日期——同一天鱼情完全固定!点左侧浅滩或右侧深潭(或按 1/2)下竿,12 竿内把潜伏的鱼王钓上来!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>鱼竿 <b id="s2">12</b></span><span>鱼王 <b id="s3">未捕获</b></span></div>
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov"><h2 id="ot">每日鱼汛</h2><p id="op">老渔民说:每天的鱼情都不一样,<br>但同一天,全世界的湖都是同一份鱼汛。<br>看预报、选水深、盯上「今日活跃」的双倍鱼,<br>再把传说中的鱼王请上岸!</p><button id="ob">看今日鱼汛</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eB=document.getElementById('s2'),eK=document.getElementById('s3');
+var W=cv.width,H=cv.height;
+var sp=[['鲫鱼',30],['鲤鱼',60],['草鱼',80],['鲶鱼',50],['鳜鱼',100],['鳟鱼',90],['银龙鱼',150],['河豚',70]];
+function mulberry(a){
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    var t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+var d=new Date();
+var dateStr=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日';
+var rng=mulberry(d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate());
+var order=[0,1,2,3,4,5,6,7],i,j,tmp;
+for(i=7;i>0;i--){
+  j=Math.floor(rng()*(i+1));
+  tmp=order[i];order[i]=order[j];order[j]=tmp;
+}
+var shallow=[],deep=[];
+for(i=0;i<8;i++){
+  if(i<4)shallow.push({idx:order[i],w:[0.38,0.30,0.22,0.10][i]});
+  else deep.push({idx:order[i],w:[0.34,0.28,0.22,0.16][i-4]});
+}
+var actives=[];
+for(i=0;i<3;i++)actives.push(order[(i*2+1)%8]);
+while(actives.length<3){
+  var cand=order[Math.floor(rng()*8)];
+  if(actives.indexOf(cand)<0)actives.push(cand);
+}
+var kingIdx=order[Math.floor(rng()*8)];
+var kingDepth=rng()<0.5?0:1;
+var activeNames=[];
+for(i=0;i<3;i++)activeNames.push(sp[actives[i]][0]);
+var state='ready',score=0,casts=12,msg='';
+var zoneSel=0,phase='idle',pt=0,tWait=0,card=null,won=false,kingCaught=false;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function rollZone(z){
+  var pool=z===0?shallow:deep,r=Math.random(),c=0;
+  for(i=0;i<pool.length;i++){c+=pool[i].w;if(r<=c)return pool[i].idx}
+  return pool[pool.length-1].idx;
+}
+function cast(z){
+  if(state!=='play')return;
+  if(phase!=='idle'||casts<=0)return;
+  zoneSel=z;casts--;phase='cast';pt=0;msg='';card=null;
+}
+function resolve(){
+  if(zoneSel===kingDepth&&Math.random()<0.09){
+    kingCaught=true;won=true;
+    score+=300;
+    card={name:'鱼王·'+sp[kingIdx][0],v:300,gold:true};
+    msg='鱼王出水!!+300 分';
+  }else{
+    var idx=rollZone(zoneSel),v=sp[idx][1],hot=actives.indexOf(idx)>=0;
+    if(hot)v*=2;
+    score+=v;
+    card={name:sp[idx][0],v:v,gold:false,hot:hot};
+    msg='钓到'+sp[idx][0]+(hot?'(今日活跃 ×2)!+':'!+')+v+' 分';
+  }
+  phase='show';pt=0;
+}
+function finish(win){
+  state='over';ob.textContent='再钓一天';
+  ot.textContent=win?'鱼王在手!':'鱼王未现…';
+  op.innerHTML='得分 <b style="color:#ffd75e">'+score+'</b>'+(kingCaught?'<br>今日鱼王已被你降服!':'<br>今日鱼王潜伏在'+(kingDepth===0?'浅滩':'深潭')+',12 竿内没能请它出水。<br>明天鱼汛又会焕然一新!') ;
+  ov.classList.remove('hide');
+}
+function start(){
+  score=0;casts=12;msg='';zoneSel=0;phase='idle';pt=0;card=null;won=false;kingCaught=false;
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  pt+=dt;
+  if(phase==='cast'){
+    if(pt>=0.4){phase='wait';pt=0;tWait=rnd(0.9,1.6)}
+  }else if(phase==='wait'){
+    if(pt>=tWait)resolve();
+  }else if(phase==='show'){
+    if(pt>=1.4){
+      card=null;phase='idle';
+      if(won){finish(true);return}
+      if(casts<=0){finish(false);return}
+    }
+  }
+}
+function drawFish(x,y,c){
+  X.fillStyle=c;
+  X.beginPath();X.ellipse(x,y,13,6,0,0,7);X.fill();
+  X.beginPath();X.moveTo(x-10,y);X.lineTo(x-20,y-5);X.lineTo(x-20,y+5);X.closePath();X.fill();
+}
+function draw(){
+  X.fillStyle='#0c1428';X.fillRect(0,0,W,132);
+  X.fillStyle='#7fd4ff';X.font='bold 15px system-ui';X.textAlign='left';
+  X.fillText('今日鱼汛 · '+dateStr,16,28);
+  X.fillStyle='#ffd75e';X.font='13px system-ui';
+  X.fillText('今日活跃(×2 分):'+activeNames.join('、'),16,54);
+  X.fillStyle='#c9a2e8';X.font='13px system-ui';
+  X.fillText('传闻:今日鱼王潜伏在'+(kingDepth===0?'浅滩':'深潭')+'…',16,78);
+  X.fillStyle='#9aa3b5';X.font='12px system-ui';
+  X.fillText('按 1 下浅滩 / 按 2 下深潭 · 空格重复上一处',16,106);
+  var g2=X.createLinearGradient(0,132,0,580);g2.addColorStop(0,'#1a4472');g2.addColorStop(1,'#081428');
+  X.fillStyle=g2;X.fillRect(0,132,W,448);
+  var zones=[['浅滩','#1c4a58'],['深潭','#12365e']];
+  var t=Date.now()*0.001;
+  for(i=0;i<2;i++){
+    var x0=i===0?0:W/2;
+    X.fillStyle=zones[i][1];
+    X.fillRect(x0,132,W/2,448);
+    X.strokeStyle=i===zoneSel?'rgba(255,215,94,.8)':'rgba(127,212,255,.25)';
+    X.lineWidth=i===zoneSel?2.5:1.5;
+    X.strokeRect(x0+4,136,W/2-8,440);
+    X.fillStyle='rgba(220,232,245,.85)';X.font='bold 14px system-ui';X.textAlign='left';
+    X.fillText(zones[i][0],x0+14,158);
+    for(j=0;j<3;j++){
+      var fx=x0+40+((j*73+i*50)%150)+Math.sin(t*(0.9+j*0.2)+j*2)*13;
+      var fy=230+j*90+Math.cos(t+j)*6;
+      drawFish(fx,fy,'rgba(10,26,44,.6)');
+    }
+  }
+  X.strokeStyle='rgba(127,212,255,.4)';X.lineWidth=2;
+  X.beginPath();X.moveTo(W/2,132);X.lineTo(W/2,580);X.stroke();
+  if(phase==='cast'||phase==='wait'){
+    var cx=zoneSel===0?W/4:(W*3/4);
+    X.strokeStyle='rgba(230,238,246,.75)';X.lineWidth=1.5;
+    X.beginPath();X.moveTo(cx,132);X.lineTo(cx,phase==='cast'?200:260);X.stroke();
+    X.fillStyle='#ff5f5f';X.beginPath();X.arc(cx,phase==='cast'?202:262,5,0,7);X.fill();
+  }
+  if(card){
+    var px=zoneSel===0?W/4:(W*3/4);
+    X.fillStyle='rgba(8,12,24,.9)';X.strokeStyle=card.gold?'#ffd75e':'#7fd4ff';X.lineWidth=2;
+    X.fillRect(px-100,330,200,110);X.strokeRect(px-100,330,200,110);
+    drawFish(px,362,card.gold?'#ffd75e':'#9fb4c9');
+    X.fillStyle='#ffffff';X.font='bold 16px system-ui';X.textAlign='center';
+    X.fillText(card.name,px,398);
+    X.fillStyle=card.gold?'#ffd75e':'#7fd4ff';X.font='bold 14px system-ui';
+    X.fillText((card.hot?'今日活跃 ':'')+'+'+card.v+' 分',px,422);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 15px system-ui';X.textAlign='center';X.fillText(msg,W/2,612);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('点击水域下竿',W/2,632);
+}
+cv.addEventListener('pointerdown',function(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width),my=(e.clientY-r.top)*(H/r.height);
+  if(state!=='play')return;
+  if(my>=132&&my<=580)cast(mx<W/2?0:1);
+});
+document.addEventListener('keydown',function(e){
+  if(state!=='play'){
+    if(e.key===' '||e.key==='Enter'){e.preventDefault();start()}
+    return;
+  }
+  if(e.key==='1')cast(0);
+  else if(e.key==='2')cast(1);
+  else if(e.key===' '){e.preventDefault();cast(zoneSel)}
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eB.textContent=casts;
+  eK.textContent=kingCaught?'已捕获':'未捕获';
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

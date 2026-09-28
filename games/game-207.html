@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>算术地鼠</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#101a2c;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#082136;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>算术地鼠</h1>
+  <p class="hint">地鼠举着答案牌 · 点正确答案得分,点错扣分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>答对 <b id="solved">0</b> 题</span>
+    <span>时间 <b id="time">60</b> 秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">算术地鼠</h2>
+      <p id="ovDesc">顶部会出一道算术题,三只地鼠各举一块答案牌。点击写着正确答案的地鼠 +20 分,点错 -5 分;超时未答会自动换题。越到后面题目越难!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elSolved=$("solved"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var GAME_LEN=60;
+var best=loadBest("mg_s207");
+var state="menu",score=0,solved=0,timeLeft=GAME_LEN;
+var holes=[],fracs=[],dips=[],answers=[],qText="",qAns=0,qTimer=0,resolveT=0,elapsed=0;
+var floats=[],rings=[];
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initHoles(){
+  holes=[{x:100,y:330},{x:240,y:330},{x:380,y:330}];
+  fracs=[0,0,0];dips=[0,0,0];
+}
+initHoles();
+
+function rnd(n){return (Math.random()*n)|0;}
+function newQuestion(){
+  var a,b,op;
+  if(elapsed<20){a=1+rnd(9);b=1+rnd(9);op="+";qAns=a+b;}
+  else if(elapsed<40){a=5+rnd(14);b=1+rnd(a-1);op="-";qAns=a-b;}
+  else{a=2+rnd(8);b=2+rnd(8);op="×";qAns=a*b;}
+  qText=a+" "+op+" "+b+" = ?";
+  var vals=[qAns];
+  while(vals.length<3){
+    var w=qAns+((Math.random()<0.5?-1:1)*(1+rnd(6)));
+    if(w<0)w=qAns+1+rnd(6);
+    var dup=false,i;
+    for(i=0;i<vals.length;i++){if(vals[i]===w)dup=true;}
+    if(!dup)vals.push(w);
+  }
+  for(var k=vals.length-1;k>0;k--){
+    var j=rnd(k+1),tmp=vals[k];vals[k]=vals[j];vals[j]=tmp;
+  }
+  answers=vals;
+  qTimer=6000;
+  updateHud();
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function reset(){
+  floats=[];rings=[];
+  score=0;solved=0;timeLeft=GAME_LEN;elapsed=0;resolveT=0;
+  fracs=[0,0,0];dips=[0,0,0];
+  newQuestion();
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s207",best);}
+  ovTitle.textContent="时间到!";
+  ovDesc.textContent="共答对 "+solved+" 道题";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elSolved.textContent=solved;
+  elTime.textContent=Math.ceil(timeLeft);
+  elBest.textContent=best;
+}
+
+function update(dt){
+  timeLeft-=dt/1000;
+  elapsed+=dt/1000;
+  if(timeLeft<=0){timeLeft=0;endGame();return;}
+  var i;
+  for(i=0;i<3;i++){
+    var target=resolveT>0?0:1;
+    var sp=dt/180;
+    if(fracs[i]<target)fracs[i]=Math.min(target,fracs[i]+sp);
+    else if(fracs[i]>target)fracs[i]=Math.max(target,fracs[i]-sp);
+    if(dips[i]>0)dips[i]-=dt;
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>800)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>300)rings.splice(i,1);}
+  if(resolveT>0){
+    resolveT-=dt;
+    if(resolveT<=0)newQuestion();
+    return;
+  }
+  qTimer-=dt;
+  if(qTimer<=0){
+    addFloat(W/2,140,"超时换题","#8b90b0");
+    newQuestion();
+  }
+}
+
+function whack(p){
+  if(state!=="playing"||resolveT>0)return;
+  var i;
+  for(i=0;i<3;i++){
+    var h=holes[i];
+    var dx=p.x-h.x,dy=p.y-(h.y-40);
+    if(dx*dx+dy*dy<66*66){
+      if(answers[i]===qAns){
+        score+=20;solved++;
+        addFloat(h.x,h.y-96,"答对了 +20","#4ade80");
+        addRing(h.x,h.y-40,62,"rgba(74,222,128,0.85)");
+        resolveT=550;
+      }else{
+        score=Math.max(0,score-5);
+        addFloat(h.x,h.y-96,"错了 -5","#f87171");
+        addRing(h.x,h.y-40,44,"rgba(248,113,113,0.8)");
+        dips[i]=280;
+        var w=qAns+((Math.random()<0.5?-1:1)*(1+rnd(6)));
+        if(w<0)w=qAns+1+rnd(6);
+        if(w===answers[0]||w===answers[1]||w===answers[2])w=qAns+3+rnd(4);
+        answers[i]=w;
+      }
+      updateHud();
+      return;
+    }
+  }
+}
+
+function drawMoleAt(i){
+  var h=holes[i],frac=fracs[i];
+  if(frac<=0.02)return;
+  var bh=84,base=h.y+10,cy=base-bh*frac;
+  var dip=dips[i]>0?Math.sin(dips[i]/280*Math.PI)*6:0;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-76,h.y-190,152,202);ctx.clip();
+  ctx.translate(dip,0);
+  ctx.fillStyle="#7c5cb0";
+  ctx.beginPath();ctx.ellipse(h.x,cy,36,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a1408";
+  ctx.beginPath();ctx.arc(h.x-12,cy-6,3.8,0,Math.PI*2);ctx.arc(h.x+12,cy-6,3.8,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+5,6,4.4,0,0,Math.PI*2);ctx.fill();
+  var sy=cy-58;
+  ctx.fillStyle="#e8eaf6";
+  ctx.strokeStyle="#94a3b8";ctx.lineWidth=3;
+  ctx.beginPath();
+  var rx=h.x-34,ry=sy-20,rw=68,rh=40;
+  ctx.moveTo(rx+8,ry);ctx.lineTo(rx+rw-8,ry);
+  ctx.arcTo(rx+rw,ry,rx+rw,ry+rh,8);ctx.arcTo(rx+rw,ry+rh,rx,ry+rh,8);
+  ctx.arcTo(rx,ry+rh,rx,ry,8);ctx.arcTo(rx,ry,rx+rw,ry,8);
+  ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.fillStyle="#0f1220";
+  ctx.font="bold 26px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText(String(answers[i]),h.x,sy+1);
+  ctx.restore();
+}
+function drawHoleBack(h){
+  ctx.fillStyle="#0a0d14";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,56,20,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#2c4460";ctx.lineWidth=4;ctx.stroke();
+}
+function drawHoleFront(h){
+  ctx.fillStyle="#0a0d14";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,56,20,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#152238");g.addColorStop(1,"#0b1220");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<3;i++)drawHoleBack(holes[i]);
+  for(i=0;i<3;i++)drawMoleAt(i);
+  for(i=0;i<3;i++)drawHoleFront(holes[i]);
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/300;
+    ctx.strokeStyle=r.c;ctx.lineWidth=3*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.4+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/800;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 19px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-34*fk);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="rgba(9,14,28,0.9)";
+  ctx.strokeStyle="#38bdf8";ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(60,44);ctx.lineTo(420,44);
+  ctx.arcTo(452,44,452,120,14);ctx.arcTo(452,120,28,120,14);
+  ctx.arcTo(28,120,28,44,14);ctx.arcTo(28,44,452,44,14);
+  ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.font="bold 40px sans-serif";
+  ctx.fillStyle="#e8eaf6";
+  ctx.fillText(qText,W/2,84);
+  ctx.font="bold 13px sans-serif";
+  ctx.fillStyle="#38bdf8";
+  ctx.fillText("点正确答案的地鼠 · 剩 "+Math.max(0,Math.ceil(qTimer/1000))+" 秒换题",W/2,110);
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

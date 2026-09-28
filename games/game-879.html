@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>探照灯夜渡</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>探照灯夜渡</h1>
+<p class="tip">方向键 / WASD 或下方按钮潜行跳跃。夜里没有车,却有三座探照灯塔来回扫射:被光柱照到警戒条就会暴涨,攒满即被抓!木箱能挡光,贴着阴影走,摸到顶部码头的小船过关。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>轮次 <b id="sR">1</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=14;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sR=document.getElementById("sR");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var grid,towers,frog,score,lives,round,meter,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function cellAt(px,py){
+  var c=Math.floor(px/CELL),r=Math.floor(py/CELL);
+  if(c<0||c>=COLS||r<0||r>=ROWS)return null;
+  return{c:c,r:r};
+}
+function buildCrates(){
+  grid=[];var r,c,i,n=12+Math.min(6,round);
+  for(r=0;r<ROWS;r++){grid.push([]);for(c=0;c<COLS;c++)grid[r].push(false);}
+  for(i=0;i<n;i++){
+    r=1+Math.floor(rnd(0,11));c=Math.floor(rnd(0,COLS));
+    if(r===13&&c>=4&&c<=6)continue;
+    if(frog&&frog.r===r&&frog.c===c)continue;
+    grid[r][c]=true;
+  }
+}
+function buildTowers(){
+  towers=[
+    {cx:395,cy:15,base:2.35,amp:0.9,spd:0.55,ph:0,range:330,spread:0.46},
+    {cx:15,cy:265,base:0,amp:1.05,spd:0.42,ph:2.2,range:335,spread:0.42},
+    {cx:395,cy:415,base:3.14,amp:0.75,spd:0.48,ph:4.1,range:300,spread:0.5}
+  ];
+  var i;
+  for(i=0;i<towers.length;i++){
+    towers[i].spd*=1+(round-1)*0.14;
+    towers[i].amp=Math.min(1.35,towers[i].amp+(round-1)*0.07);
+  }
+}
+function beamAngle(t){return t.base+Math.sin(gt*t.spd+t.ph)*t.amp;}
+function normAng(a){
+  while(a>Math.PI)a-=Math.PI*2;
+  while(a<-Math.PI)a+=Math.PI*2;
+  return a;
+}
+function litBy(t,c,r){
+  var px=(c+0.5)*CELL,py=(r+0.5)*CELL,dx=px-t.cx,dy=py-t.cy;
+  var dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist>t.range)return false;
+  if(Math.abs(normAng(Math.atan2(dy,dx)-beamAngle(t)))>t.spread/2)return false;
+  var s,px2,py2,cl;
+  for(s=1;s<=5;s++){
+    px2=t.cx+dx*s/6;py2=t.cy+dy*s/6;
+    cl=cellAt(px2,py2);
+    if(cl&&grid[cl.r][cl.c]&&!(cl.c===c&&cl.r===r))return false;
+  }
+  return true;
+}
+function frogLit(){
+  var i;
+  if(frog.r===0)return false;
+  for(i=0;i<towers.length;i++)if(litBy(towers[i],frog.c,frog.r))return true;
+  return false;
+}
+function resetFrog(){frog={c:5,r:13,x:5.5*CELL,y:13*CELL};moving=false;}
+function updHud(){sS.textContent=score;sL.textContent=lives;sR.textContent=round;}
+function reset(){score=0;lives=3;round=1;meter=0;deadT=0;frog=null;buildTowers();buildCrates();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.8;moving=false;lives--;meter=0;updHud();
+  if(lives<=0){state="over";show("游戏结束",""+msg+" 最终得分 "+score+",坚持到第 "+round+" 轮。");}
+}
+function arrive(){
+  if(frog.r===0){
+    score+=200+round*30;round++;
+    buildTowers();buildCrates();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));
+  if(grid[r][c])return;
+  if(c===frog.c&&r===frog.r)return;
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  if(frogLit())meter+=dt*(0.85+round*0.07);
+  else meter-=dt*0.55;
+  if(meter<0)meter=0;
+  if(meter>=1){meter=1;die("被探照灯罩住,哨兵把你拎走了!");return;}
+  if(moving){
+    mt+=dt/0.13;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }
+}
+function draw(){
+  var r,c,i,t,a;
+  ctx.fillStyle="#12101c";ctx.fillRect(0,0,420,560);
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if((r+c)%2===0){ctx.fillStyle="rgba(255,255,255,.015)";ctx.fillRect(c*CELL,r*CELL,CELL,CELL);}
+  }
+  ctx.fillStyle="#243043";ctx.fillRect(0,0,420,CELL);
+  ctx.fillStyle="#e8eaf6";ctx.font="11px system-ui";ctx.textAlign="center";
+  ctx.fillText("码头边缘 · 登上小船",210,24);
+  ctx.fillStyle="#4f8ef7";rr(180,6,60,30,8);ctx.fill();
+  ctx.fillStyle="#132";rr(190,12,40,16,6);ctx.fill();
+  for(i=0;i<towers.length;i++){
+    t=towers[i];a=beamAngle(t);
+    ctx.fillStyle="rgba(255,232,150,.13)";
+    ctx.beginPath();ctx.moveTo(t.cx,t.cy);
+    ctx.arc(t.cx,t.cy,t.range,a-t.spread/2,a+t.spread/2);
+    ctx.closePath();ctx.fill();
+    for(r=1;r<ROWS;r++)for(c=0;c<COLS;c++){
+      if(litBy(t,c,r)){ctx.fillStyle="rgba(255,232,150,.16)";ctx.fillRect(c*CELL,r*CELL,CELL,CELL);}
+    }
+  }
+  for(r=1;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(grid[r][c]){
+      ctx.fillStyle="#4a3d28";rr(c*CELL+3,r*CELL+3,CELL-6,CELL-6,5);ctx.fill();
+      ctx.strokeStyle="#2e2416";ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(c*CELL+5,r*CELL+9);ctx.lineTo(c*CELL+CELL-5,r*CELL+9);
+      ctx.moveTo(c*CELL+5,r*CELL+CELL-9);ctx.lineTo(c*CELL+CELL-5,r*CELL+CELL-9);ctx.stroke();
+    }
+  }
+  for(i=0;i<towers.length;i++){
+    t=towers[i];
+    ctx.fillStyle="#333a52";ctx.beginPath();ctx.arc(t.cx,t.cy,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#ffe896";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(t.cx,t.cy);
+    ctx.lineTo(t.cx+Math.cos(beamAngle(t))*18,t.cy+Math.sin(beamAngle(t))*18);ctx.stroke();
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="rgba(7,9,22,.75)";rr(110,540,200,16,8);ctx.fill();
+  ctx.fillStyle=meter>0.6?"#ff5252":(meter>0.3?"#ffd668":"#37d67a");
+  rr(112,542,196*meter,12,6);ctx.fill();
+  ctx.fillStyle="#aab2dd";ctx.font="10px system-ui";ctx.textAlign="left";
+  ctx.fillText("警戒",80,552);
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,200,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,250);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("木箱可以挡光 · 警戒条攒满即被抓",210,280);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("探照灯夜渡","夜渡封锁的货运码头!三座探照灯塔永远在扫射,光柱扫到你身上警戒条就会快速上涨,攒满一圈立刻失败;躲进木箱背后可以完全挡光。小心规划路线,登上顶部码头的小船。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

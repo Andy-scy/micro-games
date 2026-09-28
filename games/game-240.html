@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>泡影破灭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#67e8f9;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#67e8f9;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#67e8f9;color:#083344;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>泡影破灭</h1>
+  <p class="hint">泡泡冒出后不断缩小 · 消失前点破它,越小分越高!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连破 <b id="streak">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">泡影破灭</h2>
+      <p id="ovDesc">泡泡会不断冒出并持续缩小,在它彻底消失前点破得分——泡泡越小,单次得分越高!让任何泡泡自己溜走会扣一次机会;点空会断连破并扣 5 分。手要快,眼要准!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,KEY="mg_s240",R0=36;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elStreak=$("streak"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,streak=0,lives=3,bubbles=[],rings=[],pops=[];
+var spawnAt=0,startAt=0,flashUntil=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elScore.textContent=score;
+  elStreak.textContent=streak;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="泡影皆空";
+  ovDesc.textContent="太多的泡泡自己溜走了!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.15)";
+    ctx.fillRect(0,0,W,H);
+  }
+  var i;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    ctx.fillStyle="rgba(103,232,249,0.08)";
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#67e8f9";
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+    ctx.strokeStyle="rgba(224,242,254,0.8)";
+    ctx.beginPath();
+    ctx.arc(b.x-b.r*0.25,b.y-b.r*0.25,b.r*0.5,Math.PI*1.05,Math.PI*1.55);
+    ctx.stroke();
+  }
+  for(i=0;i<rings.length;i++){
+    var g=rings[i];
+    ctx.strokeStyle="rgba(103,232,249,"+Math.max(0,g.life)+")";
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(g.x,g.y,g.r,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#fbbf24";
+  ctx.font="bold 15px system-ui,sans-serif";
+  ctx.textAlign="center";
+  for(i=0;i<pops.length;i++){
+    var p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillText(p.txt,p.x,p.y);
+  }
+  ctx.globalAlpha=1;
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  var dts=dt/1000,i;
+  if(state==="playing"){
+    var sec=(t-startAt)/1000;
+    var maxB=Math.min(5,2+Math.floor(sec/15));
+    var v=Math.min(40,13+sec*0.55);
+    if(t>=spawnAt&&bubbles.length<maxB){
+      bubbles.push({x:50+Math.random()*(W-100),y:50+Math.random()*(H-100),r:R0});
+      spawnAt=t+Math.max(380,720-sec*11);
+    }
+    for(i=bubbles.length-1;i>=0;i--){
+      bubbles[i].r-=v*dts;
+      if(bubbles[i].r<=4){
+        bubbles.splice(i,1);
+        lives--;
+        streak=0;
+        flashUntil=t+300;
+        updateHud();
+        if(lives<=0){endGame();return;}
+      }
+    }
+  }
+  for(i=rings.length-1;i>=0;i--){
+    rings[i].r+=140*dts;
+    rings[i].life-=dts*2.6;
+    if(rings[i].life<=0)rings.splice(i,1);
+  }
+  for(i=pops.length-1;i>=0;i--){
+    pops[i].y-=36*dts;
+    pops[i].life-=dts*1.7;
+    if(pops[i].life<=0)pops.splice(i,1);
+  }
+  draw(t);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function onTap(e){
+  if(state!=="playing")return;
+  var p=pos(e),i,hit=-1,bd=1e9;
+  for(i=0;i<bubbles.length;i++){
+    var d=Math.hypot(p.x-bubbles[i].x,p.y-bubbles[i].y);
+    if(d<bubbles[i].r+6&&d<bd){bd=d;hit=i;}
+  }
+  if(hit>=0){
+    var b=bubbles[hit];
+    var pts=8+Math.round((R0-b.r)*1.4);
+    score+=pts;
+    streak++;
+    rings.push({x:b.x,y:b.y,r:b.r,life:1});
+    pops.push({x:b.x,y:b.y,txt:"+"+pts,life:1});
+    bubbles.splice(hit,1);
+  }else{
+    streak=0;
+    score-=5;
+    if(score<0)score=0;
+    pops.push({x:p.x,y:p.y,txt:"空点 -5",life:1});
+  }
+  updateHud();
+}
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onTap(e);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+function startGame(){
+  score=0;streak=0;lives=3;bubbles=[];rings=[];pops=[];
+  state="playing";
+  startAt=performance.now();
+  spawnAt=startAt+400;
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

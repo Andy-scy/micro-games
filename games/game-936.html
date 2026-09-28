@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双层战场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin-bottom:8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#60a5fa;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#60a5fa;color:#0b2545;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双层战场</h1>
+  <p class="hint">← → 或 A/D 同时压住上下两层的左/右翼 · 空格蓄力发射</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>残球 <b id="ball">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="400" height="620"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双层战场</h2>
+      <p id="ovDesc">一台球机、两层战场!上层翼板守住小球并得分,两翼之间的豁口会让球坠向下层;下层是真正的漏斗区,掉下去就丢球。左右键会同时压住两层同侧的翼板,一心二用吧!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var elScore=$("score"),elBall=$("ball"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var W=400,H=620,G=1000,MAXS=1250,TAU=6.2832;
+var best=0;
+try{best=parseInt(localStorage.getItem("mg936")||"0",10)||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg936",String(best));}catch(e){}}
+var state="menu",score=0,balls=3,lastT=0,shake=0;
+var b=null,segs=[],circs=[],flUL=null,flUR=null,flLL=null,flLR=null;
+var charging=false,charge=0;
+var pops=[];
+function S(x1,y1,x2,y2,o){var s={x1:x1,y1:y1,x2:x2,y2:y2,e:0.5,pad:2,kick:0,ow:0,cd:0};if(o)for(var k in o)s[k]=o[k];segs.push(s);return s;}
+function C(x,y,r,o){var c={x:x,y:y,r:r,e:0.9,kick:0,cd:0,val:0};if(o)for(var k in o)c[k]=o[k];circs.push(c);return c;}
+function mkFL(px,py,mir,len){len=len||58;return{px:px,py:py,len:len,rest:mir?Math.PI-0.55:0.55,up:mir?Math.PI+0.62:-0.62,ang:mir?Math.PI-0.55:0.55,om:0,spd:16,pressed:false};}
+function reset(){
+  segs=[];circs=[];pops=[];
+  S(10,44,326,44);
+  S(326,44,390,112);
+  S(350,138,390,112,{ow:1,e:0.4});
+  S(10,44,10,588);
+  S(390,112,390,588);
+  S(358,138,358,588);
+  S(358,588,390,588,{e:0});
+  S(62,236,94,310);
+  S(338,236,306,310);
+  S(62,452,94,536);
+  S(338,452,306,536);
+  S(86,446,134,524,{e:1.05,kick:300,col:"#f472b6"});
+  S(314,446,266,524,{e:1.05,kick:300,col:"#f472b6"});
+  S(134,524,144,548);
+  S(266,524,256,548);
+  C(120,130,18,{kick:300,val:120});
+  C(280,130,18,{kick:300,val:120});
+  C(200,185,8,{e:0.8,val:40});
+  C(60,205,8,{e:0.8,val:40});
+  C(340,205,8,{e:0.8,val:40});
+  C(100,420,8,{e:0.8,val:30});
+  C(300,420,8,{e:0.8,val:30});
+  C(200,455,8,{e:0.8,val:30});
+  flUL=mkFL(140,318,false,46);
+  flUR=mkFL(260,318,true,46);
+  flLL=mkFL(140,547,false);
+  flLR=mkFL(260,547,true);
+}
+function fseg(f){return{x1:f.px,y1:f.py,x2:f.px+f.len*Math.cos(f.ang),y2:f.py+f.len*Math.sin(f.ang),e:0.3,pad:5,om:f.om,ang:f.ang};}
+function upFlip(f,h){
+  var target=f.pressed?f.up:f.rest,prev=f.ang,step=f.spd*h,d=target-f.ang;
+  if(Math.abs(d)<=step)f.ang=target;else f.ang+=(d>0?step:-step);
+  f.om=(f.ang-prev)/h;
+}
+function addScore(v,x,y){
+  score+=v;elScore.textContent=score;
+  if(x!==undefined&&pops.length<8)pops.push({x:x,y:y,txt:"+"+v,life:900});
+}
+function toReady(){
+  b={x:374,y:574,vx:0,vy:0,r:9};
+  charging=false;charge=0;state="ready";
+}
+function launch(){
+  b.vx=-10;b.vy=-(640+820*charge);
+  charge=0;charging=false;state="playing";
+}
+function loseBall(){
+  balls--;elBall.textContent=balls;
+  if(balls<=0)gameOver("三颗弹珠全部掉落!");
+  else toReady();
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest();}
+  elBest.textContent=best;
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  reset();score=0;balls=3;
+  elScore.textContent=0;elBall.textContent=3;elBest.textContent=best;
+  toReady();
+  ov.classList.add("hide");
+}
+function collideSeg(s,now){
+  var dx=s.x2-s.x1,dy=s.y2-s.y1,L2=dx*dx+dy*dy;
+  var t=L2>0?((b.x-s.x1)*dx+(b.y-s.y1)*dy)/L2:0;
+  t=t<0?0:t>1?1:t;
+  var px=s.x1+t*dx,py=s.y1+t*dy;
+  var ex=b.x-px,ey=b.y-py,d2=ex*ex+ey*ey,R=b.r+(s.pad||0);
+  if(d2>=R*R)return false;
+  if(s.ow===1&&b.vy<0)return false;
+  var d=Math.sqrt(d2);
+  if(d<0.001){d=0.001;ex=0.001;ey=0;}
+  var nx=ex/d,ny=ey/d;
+  b.x=px+nx*R;b.y=py+ny*R;
+  var ox=0,oy=0;
+  if(s.om){
+    var segLen=Math.sqrt(L2),l=(t-(s.pv||0))*segLen;
+    var sA=Math.sin(s.ang),cA=Math.cos(s.ang);
+    ox=-s.om*l*sA;oy=s.om*l*cA;
+  }
+  var rvx=b.vx-ox,rvy=b.vy-oy,vn=rvx*nx+rvy*ny;
+  if(vn<0){
+    b.vx-=(1+s.e)*vn*nx;b.vy-=(1+s.e)*vn*ny;
+    if(s.kick&&now-s.cd>90){s.cd=now;b.vx+=s.kick*nx;b.vy+=s.kick*ny;addScore(50,px,py);}
+  }
+  return true;
+}
+function collideCirc(c,now){
+  var ex=b.x-c.x,ey=b.y-c.y,R=b.r+c.r,d2=ex*ex+ey*ey;
+  if(d2>=R*R)return false;
+  var d=Math.sqrt(d2);
+  if(d<0.001){d=0.001;ex=0.001;ey=-0.001;}
+  var nx=ex/d,ny=ey/d;
+  b.x=c.x+nx*R;b.y=c.y+ny*R;
+  var vn=b.vx*nx+b.vy*ny;
+  if(vn<0){
+    b.vx-=(1+c.e)*vn*nx;b.vy-=(1+c.e)*vn*ny;
+    if(now-c.cd>120){
+      c.cd=now;
+      if(c.kick){b.vx+=c.kick*nx;b.vy+=c.kick*ny;}
+      if(c.val)addScore(c.val,c.x,c.y-c.r-8);
+    }
+  }
+  return true;
+}
+function stepBall(h,now){
+  b.vy+=G*h;
+  var sp=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+  if(sp>MAXS){b.vx*=MAXS/sp;b.vy*=MAXS/sp;}
+  b.x+=b.vx*h;b.y+=b.vy*h;
+  var i;
+  for(i=0;i<segs.length;i++)collideSeg(segs[i],now);
+  collideSeg(fseg(flUL),now);
+  collideSeg(fseg(flUR),now);
+  collideSeg(fseg(flLL),now);
+  collideSeg(fseg(flLR),now);
+  for(i=0;i<circs.length;i++)collideCirc(circs[i],now);
+  if(b.x<12){b.x=12;if(b.vx<0)b.vx=-b.vx;}
+  if(b.x>388){b.x=388;if(b.vx>0)b.vx=-b.vx;}
+  if(b.x>362&&b.y>545&&b.vy>=-20){toReady();return false;}
+  if(b.y>H+25){loseBall();return true;}
+  return false;
+}
+function frame(t){
+  requestAnimationFrame(frame);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"||state==="ready"){
+    upFlip(flUL,dt/1000);upFlip(flUR,dt/1000);
+    upFlip(flLL,dt/1000);upFlip(flLR,dt/1000);
+  }
+  if(state==="ready"){
+    if(charging){charge+=dt*0.0013;if(charge>1)charge=1;}
+  }else if(state==="playing"){
+    var n=5,i;
+    for(i=0;i<n;i++){if(stepBall(dt/1000/n,t))break;}
+  }
+  if(shake>0.3)shake*=0.85;
+  var j;
+  for(j=pops.length-1;j>=0;j--){pops[j].life-=dt;pops[j].y-=dt*0.028;if(pops[j].life<=0)pops.splice(j,1);}
+  draw(t);
+}
+function drawSegs(){
+  ctx.lineCap="round";
+  var i,s;
+  for(i=0;i<segs.length;i++){
+    s=segs[i];
+    ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);
+    if(s.ow===1){ctx.setLineDash([6,5]);ctx.strokeStyle="#33406e";ctx.lineWidth=3;}
+    else{ctx.setLineDash([]);ctx.strokeStyle=s.col||"#3d4370";ctx.lineWidth=5;}
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.strokeStyle="rgba(96,165,250,0.25)";
+  ctx.setLineDash([2,8]);
+  ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(10,340);ctx.lineTo(390,340);ctx.stroke();
+  ctx.setLineDash([]);
+}
+function drawFL(f,col){
+  var x2=f.px+f.len*Math.cos(f.ang),y2=f.py+f.len*Math.sin(f.ang);
+  ctx.strokeStyle=col;ctx.lineWidth=11;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(f.px,f.py);ctx.lineTo(x2,y2);ctx.stroke();
+  ctx.fillStyle="#dbeafe";ctx.beginPath();ctx.arc(f.px,f.py,5,0,TAU);ctx.fill();
+}
+function draw(t){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(shake>0.3)ctx.translate((Math.random()-0.5)*shake,(Math.random()-0.5)*shake);
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  var g=ctx.createRadialGradient(200,300,40,200,300,420);
+  g.addColorStop(0,"rgba(96,165,250,0.10)");g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  drawSegs();
+  var i,c,hot;
+  for(i=0;i<circs.length;i++){
+    c=circs[i];
+    if(c.r<=9){ctx.fillStyle="#5b6398";ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,TAU);ctx.fill();}
+    else{
+      hot=t-c.cd<130;
+      ctx.fillStyle=hot?"#eff6ff":"#101d33";
+      ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,TAU);ctx.fill();
+      ctx.strokeStyle=hot?"#60a5fa":"#2c4a7c";ctx.lineWidth=3;ctx.stroke();
+    }
+  }
+  ctx.font="bold 11px system-ui";ctx.textAlign="center";
+  ctx.fillStyle="rgba(96,165,250,0.6)";
+  ctx.fillText("上 层",200,72);
+  ctx.fillStyle="rgba(148,163,184,0.5)";
+  ctx.fillText("下 层",200,372);
+  drawFL(flUL,"#60a5fa");drawFL(flUR,"#60a5fa");
+  drawFL(flLL,"#93c5fd");drawFL(flLR,"#93c5fd");
+  ctx.fillStyle="#f97316";ctx.fillRect(368,584+charge*10,12,5);
+  if(b){
+    var bg2=ctx.createRadialGradient(b.x-3,b.y-4,1,b.x,b.y,10);
+    bg2.addColorStop(0,"#ffffff");bg2.addColorStop(1,"#93c5fd");
+    ctx.fillStyle=bg2;ctx.shadowColor="#60a5fa";ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();ctx.shadowBlur=0;
+  }
+  ctx.font="bold 14px system-ui";ctx.textAlign="center";
+  for(i=0;i<pops.length;i++){
+    ctx.globalAlpha=Math.min(1,pops[i].life/500);
+    ctx.fillStyle="#bfdbfe";ctx.fillText(pops[i].txt,pops[i].x,pops[i].y);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k==="ArrowLeft"||k==="a"||k==="A"){
+    flUL.pressed=true;flLL.pressed=true;e.preventDefault();
+  }else if(k==="ArrowRight"||k==="d"||k==="D"){
+    flUR.pressed=true;flLR.pressed=true;e.preventDefault();
+  }else if(k===" "||k==="ArrowDown"){
+    e.preventDefault();
+    if(state==="ready")charging=true;
+    else if(state==="menu"||state==="over")startGame();
+  }else if(k==="Enter"&&(state==="menu"||state==="over"))startGame();
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k==="ArrowLeft"||k==="a"||k==="A"){flUL.pressed=false;flLL.pressed=false;}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){flUR.pressed=false;flLR.pressed=false;}
+  else if(k===" "||k==="ArrowDown"){
+    if(state==="ready"&&charging)launch();
+    charging=false;
+  }
+});
+var tCharge=false;
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  if(state==="ready"){tCharge=true;charging=true;return;}
+  var r=cv.getBoundingClientRect(),i,x;
+  for(i=0;i<e.changedTouches.length;i++){
+    x=e.changedTouches[i].clientX-r.left;
+    if(x<r.width/2){flUL.pressed=true;flLL.pressed=true;}
+    else{flUR.pressed=true;flLR.pressed=true;}
+  }
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  e.preventDefault();
+  if(state==="ready"){
+    if(tCharge){tCharge=false;charge=Math.max(charge,0.55);launch();}
+    return;
+  }
+  var r=cv.getBoundingClientRect(),i,x;
+  for(i=0;i<e.changedTouches.length;i++){
+    x=e.changedTouches[i].clientX-r.left;
+    if(x<r.width/2){flUL.pressed=false;flLL.pressed=false;}
+    else{flUR.pressed=false;flLR.pressed=false;}
+  }
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+elBest.textContent=best;
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

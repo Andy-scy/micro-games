@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜像补全</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#2dd4bf;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#2dd4bf;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #115e59;background:#10141f;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.bar{display:flex;justify-content:center;margin-top:10px}
+.bar button{background:#2dd4bf;color:#042f2e;border:none;border-radius:10px;padding:10px 28px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.msg{text-align:center;color:#f87171;font-size:13px;height:18px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(6,16,15,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#2dd4bf;color:#042f2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>镜像补全</h1>
+  <p class="hint">左半边图案已经画好,<b style="color:#2dd4bf">只在右半边落笔</b>,把另一半对称补全(右侧有淡淡虚线提示);<br>重叠 ≥65% 且出界 ≤25% 即过关,总分按重叠率算!</p>
+  <div class="hud"><span>图案 <b id="lv">1/3</b></span><span>重叠 <b id="ovl">0%</b></span><span>出界 <b id="str">0%</b></span><span>得分 <b id="score">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">镜像补全</h2>
+      <p id="ovP">设计师只交了左半稿!对照左边的成品,在右边画出镜像的另一半。别画到轮廓外面——出界越多扣得越狠。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">领取半稿</button>
+    </div>
+  </div>
+  <div class="bar"><button id="btnSub">提交补全</button></div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo"),btnSub=$("btnSub");
+var elLv=$("lv"),elOvl=$("ovl"),elStr=$("str"),elScore=$("score"),elMsg=$("msg");
+function heartPoly(cx,cy,s){
+  var pts=[],t;
+  for(t=0;t<Math.PI*2;t+=Math.PI/14){
+    var x=16*Math.pow(Math.sin(t),3);
+    var y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+    pts.push([cx+x*s,cy-y*s]);
+  }
+  return pts;
+}
+var LV=[
+ {name:"爱心",shapes:[{t:"p",pts:heartPoly(240,250,11)}]},
+ {name:"小树",shapes:[{t:"p",pts:[[240,66],[158,218],[322,218]]},{t:"p",pts:[[212,218],[268,218],[268,336],[212,336]]}]},
+ {name:"蝴蝶",shapes:[{t:"c",x:172,y:198,r:66},{t:"c",x:308,y:198,r:66},{t:"c",x:180,y:306,r:44},{t:"c",x:300,y:306,r:44},{t:"p",pts:[[226,148],[254,148],[254,344],[226,344]]}]}
+];
+var N=60,CELL=8;
+var state="menu",lv=0,score=0,tgt=null,tgtCnt=0,paint=null,pcv=null,pctx=null,isDown=false,last=null;
+pcv=document.createElement("canvas");pcv.width=480;pcv.height=480;
+pctx=pcv.getContext("2d");
+function inPoly(x,y,pts){
+  var ins=false,i,j,n=pts.length;
+  for(i=0,j=n-1;i<n;j=i++){
+    if(((pts[i][1]>y)!==(pts[j][1]>y))&&(x<(pts[j][0]-pts[i][0])*(y-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0]))ins=!ins;
+  }
+  return ins;
+}
+function inShape(sh,x,y){
+  if(sh.t==="c"){
+    var dx=x-sh.x,dy=y-sh.y;
+    return dx*dx+dy*dy<=sh.r*sh.r;
+  }
+  return inPoly(x,y,sh.pts);
+}
+function loadLevel(){
+  tgt=new Uint8Array(N*N);tgtCnt=0;
+  var i,j,k,shapes=LV[lv].shapes;
+  for(i=0;i<N;i++)for(j=0;j<N;j++){
+    var x=i*CELL+4,y=j*CELL+4;
+    if(x<240)continue;
+    for(k=0;k<shapes.length;k++){
+      if(inShape(shapes[k],x,y)){tgt[i*N+j]=1;tgtCnt++;break;}
+    }
+  }
+  paint=new Uint8Array(N*N);
+  pctx.clearRect(0,0,480,480);
+  elLv.textContent=(lv+1)+"/3";elMsg.textContent="";
+  stats();draw();
+}
+function stats(){
+  var inC=0,pnt=0,i;
+  for(i=0;i<N*N;i++){
+    if(paint[i]){
+      pnt++;
+      if(tgt[i])inC++;
+    }
+  }
+  var ovl=tgtCnt?Math.round(inC/tgtCnt*100):0;
+  var str=pnt?Math.round((pnt-inC)/pnt*100):0;
+  elOvl.textContent=ovl+"%";elStr.textContent=str+"%";
+  return {ovl:ovl,str:str};
+}
+function markSeg(p,q){
+  var d=Math.hypot(q.x-p.x,q.y-p.y),n=Math.max(1,Math.ceil(d/3)),t;
+  for(t=0;t<=n;t++){
+    var x=p.x+(q.x-p.x)*t/n,y=p.y+(q.y-p.y)*t/n;
+    var gx=Math.floor(x/CELL),gy=Math.floor(y/CELL),a,b;
+    for(a=gx-1;a<=gx+1;a++)for(b=gy-1;b<=gy+1;b++){
+      if(a<0||a>=N||b<0||b>=N)continue;
+      var cx=a*CELL+4,cy=b*CELL+4;
+      if((cx-x)*(cx-x)+(cy-y)*(cy-y)<42)paint[a*N+b]=1;
+    }
+  }
+}
+function strokeSeg(p,q){
+  pctx.save();
+  pctx.beginPath();pctx.rect(240,0,240,480);pctx.clip();
+  pctx.strokeStyle="#f0abfc";pctx.lineWidth=9;pctx.lineCap="round";pctx.lineJoin="round";
+  pctx.beginPath();pctx.moveTo(p.x,p.y);pctx.lineTo(q.x,q.y);pctx.stroke();
+  pctx.restore();
+  markSeg(p,q);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){
+  if(state!=="playing")return;
+  var p=pos(e);isDown=true;last=p;
+  strokeSeg(p,{x:p.x+0.01,y:p.y+0.01});
+  stats();draw();
+}
+function moveP(e){
+  if(!isDown||state!=="playing")return;
+  var p=pos(e);strokeSeg(last,p);last=p;
+  stats();draw();
+}
+function endP(){isDown=false;last=null;}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+function draw(){
+  var shapes=LV[lv].shapes,i;
+  ctx.fillStyle="#10141f";ctx.fillRect(0,0,480,480);
+  ctx.save();
+  ctx.beginPath();ctx.rect(0,0,240,480);ctx.clip();
+  for(i=0;i<shapes.length;i++){
+    var sh=shapes[i];
+    ctx.beginPath();
+    if(sh.t==="c")ctx.arc(sh.x,sh.y,sh.r,0,Math.PI*2);
+    else{
+      var k;
+      for(k=0;k<sh.pts.length;k++){
+        if(k===0)ctx.moveTo(sh.pts[k][0],sh.pts[k][1]);else ctx.lineTo(sh.pts[k][0],sh.pts[k][1]);
+      }
+      ctx.closePath();
+    }
+    ctx.fillStyle="#2dd4bf";ctx.fill();
+    ctx.strokeStyle="#0f766e";ctx.lineWidth=2;ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();ctx.rect(240,0,240,480);ctx.clip();
+  ctx.setLineDash([5,6]);
+  for(i=0;i<shapes.length;i++){
+    var s2=shapes[i];
+    ctx.beginPath();
+    if(s2.t==="c")ctx.arc(s2.x,s2.y,s2.r,0,Math.PI*2);
+    else{
+      var k2;
+      for(k2=0;k2<s2.pts.length;k2++){
+        if(k2===0)ctx.moveTo(s2.pts[k2][0],s2.pts[k2][1]);else ctx.lineTo(s2.pts[k2][0],s2.pts[k2][1]);
+      }
+      ctx.closePath();
+    }
+    ctx.strokeStyle="rgba(45,212,191,0.35)";ctx.lineWidth=1.5;ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+  ctx.strokeStyle="rgba(232,234,246,0.3)";ctx.lineWidth=1.5;ctx.setLineDash([4,7]);
+  ctx.beginPath();ctx.moveTo(240,0);ctx.lineTo(240,480);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.drawImage(pcv,0,0);
+}
+function finish(){
+  state="over";
+  ovT.textContent="半稿全部补完!";
+  ovP.textContent="三幅对称作品都交付了,你的镜像感一流。";
+  ovS.style.display="block";ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btnSub.addEventListener("click",function(){
+  if(state!=="playing")return;
+  var st=stats();
+  if(st.ovl>=65&&st.str<=25){
+    score+=Math.max(0,Math.round(st.ovl-st.str*0.3));
+    elScore.textContent=score;
+    lv++;
+    if(lv>=3){finish();return;}
+    loadLevel();
+  }else{
+    elMsg.textContent="重叠 "+st.ovl+"%(需65)/出界 "+st.str+"%(需25)——继续补笔!";
+  }
+});
+btnGo.addEventListener("click",function(){
+  lv=0;score=0;elScore.textContent=0;state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  loadLevel();
+});
+loadLevel();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子消消乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#4cc9f0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.35;cursor:default}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cell{border:0;background:#232a48;border-radius:10px;padding:6px;cursor:pointer}
+.cell:hover{background:#2e3760}
+.die{position:relative;width:100%;aspect-ratio:1;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 3px 8px rgba(0,0,0,.4)}
+.die.hand{outline:3px solid #ffd166}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:22px;font-weight:800;color:#4cc9f0}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:40px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#4cc9f0;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子消消乐</h1>
+  <p class="tips">45 秒限时!盘面上有 16 枚骰子,中央是你手中的骰子——点掉盘上<b>同点数</b>的骰子即消除得分,随后补充新骰、换新手骰。点错一次扣 2 秒!目标:150 分。</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="card stat"><div class="mut">剩余时间</div><div class="big" id="tm">45.0</div></div>
+  </div>
+  <div class="card">
+    <div id="grid"></div>
+    <div class="row" style="margin-top:12px">
+      <div class="die hand" id="hand" style="width:52px"></div>
+      <button class="btn" id="start">开始挑战</button>
+    </div>
+  </div>
+  <div class="card log" id="log">点「开始挑战」后计时启动,手快有手慢无!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var grid=[],hand=1,score=0,timeLeft=45,running=false,over=false,lastT=0,combo=0;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function pickHand(){
+  var v=rnd(),tries=0;
+  while(grid.indexOf(v)<0&&tries<24){v=rnd();tries++}
+  return v;
+}
+function drawGrid(){
+  var g=$('grid');g.innerHTML='';
+  for(var i=0;i<16;i++){
+    var b=document.createElement('button');b.className='cell';
+    var d=document.createElement('div');d.className='die';setDie(d,grid[i]);
+    b.appendChild(d);
+    (function(k){b.onclick=function(){
+      if(!running||over)return;
+      if(grid[k]===hand){
+        var got=hand;
+        score+=got;
+        grid[k]=rnd();hand=pickHand();
+        setDie($('hand'),hand);
+        $('sc').textContent=score;
+        drawGrid();
+        $('log').textContent='消掉 '+got+' 分!继续寻找 '+hand+' 点!';
+        if(score>=150){finish(true);return}
+      }else{
+        timeLeft=Math.max(0,timeLeft-2);
+        $('log').textContent='点错了,-2 秒!要找和手骰一样的点数。';
+        if(timeLeft<=0){finish(score>=150)}
+      }
+    }})(i);
+    g.appendChild(b);
+  }
+}
+function loop(t){
+  if(!running||over)return;
+  if(lastT)timeLeft-=(t-lastT)/1000;
+  lastT=t;
+  if(timeLeft<=0){timeLeft=0;$('tm').textContent='0.0';finish(score>=150);return}
+  $('tm').textContent=timeLeft.toFixed(1);
+  requestAnimationFrame(loop);
+}
+function finish(good){
+  over=true;running=false;
+  $('ovt').textContent=good?'消消达人!':'时间到';
+  $('ovp').innerHTML='最终得分 <b>'+score+'</b> / 目标 150<br>'+(good?'眼疾手快,骰盘为你清空!':'差一点点,下次优先扫荡大点数的骰子!');
+  $('overlay').classList.add('show');
+}
+$('start').onclick=function(){
+  if(running||over)return;
+  running=true;lastT=0;
+  $('start').disabled=true;
+  $('log').textContent='计时开始!快速点击与手骰相同的点数!';
+  requestAnimationFrame(loop);
+};
+$('again').onclick=function(){
+  grid=[];for(var i=0;i<16;i++)grid.push(rnd());
+  hand=rnd();score=0;timeLeft=45;running=false;over=false;lastT=0;
+  $('overlay').classList.remove('show');
+  setDie($('hand'),hand);
+  $('sc').textContent='0';$('tm').textContent='45.0';
+  $('start').disabled=false;
+  drawGrid();
+  $('log').textContent='点「开始挑战」重新计时!';
+};
+(function init(){
+  for(var i=0;i<16;i++)grid.push(rnd());
+  hand=pickHand();
+  setDie($('hand'),hand);
+  drawGrid();
+})();
+</script>
+</body>
+</html>

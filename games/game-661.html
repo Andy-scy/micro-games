@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鲜果快接</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>鲜果快接</h1>
+  <p class="tips">← → 或 A/D 移动竹篮,触屏按住拖动亦可。接住掉落水果得分,漏接一个损失 1 条生命,共 3 条;越到后面水果越密越快!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">最高分</div><div class="big" id="hs">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">鲜果快接</h2><p id="ovp">玩法:经典接水果。<br>· 键盘 ← → 或 A/D 移动竹篮,触屏按住拖动<br>· 红苹果 +10,橙子 +15,金果子 +30<br>· 水果落地漏接 -1 生命,共 3 条<br>· 时间越久,水果越密越快<br>· 生命耗尽结算,冲击最高分!</p><button class="btn" id="obtn">开始游戏</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var FR=[{c:'#ff5c5c',r:15,p:10,w:0.55},{c:'#ffa94d',r:14,p:15,w:0.32},{c:'#ffd166',r:12,p:30,w:0.13}];
+var best=0;
+try{best=parseInt(localStorage.getItem('mg661')||'0',10)||0}catch(e){best=0}
+$('hs').textContent=best;
+var S=null;
+function reset(){S={on:false,score:0,lives:3,bx:W/2,bw:86,items:[],pops:[],t:0,st:0.5,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function pick(){var r=Math.random(),a=0;for(var i=0;i<FR.length;i++){a+=FR[i].w;if(r<=a)return FR[i]}return FR[0]}
+function update(dt){
+  S.t+=dt;
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.42,1.05-S.t*0.012)*(0.7+Math.random()*0.6);
+    var f=pick();
+    S.items.push({x:30+Math.random()*(W-60),y:-20,v:150+S.t*4.5+Math.random()*60,f:f,rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.items.length-1;i>=0;i--){
+    var it=S.items[i];
+    it.y+=it.v*dt;it.rot+=dt*3;
+    if(it.y>=by-16&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+it.f.r*0.5){
+      S.score+=it.f.p;$('sc').textContent=S.score;
+      pop(it.x,by-28,'+'+it.f.p,'#ffd166');
+      S.items.splice(i,1);continue;
+    }
+    if(it.y>H+20){
+      S.items.splice(i,1);S.lives--;$('hp').textContent=hearts();
+      pop(W/2,H-110,'漏接!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  if(S.score>best){best=S.score;try{localStorage.setItem('mg661',String(best))}catch(e){}$('hs').textContent=best}
+  $('ovt').textContent='游戏结束';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>历史最高 <b>'+best+'</b><br>手再稳一点,下局接更多!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.strokeStyle='rgba(255,255,255,.05)';ctx.lineWidth=1;
+  for(var g=0;g<W;g+=48){ctx.beginPath();ctx.moveTo(g,H-38);ctx.lineTo(g,H);ctx.stroke()}
+  for(var i=0;i<S.items.length;i++){
+    var it=S.items[i];
+    ctx.save();ctx.translate(it.x,it.y);ctx.rotate(Math.sin(it.rot)*0.3);
+    ctx.fillStyle=it.f.c;ctx.beginPath();ctx.arc(0,0,it.f.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.35)';ctx.beginPath();ctx.arc(-it.f.r*0.35,-it.f.r*0.35,it.f.r*0.28,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#51d88a';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-it.f.r);ctx.quadraticCurveTo(6,-it.f.r-9,13,-it.f.r-6);ctx.stroke();
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,.28)';
+  for(var k=1;k<4;k++){ctx.beginPath();ctx.moveTo(S.bx-S.bw/2+k*S.bw/4,by+3);ctx.lineTo(S.bx-S.bw/2+k*S.bw/4,by+21);ctx.stroke()}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蚁巢拾光</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fbbf24;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#fbbf24;color:#422006;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蚁巢拾光</h1>
+  <p class="hint">点按地面投放糖粒 · 工蚁搬粮回巢,每三粒添一蚁 · 蚁群满 30 圆满</p>
+  <div class="hud">
+    <span>蚁群 <b id="hPop">5</b></span>
+    <span>存粮 <b id="hStore">0</b></span>
+    <span>群落 <b id="hLv">初辟</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">蚁巢拾光</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开巢撒糖</button>
+      <button id="btnMore" style="display:none">继续滋养</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hPop=$("hPop"),hStore=$("hStore"),hLv=$("hLv");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=300,TAU=Math.PI*2;
+var ants=[],crumbs=[],fx=[];
+var store=0,lvl=0,state="menu",goalDone=false,time=0;
+var LVN=["初辟","成行","繁盛","金秋"];
+var PEB=[];
+function sr(n){var x=Math.sin(n*91.7+47.3)*3758.5453;return x-Math.floor(x);}
+for(var i=0;i<26;i++)PEB.push({x:70+sr(i*3+1)*380,y:16+sr(i*3+2)*268,r:1.5+sr(i*3+3)*3});
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function spawnAnt(){
+  var a=Math.random()*TAU;
+  ants.push({x:58+Math.cos(a)*20,y:150+Math.sin(a)*20,dir:a,tgt:null,wt:0,carry:0,ph:Math.random()*TAU});
+  hPop.textContent=ants.length;
+}
+function nearestCrumb(a){
+  var best=null,bd=130*130,i;
+  for(i=0;i<crumbs.length;i++){var c=crumbs[i];
+    if(c.amt<=0)continue;
+    var dx=c.x-a.x,dy=c.y-a.y,d=dx*dx+dy*dy;
+    if(d<bd){bd=d;best=c;}}
+  return best;
+}
+function stepAnt(a,dt){
+  var tx,ty,sp;
+  if(a.state==="home"){tx=58;ty=150;sp=66;}
+  else{
+    if(!a.tgt||a.tgt.amt<=0){a.tgt=nearestCrumb(a);}
+    if(a.tgt){tx=a.tgt.x;ty=a.tgt.y;sp=58;}
+    else{
+      a.wt-=dt;
+      if(a.wt<=0){a.wt=0.5+Math.random();a.dir+=(Math.random()-0.5)*2.4;}
+      tx=a.x+Math.cos(a.dir)*30;ty=a.y+Math.sin(a.dir)*30;sp=44;
+    }
+  }
+  var dx=tx-a.x,dy=ty-a.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+  if(a.state==="home"||a.tgt)a.dir=Math.atan2(dy,dx);
+  a.x+=Math.cos(a.dir)*sp*dt;a.y+=Math.sin(a.dir)*sp*dt;
+  a.ph+=dt*22;
+  if(a.x<8){a.x=8;a.dir=0;}
+  if(a.x>W-8){a.x=W-8;a.dir=Math.PI;}
+  if(a.y<12){a.y=12;a.dir=Math.PI/2;}
+  if(a.y>H-8){a.y=H-8;a.dir=-Math.PI/2;}
+  if(a.state==="home"&&d<16){
+    a.state="seek";store++;hStore.textContent=store;
+    if(store%3===0&&ants.length<34){
+      spawnAnt();addFx(58,120,"新蚁入巢","#fde68a");
+      if(ants.length>=10&&lvl<1){lvl=1;hLv.textContent=LVN[1];addFx(235,60,"群落初成 · 十蚁同行","#fbbf24");}
+      if(ants.length>=20&&lvl<2){lvl=2;hLv.textContent=LVN[2];addFx(235,60,"部落繁盛 · 二十成邦","#fbbf24");}
+      if(ants.length>=30&&!goalDone){goalDone=true;zenWin();}
+    }
+  }
+  if(a.state==="seek"&&a.tgt&&d<8){
+    a.tgt.amt--;a.carry=1;
+    if(a.tgt.amt<=0)crumbs.splice(crumbs.indexOf(a.tgt),1);
+    a.tgt=null;a.state="home";
+  }
+}
+function zenWin(){
+  state="zen";
+  ovT.textContent="蚁巢圆满";
+  ovD.textContent="蚁群已达 "+ants.length+" 只,存粮 "+store+" 粒。\n小小的王国,靠一点一点搬回来。\n糖仍可撒,蚁仍会忙。";
+  btnMore.style.display="inline-block";
+  ov.classList.remove("hide");
+}
+function step(dt){
+  var i;
+  for(i=0;i<ants.length;i++)stepAnt(ants[i],dt);
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#191310";ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<PEB.length;i++){var p=PEB[i];
+    ctx.fillStyle="rgba(120,100,80,.35)";
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fill();}
+  ctx.fillStyle="#2c2117";
+  ctx.beginPath();ctx.arc(58,150,26,0,TAU);ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(58,150,11,0,TAU);ctx.fill();
+  ctx.strokeStyle="#3a2c1e";ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(58,150,30,0,TAU);ctx.stroke();
+  for(i=0;i<crumbs.length;i++){var c=crumbs[i];
+    ctx.fillStyle="#f5ead9";
+    ctx.beginPath();ctx.arc(c.x-2,c.y,2.2,0,TAU);ctx.fill();
+    ctx.beginPath();ctx.arc(c.x+2,c.y-2,1.8,0,TAU);ctx.fill();
+    ctx.beginPath();ctx.arc(c.x+1,c.y+2,1.5,0,TAU);ctx.fill();}
+  for(i=0;i<ants.length;i++){var a=ants[i];
+    ctx.save();ctx.translate(a.x,a.y);ctx.rotate(a.dir);
+    ctx.strokeStyle="#4a3826";ctx.lineWidth=1;
+    var lg=Math.sin(a.ph)*1.6,k;
+    for(k=-1;k<=1;k++){
+      ctx.beginPath();ctx.moveTo(k*3,0);ctx.lineTo(k*3+lg,k>0?-3.4:3.4);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(k*3,0);ctx.lineTo(k*3-lg,k>0?-3.4:3.4);ctx.stroke();}
+    ctx.fillStyle="#52381f";
+    ctx.beginPath();ctx.arc(-4,0,2,0,TAU);ctx.fill();
+    ctx.beginPath();ctx.arc(0,0,1.7,0,TAU);ctx.fill();
+    ctx.beginPath();ctx.arc(4,0,2.4,0,TAU);ctx.fill();
+    if(a.carry){ctx.fillStyle="#f5ead9";
+      ctx.beginPath();ctx.arc(4.5,-3,2,0,TAU);ctx.fill();}
+    ctx.restore();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var rc=cv.getBoundingClientRect();
+  var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+  var dx=x-58,dy=y-150;
+  if(dx*dx+dy*dy<34*34)return;
+  if(crumbs.length>=8){addFx(x,y,"糖粒已够多","#94a3b8");return;}
+  crumbs.push({x:x,y:y,amt:3});
+  addFx(x,y-10,"撒下糖粒","#fde68a");
+});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="蚁巢拾光";
+  ovD.textContent="巢中五只工蚁四处巡走。点按地面投放糖粒(场上至多八堆),\n工蚁发现后便会搬起一粒、径直送回巢中。\n每存满三粒,便有一只新蚁破土而出。\n蚁群满 30 只,即是圆满。";
+  btnGo.textContent="开巢撒糖";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){
+  var i;
+  for(i=0;i<5;i++)spawnAnt();
+  state="play";ov.classList.add("hide");
+});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

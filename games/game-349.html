@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旋转棋盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#67e8f9;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#67e8f9;font-size:16px}
+.gbtn{background:#0c2f36;color:#67e8f9;border:1px solid #67e8f9;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#67e8f9;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.frame{max-width:300px;margin:0 auto}
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;aspect-ratio:1/1;transition:transform .55s cubic-bezier(.4,.1,.2,1);touch-action:manipulation}
+.pad{border-radius:50%;background:#1b2140;border:2px solid #2a3258;cursor:pointer;transition:box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none;aspect-ratio:1/1}
+.pad.lit{background:#22d3ee;border-color:#cffafe;box-shadow:0 0 26px rgba(34,211,238,.9)}
+.pad:active{box-shadow:0 0 12px rgba(34,211,238,.5)}
+.angle{text-align:center;color:#38507a;font-size:13px;min-height:18px;margin-top:8px;letter-spacing:1px}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#67e8f9;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#67e8f9;color:#0c2f36;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>旋转棋盘</h1>
+  <p class="hint">空间旋转版记忆序列:九个圆点正向演示完后,整个棋盘会随机旋转 90°/180°/270°!你要按出「原来亮过的那些格子」在旋转后的新位置。脑内旋转,越转越晕。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>序列长 <b id="len">0</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="frame">
+    <div class="board" id="board"></div>
+  </div>
+  <div class="angle" id="angle"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">旋转棋盘</h2>
+    <p id="ovDesc">演示时棋盘是正的,输入时它已经转了个角度。记住亮点的绝对位置,再在转过的棋盘上把它们找出来——这是记忆与心理旋转的双重挑战。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg349_best",GAP=680,FLASH=400;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null,lastAng=-1;
+var pads=[],board=$("board"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew"),elAngle=$("angle");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.28;v=v==null?0.14:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){for(var i=0;i<9;i++){var d=document.createElement("div");d.className="pad";d.dataset.i=String(i);board.appendChild(d);pads.push(d);}})();
+function flash(i,ms){var el=pads[i];el.classList.add("lit");tone(300+i*42);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<9;i++)pads[i].classList.remove("lit");}
+function rnd(){var n;do{n=(Math.random()*9)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function pickAngle(){var a;do{a=[90,180,270][(Math.random()*3)|0];}while(a===lastAng);lastAng=a;return a;}
+function rotate(deg){board.style.transform="rotate("+deg+"deg)";elAngle.textContent=deg===0?"棋盘已回正":"当前旋转 "+deg+"°";}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";rotate(0);setMsg("棋盘回正,看好亮点…");
+var i=0;timers.push(setTimeout(function step(){
+if(i>=seq.length){var a=pickAngle();timers.push(setTimeout(function(){rotate(a);},320));
+state="input";pos=0;setMsg("棋盘转了 "+a+"°!按出原来亮过的格子");return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));},520));}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();seq=[];pos=0;level=0;state="wait";rotate(0);setMsg("");updateHud();timers.push(setTimeout(nextRound,750));}
+function winStep(){level++;state="wait";setMsg("转着也能记住!加一步…");updateHud();timers.push(setTimeout(nextRound,900));}
+function fail(){clearTimers();clearLit();state="over";tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="晕头转向";
+ovDesc.textContent="棋盘转到 "+lastAng+"° 时跟丢了序列。诀窍:以棋盘边框为参照物,把亮点位置挂在「靠转轴最近的角」这类锚点上。";
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flash(i,200);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+board.addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

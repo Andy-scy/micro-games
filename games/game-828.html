@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>海底拼贴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#38bdf8;font-size:16px}
+.pal{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-bottom:8px}
+.pal button{font-size:24px;background:#152238;border:1px solid #2a3c5e;border-radius:10px;width:46px;height:44px;cursor:pointer;line-height:1}
+.pal button.on{border-color:#38bdf8;box-shadow:0 0 0 2px rgba(56,189,248,.4)}
+.stage{position:relative;height:340px;border-radius:12px;overflow:hidden;border:2px solid #0e3a5c;background:linear-gradient(#0b2740,#081426);user-select:none}
+.stk{position:absolute;transform:translate(-50%,-50%);font-size:36px;line-height:1;cursor:grab;text-shadow:0 2px 6px rgba(0,0,0,.5);z-index:2}
+.sand{position:absolute;left:0;right:0;bottom:0;height:26px;background:linear-gradient(#3a2f1b,#241c10)}
+.bar{display:flex;justify-content:center;margin-top:10px}
+.bar button{background:#38bdf8;color:#082f49;border:none;border-radius:10px;padding:10px 28px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay{position:absolute;inset:0;background:rgba(6,14,26,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:16px;line-height:1.7;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:23px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:13.5px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#082f49;border:none;border-radius:10px;padding:11px 32px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>海底拼贴</h1>
+  <p class="hint">点下方贴纸选中,再点海面放置(可反复贴、按住拖动)。<br><b style="color:#fde047">双击</b>贴纸可移除。「完成拼贴」按主题契合与四象限构图评分,80 分及格!</p>
+  <div class="hud"><span>已放置 <b id="cnt">0</b></span><span>海洋系 <b id="sea">0</b></span><span>乱入 <b id="bad">0</b></span></div>
+  <div class="pal" id="pal"></div>
+  <div class="stage" id="stage">
+    <div class="sand"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">海底拼贴大赛</h2>
+      <p id="ovP">主题:热闹的海底世界!海洋生物 +10 分,混进来的陆地物品 -10 分,四个象限各有元素 +10 分/个,总数不足 5 个 -15。冲到 80 分!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始拼贴</button>
+    </div>
+  </div>
+  <div class="bar"><button id="btnDone">完成拼贴</button></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var SEA=["🐠","🐟","🐙","🦀","🐢","🐋","🐚","⭐"];
+var BAD=["🦁","🚗","🌵","🍕"];
+var MIX=["🐠","🦁","🐟","🚗","🐙","🌵","🦀","🍕","🐢","🐋","🐚","⭐"];
+var stage=$("stage"),palEl=$("pal"),ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo"),btnDone=$("btnDone");
+var elCnt=$("cnt"),elSea=$("sea"),elBad=$("bad");
+var state="menu",sel=null,placed=[],drag=null,lastTap={id:"",t:0};
+var i;
+for(i=0;i<MIX.length;i++){
+  (function(em){
+    var b=document.createElement("button");
+    b.textContent=em;
+    b.addEventListener("click",function(){
+      sel=em;
+      var bs=palEl.children,k;
+      for(k=0;k<bs.length;k++)bs[k].className="";
+      b.className="on";
+    });
+    palEl.appendChild(b);
+  })(MIX[i]);
+}
+function hud(){
+  var s=0,b=0,k;
+  for(k=0;k<placed.length;k++){
+    if(SEA.indexOf(placed[k].em)>=0)s++;else b++;
+  }
+  elCnt.textContent=placed.length;elSea.textContent=s;elBad.textContent=b;
+}
+function stageXY(e){
+  var r=stage.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:t.clientX-r.left,y:t.clientY-r.top};
+}
+function place(x,y,em){
+  var sp=document.createElement("span");
+  sp.className="stk";sp.textContent=em;
+  sp.style.left=Math.max(14,Math.min(stage.clientWidth-14,x))+"px";
+  sp.style.top=Math.max(14,Math.min(stage.clientHeight-14,y))+"px";
+  stage.appendChild(sp);
+  var rec={em:em,el:sp};
+  placed.push(rec);
+  sp.setAttribute("data-id",String(placed.length-1));
+  hud();
+  return rec;
+}
+function down(e){
+  if(state!=="playing")return;
+  var p=stageXY(e),node=e.target,i;
+  if(node&&node.className==="stk"){
+    var id=parseInt(node.getAttribute("data-id"),10);
+    var now=Date.now();
+    if(lastTap.id===node.getAttribute("data-id")&&now-lastTap.t<320){
+      if(drag)drag=null;
+      if(node.parentNode===stage)stage.removeChild(node);
+      placed.splice(id,1);
+      for(i=0;i<placed.length;i++)placed[i].el.setAttribute("data-id",String(i));
+      lastTap={id:"",t:0};hud();
+      return;
+    }
+    lastTap={id:node.getAttribute("data-id"),t:now};
+    drag={el:node,ox:p.x-node.offsetLeft,oy:p.y-node.offsetTop};
+    e.preventDefault();
+    return;
+  }
+  if(sel)place(p.x,p.y,sel);
+}
+function move(e){
+  if(!drag||state!=="playing")return;
+  var p=stageXY(e);
+  drag.el.style.left=Math.max(14,Math.min(stage.clientWidth-14,p.x))+"px";
+  drag.el.style.top=Math.max(14,Math.min(stage.clientHeight-14,p.y))+"px";
+  e.preventDefault();
+}
+function up(){drag=null;}
+stage.addEventListener("mousedown",down);
+window.addEventListener("mousemove",move);
+window.addEventListener("mouseup",up);
+stage.addEventListener("touchstart",function(e){e.preventDefault();down(e);},{passive:false});
+stage.addEventListener("touchmove",function(e){e.preventDefault();move(e);},{passive:false});
+stage.addEventListener("touchend",function(e){up();},{passive:false});
+function clearAll(){
+  var k;
+  for(k=0;k<placed.length;k++){
+    if(placed[k].el.parentNode===stage)stage.removeChild(placed[k].el);
+  }
+  placed=[];hud();
+}
+btnDone.addEventListener("click",function(){
+  if(state!=="playing")return;
+  var s=0,b=0,quad=[false,false,false,false],k;
+  var w=stage.clientWidth,h=stage.clientHeight;
+  for(k=0;k<placed.length;k++){
+    var el=placed[k].el,x=el.offsetLeft,y=el.offsetTop;
+    if(SEA.indexOf(placed[k].em)>=0)s++;else b++;
+    if(x<w/2&&y<h/2)quad[0]=true;
+    if(x>=w/2&&y<h/2)quad[1]=true;
+    if(x<w/2&&y>=h/2)quad[2]=true;
+    if(x>=w/2&&y>=h/2)quad[3]=true;
+  }
+  var quads=0;
+  for(k=0;k<4;k++)if(quad[k])quads++;
+  var score=s*10-b*10+quads*10;
+  if(placed.length<5)score-=15;
+  score=Math.max(0,score);
+  state="over";
+  var win=score>=80;
+  ovT.textContent=win?"策展人狂赞!":"还差点意思";
+  ovP.textContent="海洋生物 "+s+" 个 (+"+(s*10)+")\n乱入物品 "+b+" 个 ("+(b?-b*10:0)+")\n象限覆盖 "+quads+"/4 (+"+(quads*10)+")"+(placed.length<5?"\n不足 5 个元素 -15":"");
+  ovS.style.display="block";ovS.textContent="构图总分 "+score+" · "+(win?"及格!":"目标 80");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+});
+btnGo.addEventListener("click",function(){
+  clearAll();sel=null;
+  var bs=palEl.children,k;
+  for(k=0;k<bs.length;k++)bs[k].className="";
+  state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  hud();
+});
+hud();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双线监控</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#4a0e2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双线监控</h1>
+  <p class="hint">左右两个战区独立出信号:F / ← 处理左区,J / → 处理右区 · 两侧可能同时告警!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双线监控</h2>
+      <p id="ovDesc">左区按 F(或 ←),右区按 J(或 →),也可以直接点击信号。两条战线各自计时,信号拖太久或按错战区都会扣机会——两侧同时告警时才是真正的大脑风暴!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=300,KEY="mg_s231";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elCombo=$("combo"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,combo=0,lives=3;
+var zones=[null,null],nextAt=[0,0];
+var flashSide=-1,flashUntil=0,startAt=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function windowMs(){return Math.max(950,1600-score*6);}
+function intervalMs(){return Math.max(760,1500-score*5);}
+function updateHud(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="防线失守";
+  ovDesc.textContent="双线告警太多,顾此失彼了!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#232849";
+  ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(W/2,16);ctx.lineTo(W/2,H-16);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle="#3b457c";
+  ctx.font="bold 15px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText("左区 · F",120,H-14);
+  ctx.fillText("右区 · J",360,H-14);
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.16)";
+    if(flashSide===0)ctx.fillRect(0,0,W/2,H);
+    else ctx.fillRect(W/2,0,W/2,H);
+  }
+  var s;
+  for(s=0;s<2;s++){
+    var z=zones[s];
+    if(!z)continue;
+    var frac=1-(t-z.born)/windowMs();
+    if(frac<0)frac=0;
+    ctx.beginPath();ctx.arc(z.x,z.y,15,0,Math.PI*2);
+    ctx.fillStyle=s===0?"#f472b6":"#38bdf8";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(z.x,z.y,24,-Math.PI/2,-Math.PI/2+Math.PI*2*frac);
+    ctx.strokeStyle=frac>0.35?"#4ade80":"#f87171";
+    ctx.lineWidth=5;ctx.stroke();ctx.lineWidth=1;
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  lastT=t;
+  if(state==="playing"){
+    var s;
+    for(s=0;s<2;s++){
+      if(!zones[s]&&t>=nextAt[s]){
+        zones[s]={x:(s===0?50:250)+Math.random()*140,y:40+Math.random()*190,born:t};
+      }
+      if(zones[s]&&t-zones[s].born>windowMs()){
+        zones[s]=null;
+        lives--;
+        combo=0;
+        flashSide=s;flashUntil=t+300;
+        nextAt[s]=t+520;
+        updateHud();
+        if(lives<=0){endGame();return;}
+      }
+    }
+  }
+  draw(t);
+}
+function clearZone(s){
+  if(state!=="playing")return;
+  var t=performance.now();
+  if(zones[s]){
+    zones[s]=null;
+    combo++;
+    score+=10+Math.min(20,combo*2);
+    nextAt[s]=t+intervalMs()*(0.8+Math.random()*0.5);
+  }else{
+    combo=0;
+    score-=4;
+    if(score<0)score=0;
+  }
+  updateHud();
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+cv.addEventListener("mousedown",function(e){var p=pos(e);clearZone(p.x<W/2?0:1);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();var p=pos(e);clearZone(p.x<W/2?0:1);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="f"||e.key==="F"||e.key==="ArrowLeft"){e.preventDefault();clearZone(0);}
+  else if(e.key==="j"||e.key==="J"||e.key==="ArrowRight"){e.preventDefault();clearZone(1);}
+});
+function startGame(){
+  score=0;combo=0;lives=3;
+  zones=[null,null];
+  var t=performance.now();
+  nextAt=[t+600,t+1100];
+  state="playing";
+  startAt=t;
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>贯穿炮线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#ff70a6;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#ff70a6;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ff70a6}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#ff70a6;color:#3d0a20;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>贯穿炮线</h1>
+  <p class="hint">先点一枚方块,再点它同行/列的同级方块<br>两点贯穿一线,途中方块全部清除,端点合而为一!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>步数 <b id="steps">24</b></span>
+    <span>最高 <b id="mx">2</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="336" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">贯穿炮线</h2>
+      <p id="ovP">线拉得越长,清得越多,分得越狠\n每 800 分奖励 2 步,步数用完即收官</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=8,ROWS=7,CELL=40,BX=8,BY=10;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#e56399','#ffd166'];
+var grid=[],sel=null,score=0,best=0,steps=24,nextBonus=800,state='ready';
+var flashes=[];
+function randE(){return Math.random()<0.75?1:2;}
+function addScore(n){
+  score+=n;
+  if(score>best)best=score;
+  if(score>=nextBonus){nextBonus+=800;steps+=2;}
+  $('score').textContent=score;$('steps').textContent=String(steps);$('best').textContent=best;
+}
+function newBoard(){
+  var r,c;
+  grid=[];
+  for(r=0;r<ROWS;r++){grid.push([]);for(c=0;c<COLS;c++)grid[r].push(randE());}
+}
+function compactRefill(){
+  var r,c,stack,i;
+  for(c=0;c<COLS;c++){
+    stack=[];
+    for(r=ROWS-1;r>=0;r--)if(grid[r][c]>0)stack.push(grid[r][c]);
+    for(r=ROWS-1,i=0;r>=0;r--,i++){
+      if(i<stack.length)grid[r][c]=stack[i];
+      else grid[r][c]=randE();
+    }
+  }
+}
+function maxOn(){var m=0,r,c;for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++)if(grid[r][c]>m)m=grid[r][c];return m;}
+function fire(a,b){
+  var e=grid[a.r][a.c],path=[],r,c;
+  if(a.r===b.r){
+    var c0=Math.min(a.c,b.c),c1=Math.max(a.c,b.c);
+    for(c=c0;c<=c1;c++)path.push({r:a.r,c:c});
+  }else{
+    var r0=Math.min(a.r,b.r),r1=Math.max(a.r,b.r);
+    for(r=r0;r<=r1;r++)path.push({r:r,c:a.c});
+  }
+  addScore(path.length*e*10);
+  for(var i=1;i<path.length-1;i++){
+    grid[path[i].r][path[i].c]=0;
+    flashes.push({r:path[i].r,c:path[i].c,t:0});
+  }
+  grid[a.r][a.c]=0;
+  flashes.push({r:a.r,c:a.c,t:0});
+  grid[b.r][b.c]=Math.min(9,e+1);
+  flashes.push({r:b.r,c:b.c,t:0,em:true});
+  steps--;$('steps').textContent=String(steps);
+  compactRefill();
+  $('mx').textContent=String(Math.pow(2,maxOn()));
+  if(steps<=0)finish();
+}
+function clickAt(x,y){
+  if(state!=='play')return;
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=ROWS||c<0||c>=COLS)return;
+  if(grid[r][c]===0){sel=null;return;}
+  if(!sel){sel={r:r,c:c};return;}
+  if(sel.r===r&&sel.c===c){sel=null;return;}
+  var sameLine=(sel.r===r||sel.c===c);
+  var sameE=(grid[sel.r][sel.c]===grid[r][c]);
+  if(sameLine&&sameE){var a=sel;sel=null;fire(a,{r:r,c:c});}
+  else sel={r:r,c:c};
+}
+function finish(){
+  state='over';
+  $('ovT').textContent='炮线收官';
+  $('ovP').textContent='最高合成到 '+Math.pow(2,maxOn())+' 级';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  newBoard();score=0;steps=24;nextBonus=800;sel=null;flashes=[];
+  $('score').textContent='0';$('steps').textContent='24';$('mx').textContent='2';$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function update(dt){
+  var i;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.4)k.push(flashes[i]);
+  flashes=k;
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,336,300);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,336,300);
+  var r,c,i;
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    var e=grid.length?grid[r][c]:0;
+    if(e>0){
+      var aim=sel&&grid[sel.r]&&grid[sel.r][sel.c]===e&&(sel.r===r||sel.c===c)&&!(sel.r===r&&sel.c===c);
+      ctx.fillStyle=CCOL[Math.min(e,9)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,8);ctx.fill();
+      if(aim){
+        ctx.save();ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;ctx.setLineDash([4,4]);
+        roundRect(BX+c*CELL+2,BY+r*CELL+2,CELL-4,CELL-4,8);ctx.stroke();ctx.restore();
+      }
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      ctx.font='700 '+Math.min(19,11+e*2)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(Math.pow(2,e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  if(sel&&state==='play'){
+    ctx.save();ctx.strokeStyle='#ff70a6';ctx.lineWidth=2.5;
+    roundRect(BX+sel.c*CELL+2,BY+sel.r*CELL+2,CELL-4,CELL-4,8);ctx.stroke();
+    ctx.restore();
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.4;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle=f.em?'#ffd166':'#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*7,BY+f.r*CELL+3-pr*7,CELL-6+pr*14,CELL-6+pr*14,8);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'&&!sel){
+    ctx.fillStyle='rgba(255,112,166,.7)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('点击第一枚方块',168,BY-2);
+  }else if(state==='play'&&sel){
+    ctx.fillStyle='rgba(255,112,166,.7)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('再点同行/列同级方块,发射贯穿炮线',168,BY-2);
+  }
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*336/rc.width,(e.clientY-rc.top)*300/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*336/rc.width,(t.clientY-rc.top)*300/rc.height);
+  e.preventDefault();
+},{passive:false});
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

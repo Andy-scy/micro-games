@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>屏息一箭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#9fd8ff;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#9fd8ff;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.bth{display:flex;justify-content:center;margin:2px 0 8px}
+.bth button{background:#26314f;color:#9fd8ff;border:1px solid #3a4a75;border-radius:10px;padding:9px 26px;font-size:14px;font-family:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
+.bth button:active{background:#33426b}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#9fd8ff}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#9fd8ff;color:#0b2740;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>屏息一箭</h1>
+  <p class="hint">按住空格或「屏息」键稳住准星 · 气槽耗尽会喘气 · 十箭拿 70 分</p>
+  <div class="hud">
+    <span>箭 <b id="ar">0</b>/10</span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>目标 <b>70</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="bth"><button id="bh">按住屏息</button></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">屏息一箭</h2>
+      <p id="ovD">久持弓者手必晃:准星会越晃越大。按住空格(或下方按钮)屏住呼吸,准星会缓缓收拢到一点——但气槽正在耗尽,见底就会猛地喘气,准星瞬间大乱。什么时候射、屏多久,是这一局的全部学问。靶小环密,十箭拿 70 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">举弓</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn"),bh=$("bh");
+const elAr=$("ar"),elSc=$("sc"),elMsg=$("msg");
+const CX=240,CY=240,TR=58,OX=240,OY=540,FLIGHT=0.18;
+const RING=["#eceff1","#eceff1","#455a64","#455a64","#1e88e5","#1e88e5","#e53935","#e53935","#ffc107","#ffc107"];
+let state="menu",score=0,used=0,tp=0,endT=-1;
+let amp=2.5,breath=100,holding=false,gaspLock=false;
+let mouse={x:240,y:240},flies=[],marks=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function swayAim(){return{x:mouse.x+Math.sin(tp*2.3)*amp,y:mouse.y+Math.cos(tp*1.7)*amp*0.8};}
+function ringVal(d){if(d>TR)return 0;return Math.max(1,10-Math.floor(d/(TR/10)));}
+function hold(v){
+  if(v){
+    if(state==="play"&&!gaspLock&&breath>0)holding=true;
+  }else holding=false;
+}
+function fire(){
+  if(state!=="play"||used>=10||flies.length>=2)return;
+  const a=swayAim();
+  flies.push({x0:OX,y0:OY,x1:a.x,y1:a.y,t:0});
+  amp=Math.min(30,amp+4);
+}
+function resolve(f){
+  const v=ringVal(Math.hypot(f.x1-CX,f.y1-CY));
+  used++;score+=v;
+  marks.push({x:f.x1,y:f.y1,v:v});
+  elMsg.textContent=v>0?(v+" 环"+(v>=9?"!":"")):"脱靶";
+  elAr.textContent=used;elSc.textContent=score;
+  if(used>=10)endT=0.6;
+}
+function startGame(){
+  score=0;used=0;flies=[];marks=[];endT=-1;tp=0;
+  amp=2.5;breath=100;holding=false;gaspLock=false;
+  elMsg.textContent="";elAr.textContent="0";elSc.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";holding=false;
+  const win=score>=70;
+  ovT.textContent=win?"心静如水!":"气息未匀";
+  ovD.textContent=win?"每一箭都射在呼吸的间隙里,这才是屏息的真义。":"气要省着用:屏息不是越久越好,是把准星收到最小的一瞬。";
+  ovS.textContent="总分 "+score+" · 目标 70 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+bh.addEventListener("mousedown",function(e){e.preventDefault();hold(true);});
+bh.addEventListener("mouseup",function(){hold(false);});
+bh.addEventListener("mouseleave",function(){hold(false);});
+bh.addEventListener("touchstart",function(e){e.preventDefault();hold(true);},{passive:false});
+bh.addEventListener("touchend",function(){hold(false);});
+bh.addEventListener("touchcancel",function(){hold(false);});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "){e.preventDefault();if(!e.repeat)hold(true);return;}
+  if((e.key==="Enter")&&state!=="play"){startGame();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" ")hold(false);
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  if(state!=="menu")tp+=dt;
+  if(state==="play"){
+    if(holding&&!gaspLock&&breath>0){
+      amp=Math.max(1.5,amp-20*dt);
+      breath-=30*dt;
+      if(breath<=0){
+        breath=0;holding=false;gaspLock=true;
+        amp=Math.min(30,amp+10);
+        elMsg.textContent="憋不住了!喘气…";
+      }
+    }else{
+      amp=Math.min(26,amp+12*dt);
+      breath=Math.min(100,breath+14*dt);
+      if(gaspLock&&breath>=35){gaspLock=false;elMsg.textContent="气息回稳";}
+    }
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];f.t+=dt/FLIGHT;
+      if(f.t>=1){resolve(f);flies.splice(i,1);}
+    }
+    if(endT>0){endT-=dt;if(endT<=0)finish();}
+  }
+  draw();
+}
+function drawBreath(){
+  const bx=70,bw=340,by=516,bh2=14;
+  ctx.fillStyle="rgba(0,0,0,0.4)";
+  ctx.fillRect(bx-4,by-4,bw+8,bh2+8);
+  ctx.fillStyle="#22304f";
+  ctx.fillRect(bx,by,bw,bh2);
+  const k=breath/100;
+  ctx.fillStyle=gaspLock?"#ef5350":(k<0.35?"#ffb74d":"#4dd0e1");
+  ctx.fillRect(bx,by,bw*k,bh2);
+  ctx.fillStyle="#9fd8ff";ctx.font="12px system-ui";ctx.textAlign="left";
+  ctx.fillText("气槽",bx,by-8);
+  if(gaspLock){
+    ctx.fillStyle="#ef5350";ctx.textAlign="right";
+    ctx.fillText("喘气中…",bx+bw,by-8);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#16283d");g.addColorStop(1,"#0d1522");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#16301f";ctx.fillRect(0,480,W,H-480);
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  for(let i=10;i>=1;i--){
+    ctx.fillStyle=RING[10-i];
+    ctx.beginPath();ctx.arc(CX,CY,TR*i/10,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  ctx.strokeStyle="#4a3a22";ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(CX-30,CY+TR+6);ctx.lineTo(CX-55,500);ctx.moveTo(CX+30,CY+TR+6);ctx.lineTo(CX+55,500);ctx.stroke();
+  for(let i=0;i<marks.length;i++){
+    const m=marks[i];
+    ctx.strokeStyle=m.v>=9?"#00e676":"#ffffff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(m.x-4,m.y-4);ctx.lineTo(m.x+4,m.y+4);ctx.moveTo(m.x+4,m.y-4);ctx.lineTo(m.x-4,m.y+4);ctx.stroke();
+  }
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i],e=Math.min(1,f.t);
+    const px=f.x0+(f.x1-f.x0)*e,py=f.y0+(f.y1-f.y0)*e;
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(px-14,py+6);ctx.lineTo(px,py);ctx.stroke();
+  }
+  if(state==="play"&&used<10){
+    const a=swayAim();
+    ctx.strokeStyle="rgba(159,216,255,0.35)";ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(a.x,a.y,Math.max(4,amp*2),0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle=holding?"#a5ffcf":"#9fd8ff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(a.x,a.y,7,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(a.x-13,a.y);ctx.lineTo(a.x-4,a.y);
+    ctx.moveTo(a.x+4,a.y);ctx.lineTo(a.x+13,a.y);
+    ctx.moveTo(a.x,a.y-13);ctx.lineTo(a.x,a.y-4);
+    ctx.moveTo(a.x,a.y+4);ctx.lineTo(a.x,a.y+13);ctx.stroke();
+  }
+  drawBreath();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

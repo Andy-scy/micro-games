@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钥匙寻踪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center;min-height:26px}
+.hud b{color:#fbbf24;font-size:16px}
+.msg{color:#fbbf24;font-size:13px;min-height:18px;text-align:center;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>钥匙寻踪</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏滑动 · 集齐 3 把钥匙打开宝箱</p>
+  <div class="hud">
+    <span>钥匙 <b id="keys">0/3</b></span>
+    <span>步数 <b id="steps">0</b></span>
+    <span>用时 <b id="time">0.0s</b></span>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">钥匙寻踪</h2>
+      <p id="ovDesc">迷宫深处藏着一只上锁的宝箱,而 3 把金钥匙散落在迷宫各处。先收集所有钥匙,再抵达宝箱将其打开。宝箱会被放在离你最远的角落,规划好路线再出发!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始寻宝</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elKeys=$("keys"),elSteps=$("steps"),elTime=$("time"),elMsg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s263");
+var state="menu";
+var grid,player,keys,chest,keysGot,steps,elapsed,pulse,msgT,msgText;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function bfs(sx,sy){
+  var dist=[],i,j,q=[],head=0,dirs=[[1,0],[-1,0],[0,1],[0,-1]],k;
+  for(j=0;j<ROWS;j++){dist.push(new Array(COLS));for(i=0;i<COLS;i++)dist[j][i]=-1;}
+  dist[sy][sx]=0;q.push([sx,sy]);
+  while(head<q.length){
+    var c=q[head];head++;
+    for(k=0;k<4;k++){
+      var nx=c[0]+dirs[k][0],ny=c[1]+dirs[k][1];
+      if(nx<0||ny<0||nx>=COLS||ny>=ROWS)continue;
+      if(grid[ny][nx]===1||dist[ny][nx]!==-1)continue;
+      dist[ny][nx]=dist[c[1]][c[0]]+1;
+      q.push([nx,ny]);
+    }
+  }
+  return dist;
+}
+function setMsg(s){msgText=s;msgT=2.4;}
+function reset(){
+  grid=genMaze(10,10);
+  player={x:1,y:1};
+  var dist=bfs(1,1),x,y;
+  var far={x:1,y:1,d:0};
+  for(y=1;y<ROWS-1;y++)for(x=1;x<COLS-1;x++){
+    if(grid[y][x]===0&&dist[y][x]>far.d)far={x:x,y:y,d:dist[y][x]};
+  }
+  chest={x:far.x,y:far.y};
+  var cells=[];
+  for(y=1;y<ROWS-1;y++)for(x=1;x<COLS-1;x++){
+    if(grid[y][x]===0&&dist[y][x]>=8&&!(x===chest.x&&y===chest.y))cells.push({x:x,y:y});
+  }
+  keys=[];
+  var guard=0;
+  while(keys.length<3&&cells.length&&guard<400){
+    guard++;
+    var i=(Math.random()*cells.length)|0,c=cells[i],bad=false,j;
+    for(j=0;j<keys.length;j++)if(keys[j].x===c.x&&keys[j].y===c.y)bad=true;
+    if(!bad)keys.push({x:c.x,y:c.y,got:false});
+    cells.splice(i,1);
+  }
+  keysGot=0;steps=0;elapsed=0;pulse=0;msgT=0;
+  updateHud();
+}
+function updateHud(){
+  elKeys.textContent=keysGot+"/"+keys.length;
+  elSteps.textContent=steps;
+}
+function tryMove(dx,dy){
+  if(state!=="playing")return;
+  var nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return;
+  if(grid[ny][nx]===1)return;
+  player.x=nx;player.y=ny;
+  steps++;
+  var i;
+  for(i=0;i<keys.length;i++){
+    if(!keys[i].got&&keys[i].x===nx&&keys[i].y===ny){
+      keys[i].got=true;keysGot++;
+      setMsg("捡到第 "+keysGot+" 把金钥匙!");
+    }
+  }
+  if(nx===chest.x&&ny===chest.y){
+    if(keysGot>=keys.length)win();
+    else setMsg("宝箱紧锁,还差 "+(keys.length-keysGot)+" 把钥匙");
+  }
+  updateHud();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||steps<best){best=steps;saveBest("mg_s263",best);isNew=true;}
+  ovTitle.textContent="宝藏到手!";
+  ovDesc.textContent=isNew?"新纪录!你是最高效的寻宝人。":"宝箱轰然洞开,金光洒满了整条回廊。";
+  ovScore.style.display="block";
+  ovScore.textContent="用时 "+elapsed.toFixed(1)+"s · 步数 "+steps+" · 最少步纪录 "+(best>0?best:"--");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#232a4d";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#2c3560";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function drawKey(x,y){
+  var cx=x*CELL+CELL/2,cy=y*CELL+CELL/2;
+  ctx.strokeStyle="#fbbf24";
+  ctx.shadowColor="#fbbf24";ctx.shadowBlur=8;
+  ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(cx-3,cy,3.5,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx+0.5,cy);ctx.lineTo(cx+8,cy);ctx.moveTo(cx+5,cy);ctx.lineTo(cx+5,cy+4);ctx.moveTo(cx+8,cy);ctx.lineTo(cx+8,cy+4);ctx.stroke();
+  ctx.lineWidth=1;ctx.shadowBlur=0;
+}
+function drawChest(){
+  var x=chest.x*CELL,y=chest.y*CELL;
+  var open=keysGot>=keys.length;
+  ctx.fillStyle=open?"#a16207":"#6b4a23";
+  ctx.fillRect(x+3,y+8,CELL-6,CELL-13);
+  ctx.fillStyle=open?"#fbbf24":"#8a5a2b";
+  ctx.fillRect(x+3,y+5,CELL-6,7);
+  if(open){
+    ctx.shadowColor="#fbbf24";ctx.shadowBlur=14;
+    ctx.fillStyle="rgba(251,191,36,0.5)";
+    ctx.fillRect(x+6,y+10,CELL-12,CELL-18);
+    ctx.shadowBlur=0;
+  }else{
+    ctx.fillStyle="#e5e7eb";
+    ctx.fillRect(x+CELL/2-2.5,y+9,5,7);
+  }
+}
+function draw(){
+  var x,y,i;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1)drawWall(x,y);
+  }
+  drawChest();
+  for(i=0;i<keys.length;i++){
+    if(!keys[i].got)drawKey(keys[i].x,keys[i].y);
+  }
+  var px=player.x*CELL+CELL/2,py=player.y*CELL+CELL/2;
+  ctx.fillStyle="#67e8f9";
+  ctx.shadowColor="#22d3ee";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(px,py,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(state==="playing"){
+    elapsed+=dt/1000;
+    elTime.textContent=elapsed.toFixed(1)+"s";
+  }
+  if(msgT>0){msgT-=dt/1000;elMsg.textContent=msgText;}
+  else elMsg.textContent="";
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))tryMove(dx>0?1:-1,0);
+  else tryMove(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

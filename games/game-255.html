@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幻影默写</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:10px}
+#stage{position:relative;width:100%;max-width:640px;background:#151a30;border-radius:14px;padding:30px 18px;text-align:center}
+#word{font-size:40px;font-family:ui-monospace,Consolas,monospace;letter-spacing:4px;color:#b18cff;min-height:56px}
+#word.gone{color:#39406b}
+#timerBar{height:6px;background:#232a4a;border-radius:3px;margin:14px auto 0;max-width:340px;overflow:hidden}
+#timerFill{height:100%;width:100%;background:#b18cff}
+#stage.err{animation:shk .18s}
+@keyframes shk{0%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}100%{transform:translateX(0)}}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;z-index:2}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#b18cff}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>幻影默写</h1>
+<div id="tip">单词只闪现一瞬间就化作幻影：凭记忆打出它；打错会损失护盾</div>
+<div id="hud"></div>
+<div id="stage">
+<div id="word"></div>
+<div id="timerBar"><div id="timerFill"></div></div>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var WORDS=["orbit","pixel","flame","ghost","raven","maple","quartz","zenith","lantern","vortex","cipher","marble","ripple","saffron","tundra","willow","gambit","hollow","jasper","kindle","lumber","mellow","nectar","puzzle","rumble","saddle","tempest","urchin","velvet","wombat"];
+var TOTAL=10;
+var hud=document.getElementById('hud');
+var wordEl=document.getElementById('word'),fillEl=document.getElementById('timerFill'),stage=document.getElementById('stage');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var word,idx,phase,revealT,revealMax,qNum,score,shields,okChars,errChars,running,raf,tPrev,over;
+function hudUpd(){hud.textContent='第 '+qNum+'/'+TOTAL+' 词　得分 '+score+'　护盾 '+shields+'　错误 '+errChars;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function pickWord(){
+  return shuffle(WORDS.slice()).slice(0,TOTAL);
+}
+function reset(){
+  word='';idx=0;phase='show';revealT=0;revealMax=2;qNum=0;score=0;shields=6;okChars=0;errChars=0;over=false;
+  queue=pickWord();
+  nextWord();
+  hudUpd();
+}
+var queue=[];
+function nextWord(){
+  if(qNum>=TOTAL){win();return;}
+  word=queue[qNum];idx=0;qNum++;
+  revealMax=Math.max(0.8,2.0-qNum*0.12);
+  revealT=revealMax;
+  phase='show';
+  render();
+  hudUpd();
+}
+function render(){
+  if(phase==='show'){
+    wordEl.className='';
+    wordEl.textContent=word;
+    fillEl.style.width='100%';
+  }else{
+    wordEl.className='gone';
+    var s='';
+    for(var i=0;i<word.length;i++){
+      s+=(i<idx)?word.charAt(i):'\u2022';
+    }
+    wordEl.textContent=s;
+  }
+}
+function handleChar(ch){
+  if(!running||over)return;
+  if(ch==='\b')return;
+  if(phase==='show')return;
+  if(!/^[a-z]$/.test(ch.toLowerCase()))return;
+  ch=ch.toLowerCase();
+  if(ch===word.charAt(idx)){
+    idx++;okChars++;score+=8;
+    render();
+    if(idx>=word.length){
+      score+=20+word.length*2;
+      nextWord();
+    }
+  }else{
+    errChars++;shields--;
+    score=Math.max(0,score-5);
+    stage.classList.remove('err');
+    void stage.offsetWidth;
+    stage.classList.add('err');
+    hudUpd();
+    if(shields<=0){end(false);return;}
+  }
+}
+function win(){
+  if(over)return;over=true;running=false;
+  ovT.textContent='默写完成';
+  ovX.textContent='得分 '+score+'\n完成 '+TOTAL+' 个幻影单词\n正确 '+okChars+' 字　错误 '+errChars+' 字';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function end(){
+  if(over)return;over=true;running=false;
+  ovT.textContent='护盾碎裂';
+  ovX.textContent='得分 '+score+'\n默写到第 '+(qNum-1)+'/'+TOTAL+' 个单词\n累计错误 '+errChars+' 次';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function update(dt){
+  if(phase==='show'){
+    revealT-=dt;
+    fillEl.style.width=Math.max(0,revealT/revealMax*100)+'%';
+    if(revealT<=0){
+      phase='type';
+      render();
+    }
+  }
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);
+  raf=requestAnimationFrame(loop);
+}
+function start(){
+  reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  stage.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+reset();
+ovT.textContent='幻影默写';
+ovX.textContent='单词完整显示约 2 秒后隐去，只剩幻影圆点。\n凭记忆按顺序打出整词；打错扣 1 格护盾并 -5 分。\n展示时间会越来越短，护盾共 6 格。';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

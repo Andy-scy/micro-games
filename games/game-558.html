@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>时钟接龙 今日同局</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:720px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:14px;width:100%;max-width:620px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+.pile{background:rgba(0,0,0,.25);border:2px solid transparent;border-radius:10px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.pile.cur{border-color:#ffd166}
+.pile .pl{font-size:12px;color:#9aa3c0}
+.card{width:38px;height:52px;border-radius:6px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,.4);user-select:none;animation:pop .2s ease}
+@keyframes pop{from{transform:scale(.5)}to{transform:scale(1)}}
+.card.red{color:#d62839}
+.card .r{font-size:12px;font-weight:800}
+.card .s{font-size:18px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+.pnum{font-size:11px;color:#6b7a99}
+#curCard{min-height:70px;display:flex;align-items:center;justify-content:center;gap:10px}
+#msg{min-height:20px;font-size:14px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>时钟接龙 · 今日同局</h1>
+<p id="how">52 张牌分 13 堆（A 到 K 各一堆）。从 K 堆开始翻：翻到几就跳到几的那堆继续翻，看链条能走多远。翻出第 4 张 K 或链条断在空堆则失败，翻完全部 52 张是大满贯。今天的洗牌顺序全世界都一样！</p>
+<div id="bar"><span>已翻 <b id="rv">0</b>/52</span><span>K 已现 <b id="kv">0</b>/4</span><span id="seedTxt">今日挑战</span></div>
+<div id="table">
+  <div id="grid"></div>
+  <div id="curCard"></div>
+  <div id="msg"></div>
+  <div id="btns">
+    <button id="flip" class="acc">翻一张</button>
+    <button id="daily">今日挑战</button>
+    <button id="rand">随机一局</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var piles=[],cur=12,revealed=0,kings=0,over=true,modeTxt='';
+function $(id){return document.getElementById(id);}
+function lcg(seed){
+  var s=seed%2147483647;
+  if(s<=0)s+=2147483646;
+  return function(){s=(s*16807)%2147483647;return (s-1)/2147483646;};
+}
+function cardHTML(c,back){
+  if(back)return '<div class="card back"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('rv').textContent=revealed;$('kv').textContent=kings;
+  $('seedTxt').textContent=modeTxt;
+  var g=$('grid');g.innerHTML='';
+  for(var i=0;i<12;i++){
+    var p=document.createElement('div');
+    p.className='pile'+(i===cur&&!over?' cur':'');
+    var top=null;
+    for(var k=0;k<piles[i].length;k++)if(piles[i][k].open){top=piles[i][k];}
+    var inner='<div class="pl">'+RANKS[i]+'</div>';
+    inner+=top?cardHTML(top,false):cardHTML(null,true);
+    inner+='<div class="pnum">剩 '+piles[i].filter(function(c){return !c.open;}).length+'</div>';
+    p.innerHTML=inner;
+    g.appendChild(p);
+  }
+  var cp=document.createElement('div');
+  cp.className='pile'+(cur===12&&!over?' cur':'');
+  var ctop=null;
+  for(var m=0;m<piles[12].length;m++)if(piles[12][m].open)ctop=piles[12][m];
+  cp.style.borderColor=(cur===12&&!over)?'#ffd166':'transparent';
+  cp.innerHTML='<div class="pl">K · 起点</div>'+(ctop?cardHTML(ctop,false):cardHTML(null,true))+'<div class="pnum">剩 '+piles[12].filter(function(c){return !c.open;}).length+'</div>';
+  $('curCard').innerHTML='';
+  $('curCard').appendChild(cp);
+  $('flip').disabled=over;
+}
+function msg(s){$('msg').textContent=s;}
+function flip(){
+  if(over)return;
+  var pile=piles[cur];
+  if(pile.length===0){
+    over=true;render();
+    end(false,'链条断在 '+RANKS[cur]+' 堆的空位上');
+    return;
+  }
+  var c=pile[pile.length-1];
+  c.open=true;revealed++;
+  var idx=RANKS.indexOf(c.r);
+  msg('翻出 '+c.r+c.s+'，跳到 '+c.r+' 堆');
+  if(c.r==='K'){
+    kings++;
+    if(kings>=4){
+      over=true;render();
+      end(false,'第 4 张 K 出现，链条终结');
+      return;
+    }
+  }
+  cur=idx;
+  if(revealed===52){
+    over=true;render();
+    end(true,'52 张全部翻开，大满贯！万里挑一！');
+    return;
+  }
+  render();
+}
+function end(win,info){
+  over=true;
+  $('ovt').textContent=win?'大满贯！':'本局结束';
+  $('ovi').textContent=info+' 共翻开 '+revealed+' 张（'+modeTxt+'）';
+  $('over').classList.remove('hide');
+}
+function start(seed,txt){
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j],open:false});
+  var rng=lcg(seed);
+  for(var k=d.length-1;k>0;k--){
+    var n=Math.floor(rng()*(k+1));
+    var t=d[k];d[k]=d[n];d[n]=t;
+  }
+  piles=[];
+  for(var p=0;p<13;p++)piles.push(d.slice(p*4,p*4+4));
+  cur=12;revealed=0;kings=0;over=false;modeTxt=txt;
+  $('over').classList.add('hide');
+  msg('从 K 堆开始，点「翻一张」启动链条');render();
+}
+$('flip').onclick=flip;
+$('daily').onclick=function(){
+  var now=new Date();
+  var seed=now.getFullYear()*10000+(now.getMonth()+1)*100+now.getDate();
+  start(seed,'今日挑战 '+now.getFullYear()+'-'+(now.getMonth()+1)+'-'+now.getDate());
+};
+$('rand').onclick=function(){
+  var seed=Math.floor(Math.random()*2147483000)+1;
+  start(seed,'随机局 #'+seed);
+};
+$('again').onclick=function(){
+  if(modeTxt.indexOf('今日')===0){$('daily').onclick();}
+  else{$('rand').onclick();}
+};
+var now0=new Date();
+var seed0=now0.getFullYear()*10000+(now0.getMonth()+1)*100+now0.getDate();
+start(seed0,'今日挑战 '+now0.getFullYear()+'-'+(now0.getMonth()+1)+'-'+now0.getDate());
+})();
+</script>
+</body>
+</html>

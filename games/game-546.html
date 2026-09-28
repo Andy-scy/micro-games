@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快拍J 手速对决</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:12px;padding:12px 26px;font-size:17px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:800}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:640px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#pile{min-height:130px;display:flex;align-items:center;justify-content:center}
+.card{width:82px;height:118px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .18s ease}
+@keyframes pop{from{transform:scale(.6) rotate(6deg)}to{transform:scale(1) rotate(0)}}
+.card.red{color:#d62839}
+.card .r{font-size:30px;font-weight:800}
+.card .s{font-size:44px;line-height:1}
+.card.none{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.none span{visibility:hidden}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center;font-weight:700}
+#btns{display:flex;gap:12px}
+#rest{display:flex;gap:6px;min-height:22px}
+.tiny{width:20px;height:28px;border-radius:4px;background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>快拍 J · 手速对决</h1>
+<p id="how">牌桌自动往上叠牌，一见 J 出现就点「拍！」或按空格，抢在 AI 前面拍走整叠牌得分（10 + 张数×2）。乱拍会扣一颗心，3 心用完失败；先拿 80 分即胜利。</p>
+<div id="bar"><span>你 <b id="ps">0</b></span><span>AI <b id="as">0</b></span><span>心 <b id="lv">♥♥♥</b></span><span>牌堆 <b id="dc">0</b></span><span>目标 80 分</span></div>
+<div id="table">
+  <div id="pile"></div>
+  <div id="msg"></div>
+  <div id="btns"><button id="slap" class="acc">拍！</button><button id="rst">重新开始</button></div>
+  <div id="rest"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],pile=[],score=0,aiScore=0,lives=3,phase='run',mode='idle',wait=800,aiAt=0,aiSlapped=false,raf=null,shake=0;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function cardHTML(c){
+  if(!c)return '<div class="card none"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('ps').textContent=score;$('as').textContent=aiScore;$('dc').textContent=deck.length;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'·';
+  $('lv').textContent=h;
+  $('pile').innerHTML=cardHTML(pile.length?pile[pile.length-1]:null);
+  var r='';for(var k=0;k<Math.min(6,deck.length);k++)r+='<div class="tiny"></div>';
+  $('rest').innerHTML=r;
+}
+function msg(s){$('msg').textContent=s;}
+function dealOne(){
+  if(deck.length===0){
+    if(pile.length<=1){finishAll();return;}
+    var top=pile[pile.length-1];pile=pile.slice(0,pile.length-1);shuffle(pile);deck=pile;pile=[top];
+  }
+  var c=deck.pop();pile.push(c);render();
+  if(c.r==='J'){
+    mode='jack';aiSlapped=false;aiAt=performance.now()+430+Math.random()*560;
+    msg('J 出现！快拍！');
+  }else{
+    mode='shown';wait=520+Math.random()*720;
+    msg('不是 J，盯紧…');
+  }
+}
+function aiTake(){
+  var gain=10+pile.length*2;aiScore+=gain;
+  pile=[];mode='idle';wait=900;
+  msg('AI 手更快，被它拍走 +'+gain);
+  render();checkWin();
+}
+function checkWin(){
+  if(score>=80){end(true,'你率先攒到 80 分！');return;}
+  if(aiScore>=80){end(false,'AI 率先攒到 80 分');return;}
+}
+function doSlap(){
+  if(phase!=='run')return;
+  if(mode==='jack'&&!aiSlapped){
+    var gain=10+pile.length*2;score+=gain;
+    pile=[];mode='idle';wait=900;
+    msg('好快！拍走 +'+gain+' 分');
+    render();checkWin();return;
+  }
+  lives--;shake=300;
+  msg('乱拍！扣一颗心');
+  if(mode==='jack')aiSlapped=true;
+  if(lives<=0){render();end(false,'三次乱拍，输掉比赛');return;}
+  if(mode==='jack'){aiTake();return;}
+  render();
+}
+function finishAll(){
+  if(score>aiScore)end(true,'牌尽局终，你以 '+score+' 比 '+aiScore+' 获胜');
+  else if(score<aiScore)end(false,'牌尽局终，AI 以 '+aiScore+' 比 '+score+' 获胜');
+  else end(true,'平分秋色！'+score+' 比 '+aiScore);
+}
+function master(ts){
+  raf=requestAnimationFrame(master);
+  if(phase!=='run')return;
+  if(mode==='idle'){wait-=16;if(wait<=0)dealOne();return;}
+  if(mode==='shown'){wait-=16;if(wait<=0)dealOne();return;}
+  if(mode==='jack'&&!aiSlapped&&ts>=aiAt){aiTake();return;}
+}
+function end(win,info){
+  phase='done';render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终比分 你 '+score+' : AI '+aiScore;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(raf)cancelAnimationFrame(raf);
+  refill();pile=[];score=0;aiScore=0;lives=3;phase='run';mode='idle';wait=800;
+  $('over').classList.add('hide');msg('准备，牌马上就来…');render();
+  raf=requestAnimationFrame(master);
+}
+$('slap').onclick=doSlap;
+$('rst').onclick=newGame;
+$('again').onclick=newGame;
+document.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();doSlap();}
+});
+newGame();
+})();
+</script>
+</body>
+</html>

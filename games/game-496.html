@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右开弓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4db6ac;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#4db6ac;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4db6ac}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4db6ac;color:#00312b;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>左右开弓</h1>
+  <p class="hint">左弓射完必须换右弓 · 用错弓扣分短锁 · 60 秒冲 200 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>轮到 <b id="tn">左弓</b></span>
+    <span>时间 <b id="tm">60</b>秒</span>
+    <span>机会 <b id="lv">3</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">左右开弓</h2>
+      <p id="ovD">双弓阵:左右两把弓轮流开,左弓射完必须换右弓,如此往复。用错弓会被罚 10 分并短暂锁弓;两侧的靶缓缓下降,漏到地面要扣一次机会。在轮替的节奏里找到连击的快感,60 秒冲 200 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">双手上阵</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTn=$("tn"),elTm=$("tm"),elLv=$("lv"),elMsg=$("msg");
+const GOAL=200,DUR=60,LANE_X=[120,360];
+let state="menu",score=0,timeLeft=DUR,elapsed=0,tp=0,turn=0,combo=0,lives=3,lockT=0;
+let mouse={x:240,y:280},targets=[],arrows=[],pops=[],laneCd=[0,0];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function spawn(lane){
+  const x=lane===0?50+Math.random()*160:270+Math.random()*160;
+  targets.push({x:x,y:-30,r:24,vy:55+elapsed*0.8,lane:lane});
+  laneCd[lane]=0.5;
+}
+function fire(){
+  if(state!=="play"||lockT>0)return;
+  const lane=mouse.x<240?0:1;
+  if(lane!==turn){
+    score=Math.max(0,score-10);
+    combo=0;lockT=0.7;
+    elMsg.textContent="用错弓了!现在该 "+(turn===0?"左":"右")+"弓";
+    elSc.textContent=score;
+    return;
+  }
+  arrows.push({x:mouse.x,y:540,py:540,lane:lane});
+  turn=1-turn;
+  elTn.textContent=turn===0?"左弓":"右弓";
+}
+function burst(x,y,col){
+  for(let i=0;i<10;i++){
+    const a=Math.random()*6.28,s=60+Math.random()*140;
+    pops.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:col});
+  }
+}
+function startGame(){
+  score=0;timeLeft=DUR;elapsed=0;tp=0;turn=0;combo=0;lives=3;lockT=0;
+  targets=[];arrows=[];pops=[];laneCd=[0.2,0.9];
+  elMsg.textContent="";elSc.textContent="0";elTn.textContent="左弓";elTm.textContent=DUR;elLv.textContent="3";
+  state="play";ov.classList.add("hide");
+}
+function finish(early){
+  state="over";
+  const win=!early&&score>=GOAL;
+  ovT.textContent=win?"双手神射!":"弓落沙场";
+  ovT.style.color=win?"#4db6ac":"#ef9a9a";
+  ovD.textContent=win?"左右两弓在你手里如臂使指,轮替毫无滞涩。":"别贪快:先默念左—右—左—右,射错弓的代价比慢一拍大得多。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    elapsed+=dt;timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(lockT>0)lockT-=dt;
+    for(let l=0;l<2;l++){
+      laneCd[l]-=dt;
+      let has=false;
+      for(let i=0;i<targets.length;i++)if(targets[i].lane===l)has=true;
+      if(!has&&laneCd[l]<=0)spawn(l);
+    }
+    for(let i=targets.length-1;i>=0;i--){
+      const tr=targets[i];
+      tr.y+=tr.vy*dt;
+      if(tr.y>505){
+        targets.splice(i,1);
+        lives--;
+        elLv.textContent=Math.max(0,lives);
+        elMsg.textContent="靶子落地!失去一次机会";
+        if(lives<=0){finish(true);}
+      }
+    }
+    for(let i=arrows.length-1;i>=0;i--){
+      const a=arrows[i];
+      a.py=a.y;a.y-=620*dt;
+      let hit=null;
+      for(let j=0;j<targets.length;j++){
+        const tr=targets[j];
+        if(tr.lane!==a.lane)continue;
+        if(a.py>=tr.y&&a.y<=tr.y&&Math.abs(tr.x-a.x)<tr.r+4){hit=tr;break;}
+      }
+      if(hit){
+        combo++;
+        const gain=12+combo*2;
+        score+=gain;
+        elMsg.textContent="中靶 +"+gain+(combo>1?" · 连击 x"+combo:"");
+        burst(hit.x,hit.y,"#80cbc4");
+        targets.splice(targets.indexOf(hit),1);
+        arrows.splice(i,1);
+        elSc.textContent=score;
+      }else if(a.y<-30){
+        arrows.splice(i,1);
+        combo=0;
+        elMsg.textContent="空箭,连击中断";
+      }
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;
+    }
+    if(state==="play"&&timeLeft<=0)finish(false);
+  }
+  draw();
+}
+function drawBow(lane){
+  const x=LANE_X[lane],y=530;
+  const active=state==="play"&&turn===lane&&lockT<=0;
+  if(active){
+    ctx.fillStyle="rgba(77,182,172,0.15)";
+    ctx.beginPath();ctx.arc(x,y,34,0,Math.PI*2);ctx.fill();
+  }
+  ctx.strokeStyle=active?"#4db6ac":"#546e7a";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(x,y,24,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  ctx.strokeStyle=active?"rgba(77,182,172,0.7)":"rgba(84,110,122,0.5)";ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(x-21,y-12);ctx.lineTo(x+21,y-12);ctx.stroke();
+  ctx.fillStyle=active?"#a7ffeb":"#37474f";ctx.font="bold 13px system-ui";ctx.textAlign="center";
+  ctx.fillText(lane===0?"左":"右",x,y+22);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#14332f");g.addColorStop(1,"#0b1a19");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(77,182,172,0.25)";ctx.lineWidth=2;
+  ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(240,0);ctx.lineTo(240,545);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle="rgba(0,0,0,0.3)";ctx.fillRect(0,545,W,H-545);
+  for(let i=0;i<targets.length;i++){
+    const tr=targets[i];
+    ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+    const cols=["#eceff1","#e53935","#ffc107"];
+    const rs=[1,0.6,0.28];
+    for(let k=0;k<3;k++){
+      ctx.fillStyle=cols[k];
+      ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r*rs[k],0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
+  }
+  for(let i=0;i<arrows.length;i++){
+    const a=arrows[i];
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(a.x,a.y+18);ctx.lineTo(a.x,a.y);ctx.stroke();
+    ctx.fillStyle="#f5f5f5";
+    ctx.beginPath();ctx.moveTo(a.x,a.y-7);ctx.lineTo(a.x-4,a.y+1);ctx.lineTo(a.x+4,a.y+1);ctx.closePath();ctx.fill();
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  drawBow(0);drawBow(1);
+  if(state==="play"&&lockT<=0){
+    ctx.strokeStyle="#a7ffeb";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,11,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-15,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+    ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+15,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-15);ctx.lineTo(mouse.x,mouse.y-5);
+    ctx.moveTo(mouse.x,mouse.y+5);ctx.lineTo(mouse.x,mouse.y+15);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

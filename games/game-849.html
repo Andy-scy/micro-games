@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一笔画</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:10px;margin-bottom:10px;display:flex;justify-content:center}
+svg{width:100%;max-width:330px;height:auto}
+.ln{stroke:#3a4470;stroke-width:7;stroke-linecap:round}
+.ln.used{stroke:#4ade80}
+.nd{fill:#2a3157;stroke:#56608f;stroke-width:3;cursor:pointer}
+.nd:hover{fill:#34407a}
+.nd.odd{stroke:#fbbf24;animation:pulse 1.2s infinite}
+.nd.cur{fill:#4f6ef7;stroke:#9db4ff}
+@keyframes pulse{0%,100%{stroke-width:3}50%{stroke-width:7}}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin-bottom:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>一笔画</h1>
+<p class="tip">从圆点出发,沿线条移动,把每条线都恰好走一遍。<br>闪黄圈的「奇点」是经典提示:有两个奇点时应从奇点出发。</p>
+<div class="hud"><span id="hE">已走 0/0 条</span><span id="hT">用时 0 秒</span></div>
+<div class="panel"><svg id="svg" viewBox="0 0 300 300"></svg></div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn" id="bUndo">回退</button><button class="btn pri" id="bNew">换一个图</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+let edges=[],odd=[],cur=-1,path=[],usedSet=null,sec=0,timer=null,over=false;
+function pos(i){return [60+(i%3)*90,60+Math.floor(i/3)*90];}
+function key(a,b){return a<b?a*10+b:b*10+a;}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function allPairs(){
+  const ps=[];
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    if(c<2)ps.push([r*3+c,r*3+c+1]);
+    if(r<2)ps.push([r*3+c,(r+1)*3+c]);
+  }
+  return ps;
+}
+function genGraph(){
+  for(let t=0;t<600;t++){
+    const ps=allPairs();
+    const inT=new Array(9).fill(false);
+    inT[Math.floor(Math.random()*9)]=true;
+    const tree=[];
+    while(tree.length<8){
+      const cand=ps.filter(p=>inT[p[0]]!==inT[p[1]]);
+      const e=cand[Math.floor(Math.random()*cand.length)];
+      tree.push(e);inT[e[0]]=true;inT[e[1]]=true;
+    }
+    const tKeys=new Set(tree.map(p=>key(p[0],p[1])));
+    const extras=shuffle(ps.filter(p=>!tKeys.has(key(p[0],p[1])))).slice(0,2+Math.floor(Math.random()*2));
+    const es=tree.concat(extras);
+    const deg=new Array(9).fill(0);
+    for(const e of es){deg[e[0]]++;deg[e[1]]++;}
+    const od=[];
+    for(let i=0;i<9;i++)if(deg[i]%2===1)od.push(i);
+    if(od.length<=2)return {edges:es,odd:od};
+  }
+  const es=allPairs().slice(0,10);
+  return {edges:es,odd:[]};
+}
+function edgeBetween(a,b){
+  for(const e of edges)if(key(e[0],e[1])===key(a,b))return true;
+  return false;
+}
+function hasUnusedFrom(i){
+  for(const e of edges){
+    if(usedSet.has(key(e[0],e[1])))continue;
+    if(e[0]===i||e[1]===i)return true;
+  }
+  return false;
+}
+function render(){
+  const svg=document.getElementById("svg");
+  let s="";
+  for(const e of edges){
+    const p1=pos(e[0]),p2=pos(e[1]);
+    const u=usedSet.has(key(e[0],e[1]));
+    s+='<line class="ln'+(u?" used":"")+'" x1="'+p1[0]+'" y1="'+p1[1]+'" x2="'+p2[0]+'" y2="'+p2[1]+'"/>';
+  }
+  for(let i=0;i<9;i++){
+    const p=pos(i);
+    let cls="nd";
+    if(odd.indexOf(i)>=0)cls+=" odd";
+    if(i===cur)cls+=" cur";
+    s+='<circle class="'+cls+'" data-i="'+i+'" cx="'+p[0]+'" cy="'+p[1]+'" r="17"/>';
+  }
+  svg.innerHTML=s;
+  document.getElementById("hE").textContent="已走 "+usedSet.size+"/"+edges.length+" 条";
+}
+svgClick();
+function svgClick(){
+  document.getElementById("svg").addEventListener("click",e=>{
+    const t=e.target;
+    if(!t.dataset||t.dataset.i===undefined||over)return;
+    clickNode(parseInt(t.dataset.i,10));
+  });
+}
+function clickNode(i){
+  const msg=document.getElementById("msg");
+  if(cur<0){
+    if(odd.length===2&&odd.indexOf(i)<0){msg.textContent="有两个奇点,一笔画应从奇点出发(闪黄圈的点)";return;}
+    cur=i;path=[i];msg.textContent="已出发,继续点击相邻圆点";render();return;
+  }
+  if(i===cur){msg.textContent="点击相邻的另一个圆点才能走线";return;}
+  if(!edgeBetween(cur,i)){msg.textContent="这两点之间没有线相连";return;}
+  if(usedSet.has(key(cur,i))){msg.textContent="这条线已经走过啦";return;}
+  usedSet.add(key(cur,i));
+  path.push(i);cur=i;
+  msg.textContent="";
+  render();
+  if(usedSet.size===edges.length){
+    over=true;clearInterval(timer);
+    show("一笔画完成!","走完全部 "+edges.length+" 条线 · 用时 "+sec+" 秒");
+    return;
+  }
+  if(!hasUnusedFrom(cur)){msg.textContent="这里没有未走过的边了,点「回退」调整路线";}
+}
+function undo(){
+  if(over||!path.length)return;
+  if(path.length>1)usedSet.delete(key(path[path.length-1],path[path.length-2]));
+  path.pop();
+  cur=path.length?path[path.length-1]:-1;
+  document.getElementById("msg").textContent="";
+  render();
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hT").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(){
+  const g=genGraph();
+  edges=g.edges;odd=g.odd;
+  cur=-1;path=[];usedSet=new Set();sec=0;over=false;
+  document.getElementById("msg").textContent="";
+  document.getElementById("hT").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  render();startTimer();
+}
+document.getElementById("bUndo").addEventListener("click",undo);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

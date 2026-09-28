@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连竿风暴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>连竿风暴</h1>
+<p class="tip">抛竿→浮标一沉立刻提竿!上鱼后 4.2 秒内再中鱼,连击 +1,分数按连击倍增;断竿或超时连击清零。60 秒冲 500 分!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">60</b> 秒</span><span>目标 <b>500</b> 分</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">连竿风暴</h2><p id="op">节奏就是一切!<br>一竿接一竿不停口,连击倍率一路涨:<br>x1 → x1.25 → x1.5 → …最高 x3!<br>手一慢,连击清零从头再来。</p><button id="ob">开始连竿</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var W=cv.width,H=cv.height,WL=170;
+var state='ready',tl=60,score=0,msg='';
+var phase='idle',pt=0,tWait=0,combo=0,comboT=0,mult=1;
+var bobDip=0,jump=null,jv=0,ripples=[];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function ripple(x,y){ripples.push({x:x,y:y,r:4,a:1})}
+function rollV(){var r=Math.random();if(r<0.5)return 20;if(r<0.85)return 40;return 80}
+function act(){
+  if(state!=='play')return;
+  if(phase==='idle'){phase='cast';pt=0;msg='';jump=null;return}
+  if(phase==='cast')return;
+  if(phase==='wait'){
+    msg='太急了,连击断了!';combo=0;comboT=0;mult=1;
+    phase='cool';pt=0;return;
+  }
+  if(phase==='dip'){
+    var v=rollV();
+    if(comboT>0)combo++;else combo=1;
+    comboT=4.2;mult=1+(combo-1)*0.25;
+    if(mult>3)mult=3;
+    jv=Math.round(v*mult);score+=jv;
+    jump={t:0};msg='连竿 x'+combo+'!+'+jv+' 分';
+    ripple(240,WL);ripple(240,WL);
+    phase='cool';pt=0;
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再来一局';
+  ot.textContent=win?'竿竿不停口!':'节奏乱了…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 500 分<br>'+(win?'这波连竿帅翻了!':'保持节奏:沉了就提,提了就抛。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=60;score=0;msg='';phase='idle';pt=0;combo=0;comboT=0;mult=1;bobDip=0;jump=null;ripples=[];
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  var i;
+  for(i=ripples.length-1;i>=0;i--){var r=ripples[i];r.r+=42*dt;r.a-=1.5*dt;if(r.a<=0)ripples.splice(i,1)}
+  if(jump){jump.t+=dt;if(jump.t>0.9)jump=null}
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(score>=500);return}
+  if(comboT>0){
+    comboT-=dt;
+    if(comboT<=0){combo=0;mult=1;msg='连击超时,清零了…'}
+  }
+  pt+=dt;
+  if(phase==='cast'){
+    if(pt>=0.35){phase='wait';pt=0;tWait=rnd(0.7,1.3)}
+  }else if(phase==='wait'){
+    if(pt>=tWait){phase='dip';pt=0;ripple(240,WL)}
+  }else if(phase==='dip'){
+    bobDip=16;
+    if(pt>=0.6){
+      msg='脱竿了!连击中断…';combo=0;comboT=0;mult=1;
+      phase='cool';pt=0;
+    }
+  }else if(phase==='cool'){
+    bobDip+=(0-bobDip)*Math.min(1,dt*10);
+    if(pt>=0.35)phase='idle';
+  }
+  if(phase!=='dip'&&phase!=='cool')bobDip+=(0-bobDip)*Math.min(1,dt*10);
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WL);g.addColorStop(0,'#151c36');g.addColorStop(1,'#2b3157');X.fillStyle=g;X.fillRect(0,0,W,WL);
+  var g2=X.createLinearGradient(0,WL,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#091631');X.fillStyle=g2;X.fillRect(0,WL,W,H-WL);
+  var t=Date.now()*0.001,i,xx,yy;
+  X.strokeStyle='rgba(127,212,255,.16)';X.lineWidth=2;
+  for(i=0;i<4;i++){X.beginPath();for(xx=0;xx<=W;xx+=16){yy=WL+34+i*50+Math.sin(xx*0.05+t*(1+i*0.25))*4;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke()}
+  var byy=WL-10+bobDip;
+  X.strokeStyle='rgba(230,238,246,.6)';X.lineWidth=1.5;
+  X.beginPath();X.moveTo(60,40);X.quadraticCurveTo(160,60,240,byy-8);X.stroke();
+  X.fillStyle='#ff5f5f';X.beginPath();X.arc(240,byy,8,Math.PI,Math.PI*2);X.fill();
+  X.fillStyle='#eef3fa';X.beginPath();X.arc(240,byy,8,0,Math.PI);X.fill();
+  if(phase==='dip'){X.fillStyle='#ffd75e';X.font='bold 30px system-ui';X.textAlign='center';X.fillText('提竿!',240,byy-30)}
+  for(i=0;i<ripples.length;i++){
+    var r2=ripples[i];
+    X.strokeStyle='rgba(180,220,255,'+(r2.a*0.6).toFixed(3)+')';X.lineWidth=2;
+    X.beginPath();X.ellipse(r2.x,r2.y,r2.r,r2.r*0.35,0,0,7);X.stroke();
+  }
+  if(jump){
+    var k=jump.t/0.9,fy=WL-60-Math.sin(k*Math.PI)*80;
+    X.fillStyle='#ffd75e';X.beginPath();X.ellipse(240,fy,24,10,-0.4,0,7);X.fill();
+  }
+  X.textAlign='center';
+  if(combo>0){
+    var pulse=1+0.08*Math.sin(t*8);
+    X.fillStyle='#ffd75e';X.font='bold '+Math.round(34*pulse)+'px system-ui';
+    X.fillText('连竿 x'+combo,W/2,70);
+    X.fillStyle='rgba(127,212,255,.9)';X.font='bold 15px system-ui';
+    X.fillText('倍率 x'+mult.toFixed(2),W/2,94);
+    X.fillStyle='rgba(10,16,32,.8)';X.fillRect(90,104,300,12);
+    X.fillStyle=comboT>1.5?'#63c97a':'#e05555';
+    X.fillRect(90,104,300*Math.max(0,comboT)/4.2,12);
+  }else{
+    X.fillStyle='rgba(200,215,235,.7)';X.font='bold 18px system-ui';
+    X.fillText('尚无连击 · 上鱼后 4.2 秒内再中鱼',W/2,70);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.fillText(msg,W/2,136);
+  if(phase==='idle'){X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';X.fillText('点击 / 空格 抛竿',W/2,H-14)}
+}
+cv.addEventListener('pointerdown',act);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else act();
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

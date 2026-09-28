@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词龙接珠</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:10px}
+#stage{position:relative;width:100%;max-width:640px;background:#151a30;border-radius:14px;padding:22px 18px;text-align:center}
+#lead{font-size:15px;color:#9aa3c0;margin-bottom:4px}
+#big{font-size:52px;font-weight:bold;color:#ffd76a;font-family:ui-monospace,Consolas,monospace;line-height:1.2}
+#buf{font-size:26px;font-family:ui-monospace,Consolas,monospace;color:#6ee7a0;min-height:38px;margin:8px 0}
+#hints{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;min-height:34px}
+.pill{background:#232a4a;border-radius:14px;padding:4px 14px;font-size:14px;color:#9ab1ff}
+.pill.used{opacity:.35}
+#chainRow{margin-top:10px;font-size:13px;color:#9aa3c0;white-space:nowrap;overflow:hidden;max-width:100%}
+#stage.err{animation:shk .18s}
+@keyframes shk{0%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}100%{transform:translateX(0)}}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;z-index:2}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#6ee7a0}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>词龙接珠</h1>
+<div id="tip">单词接龙：必须打出以上一个单词末字母开头的单词，接得越长倍率越高</div>
+<div id="hud"></div>
+<div id="stage">
+<div id="lead">龙首要求：打出以该字母开头的单词</div>
+<div id="big">S</div>
+<div id="buf"></div>
+<div id="hints"></div>
+<div id="chainRow"></div>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var BANK=["ant","ape","art","axe","bat","bee","bag","bus","bit","cat","cow","cup","cod","cub","dog","dot","den","dig","duck","egg","elm","eel","ear","fox","fan","fig","fly","gem","gap","gun","goat","hat","hen","hog","hip","ice","ink","imp","iron","jet","jar","jog","jam","key","kit","kid","kite","log","leg","lit","lamb","map","mug","mix","mat","net","nod","nut","nest","owl","oak","orb","ox","pen","pig","pod","pan","rat","run","rim","red","sun","sit","six","sea","top","tan","ten","toy","urn","ufo","van","vat","vet","web","win","war","wolf","yak","yes","yarn","zip","zap","zoo"];
+var GAME_TIME=90;
+var hud=document.getElementById('hud');
+var big=document.getElementById('big'),buf=document.getElementById('buf');
+var hints=document.getElementById('hints'),chainRow=document.getElementById('chainRow'),stage=document.getElementById('stage');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var lead,cands,buffer,score,chain,best,timeLeft,elapsed,running,raf,tPrev,over,chainWords;
+function candFor(letter){
+  var out=[];
+  for(var i=0;i<BANK.length;i++){if(BANK[i].charAt(0)===letter)out.push(BANK[i]);}
+  return out;
+}
+function hudUpd(){
+  hud.textContent='剩余 '+Math.ceil(timeLeft)+' 秒　得分 '+score+'　当前连龙 '+chain+'　最长 '+best;
+}
+function reset(){
+  var first="satrnmelidpogb";
+  lead=first.charAt(Math.floor(Math.random()*first.length));
+  cands=candFor(lead);
+  buffer='';score=0;chain=0;best=0;timeLeft=GAME_TIME;elapsed=0;over=false;chainWords=[];
+  render();
+  hudUpd();
+}
+function render(){
+  big.textContent=lead.toUpperCase();
+  buf.textContent=buffer||'\u00a0';
+  hints.innerHTML='';
+  for(var i=0;i<cands.length&&i<4;i++){
+    var p=document.createElement('span');
+    p.className='pill'+(i<chainWords.length?'':'');
+    p.textContent=cands[i];
+    hints.appendChild(p);
+  }
+  chainRow.textContent=chainWords.length?('龙身：'+chainWords.join(' → ')):'龙身尚空，打出第一个单词吧';
+}
+function handleChar(ch){
+  if(!running||over)return;
+  if(ch==='\b'){
+    buffer=buffer.slice(0,-1);
+    render();
+    return;
+  }
+  if(!/^[a-z]$/.test(ch.toLowerCase()))return;
+  ch=ch.toLowerCase();
+  var next=buffer+ch;
+  var any=false;
+  for(var i=0;i<cands.length;i++){
+    if(cands[i].indexOf(next)===0){any=true;break;}
+  }
+  if(!any){
+    stage.classList.remove('err');
+    void stage.offsetWidth;
+    stage.classList.add('err');
+    return;
+  }
+  buffer=next;
+  for(var j=0;j<cands.length;j++){
+    if(cands[j]===buffer){
+      accept(cands[j]);
+      return;
+    }
+  }
+  render();
+}
+function accept(word){
+  chain++;
+  best=Math.max(best,chain);
+  score+=word.length*10+chain*5;
+  chainWords.push(word);
+  var last=word.charAt(word.length-1);
+  var nextCands=candFor(last);
+  if(nextCands.length>0){
+    lead=last;
+  }else{
+    var w=BANK[Math.floor(Math.random()*BANK.length)];
+    lead=w.charAt(0);
+    chainWords.push('(换龙首 '+lead.toUpperCase()+')');
+  }
+  cands=candFor(lead);
+  buffer='';
+  render();
+  hudUpd();
+}
+function finish(){
+  if(over)return;over=true;running=false;
+  ovT.textContent='时间到';
+  ovX.textContent='得分 '+score+'\n接龙次数 '+chain+'　最长连龙 '+best+'\n龙身：'+(chainWords.join(' → ')||'无');
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  elapsed+=dt;timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;hudUpd();finish();return;}
+  hudUpd();
+  raf=requestAnimationFrame(loop);
+}
+function start(){
+  reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  stage.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+reset();
+ovT.textContent='词龙接珠';
+ovX.textContent='打出一个以上方字母开头的单词，龙身 +1。\n下一个单词必须以上一个单词的末字母开头。\n接龙越长每次加分越多（+5×连龙数），无词可接时龙神自动换首。\n90 秒内冲击最长连龙！';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

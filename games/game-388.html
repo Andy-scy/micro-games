@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹珠入洞</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹珠入洞</h1>
+  <p class="hint">方向键 / WASD 倾斜台面 · 触屏按住并拖动方向 · 让弹珠滚进绿色洞口</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹珠入洞</h2>
+      <p id="ovDesc">俯视一张弹珠台:按方向键倾斜台面,钢珠会带着惯性滑行。把它稳稳送进发光的绿色洞口即可过关;小心红色陷阱洞与弹力保险杠,掉进陷阱会损失生命!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,HT=480,MR=9,ACC=0.00055,MAXV=0.4,IN=14;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elLives=$("lives"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s388");
+var LEVELS=[
+ {start:{x:240,y:80},goal:{x:240,y:400},traps:[{x:120,y:240},{x:360,y:240}],bumpers:[{x:240,y:140}]},
+ {start:{x:240,y:60},goal:{x:80,y:400},traps:[{x:240,y:220},{x:400,y:400}],bumpers:[{x:160,y:300},{x:330,y:140}]},
+ {start:{x:60,y:60},goal:{x:400,y:120},traps:[{x:240,y:120},{x:120,y:300},{x:360,y:320}],bumpers:[{x:240,y:260},{x:80,y:180}]},
+ {start:{x:240,y:430},goal:{x:240,y:240},traps:[{x:80,y:80},{x:400,y:80},{x:80,y:400},{x:400,y:400}],bumpers:[{x:240,y:90},{x:240,y:390},{x:90,y:240},{x:390,y:240}]}
+];
+var state,lv,lives,score,marble,goal,traps,bumpers,keys,flash,msg,msgT,touchVec,touchBase;
+function reset(){lv=0;lives=3;score=0;loadLevel();updateHud();}
+function loadLevel(){
+  var L=LEVELS[lv],i;
+  marble={x:L.start.x,y:L.start.y,vx:0,vy:0};
+  goal={x:L.goal.x,y:L.goal.y};
+  traps=[];for(i=0;i<L.traps.length;i++)traps.push({x:L.traps[i].x,y:L.traps[i].y});
+  bumpers=[];for(i=0;i<L.bumpers.length;i++)bumpers.push({x:L.bumpers[i].x,y:L.bumpers[i].y,flash:0});
+  keys={};touchVec={x:0,y:0};touchBase=null;
+  elLv.textContent=lv+1;updateHud();
+}
+function updateHud(){
+  elLives.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+}
+function respawn(){
+  var L=LEVELS[lv];
+  marble={x:L.start.x,y:L.start.y,vx:0,vy:0};
+}
+function trapHit(){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"弹珠屡屡落坑,生命耗尽…");return;}
+  msg="掉进陷阱!剩余生命 "+lives;msgT=1300;
+  respawn();
+}
+function clearLevel(){
+  score+=100;updateHud();
+  if(lv<LEVELS.length-1){
+    msg="过关!台面变得更加凶险…";msgT=1400;
+    lv++;state="transition";
+    window.setTimeout(function(){if(state==="transition"){loadLevel();state="playing";}},1000);
+  }else finish(true,"四张台面全部通关,弹珠高手!");
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s388",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k.indexOf("Arrow")===0||k===" ")e.preventDefault();
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){startGame();return;}
+  if(k==="ArrowUp"||k==="w"||k==="W")keys.up=true;
+  if(k==="ArrowDown"||k==="s"||k==="S")keys.down=true;
+  if(k==="ArrowLeft"||k==="a"||k==="A")keys.left=true;
+  if(k==="ArrowRight"||k==="d"||k==="D")keys.right=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")keys.up=false;
+  if(k==="ArrowDown"||k==="s"||k==="S")keys.down=false;
+  if(k==="ArrowLeft"||k==="a"||k==="A")keys.left=false;
+  if(k==="ArrowRight"||k==="d"||k==="D")keys.right=false;
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchBase={x:(t.clientX-r.left)*W/r.width,y:(t.clientY-r.top)*HT/r.height};
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing"||!touchBase)return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  var dx=(t.clientX-r.left)*W/r.width-touchBase.x;
+  var dy=(t.clientY-r.top)*HT/r.height-touchBase.y;
+  var d=Math.sqrt(dx*dx+dy*dy);
+  if(d>60){dx=dx/d*60;dy=dy/d*60;}
+  touchVec={x:dx/60,y:dy/60};
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchVec={x:0,y:0};touchBase=null;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    var ax=0,ay=0,i;
+    if(keys.left)ax-=1;if(keys.right)ax+=1;
+    if(keys.up)ay-=1;if(keys.down)ay+=1;
+    ax+=touchVec.x;ay+=touchVec.y;
+    marble.vx+=ax*ACC*dt;marble.vy+=ay*ACC*dt;
+    var sp=Math.sqrt(marble.vx*marble.vx+marble.vy*marble.vy);
+    if(sp>MAXV){marble.vx*=MAXV/sp;marble.vy*=MAXV/sp;}
+    marble.vx*=1-0.0006*dt;marble.vy*=1-0.0006*dt;
+    marble.x+=marble.vx*dt;marble.y+=marble.vy*dt;
+    if(marble.x<IN+MR){marble.x=IN+MR;marble.vx=Math.abs(marble.vx)*0.6;}
+    if(marble.x>W-IN-MR){marble.x=W-IN-MR;marble.vx=-Math.abs(marble.vx)*0.6;}
+    if(marble.y<IN+MR){marble.y=IN+MR;marble.vy=Math.abs(marble.vy)*0.6;}
+    if(marble.y>HT-IN-MR){marble.y=HT-IN-MR;marble.vy=-Math.abs(marble.vy)*0.6;}
+    for(i=0;i<bumpers.length;i++){
+      var b=bumpers[i];
+      if(b.flash>0)b.flash-=dt;
+      var dx=marble.x-b.x,dy=marble.y-b.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<MR+15&&d>0){
+        var nx=dx/d,ny=dy/d;
+        var dot=marble.vx*nx+marble.vy*ny;
+        if(dot<0){
+          marble.vx-=2*dot*nx;marble.vy-=2*dot*ny;
+          marble.vx*=1.08;marble.vy*=1.08;
+          b.flash=300;score+=5;updateHud();
+        }
+        marble.x=b.x+nx*(MR+15.5);marble.y=b.y+ny*(MR+15.5);
+      }
+    }
+    var gdx=marble.x-goal.x,gdy=marble.y-goal.y;
+    if(gdx*gdx+gdy*gdy<12*12)clearLevel();
+    else{
+      for(i=0;i<traps.length;i++){
+        var tx=marble.x-traps[i].x,ty=marble.y-traps[i].y;
+        if(tx*tx+ty*ty<10*10){trapHit();break;}
+      }
+    }
+  }
+  if(msgT>0)msgT-=dt;
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,HT);
+  ctx.fillStyle="#12281c";ctx.fillRect(0,0,W,HT);
+  ctx.strokeStyle="#1f4a30";ctx.lineWidth=2;
+  for(i=0;i<W;i+=30){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,HT);ctx.stroke();}
+  for(i=0;i<HT;i+=30){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(W,i);ctx.stroke();}
+  ctx.strokeStyle="#3b4a77";ctx.lineWidth=6;
+  ctx.strokeRect(IN/2,IN/2,W-IN,HT-IN);
+  for(i=0;i<traps.length;i++){
+    var tr=traps[i];
+    ctx.fillStyle="#1a0d12";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,13,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#7f1d1d";ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(tr.x,tr.y,13,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle="#f87171";ctx.font="bold 10px system-ui";ctx.textAlign="center";
+    ctx.fillText("险",tr.x,tr.y+3);
+  }
+  ctx.textAlign="left";
+  var pulse=2*Math.sin(lastT*0.004);
+  ctx.fillStyle="#064e3b";
+  ctx.beginPath();ctx.arc(goal.x,goal.y,16+pulse*0.5,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#4ade80";ctx.lineWidth=3;
+  ctx.shadowColor="#4ade80";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(goal.x,goal.y,16,0,Math.PI*2);ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#4ade80";ctx.font="bold 10px system-ui";ctx.textAlign="center";
+  ctx.fillText("目标洞",goal.x,goal.y+3);
+  ctx.textAlign="left";
+  for(i=0;i<bumpers.length;i++){
+    var b=bumpers[i];
+    ctx.fillStyle=b.flash>0?"#fde047":"#f59e0b";
+    ctx.beginPath();ctx.arc(b.x,b.y,15,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#b45309";ctx.lineWidth=4;
+    ctx.beginPath();ctx.arc(b.x,b.y,10,0,Math.PI*2);ctx.stroke();
+  }
+  var L=LEVELS[lv];
+  ctx.strokeStyle="rgba(200,200,220,0.3)";ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(L.start.x,L.start.y,14,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle="#e2e8f0";
+  ctx.shadowColor="#e2e8f0";ctx.shadowBlur=8;
+  ctx.beginPath();ctx.arc(marble.x,marble.y,MR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#94a3b8";
+  ctx.beginPath();ctx.arc(marble.x-3,marble.y-3,3,0,Math.PI*2);ctx.fill();
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#fbbf24";ctx.font="bold 19px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,300);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

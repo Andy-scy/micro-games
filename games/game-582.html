@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>五字玄机</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,430px)}
+#hint{background:#151a30;border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:14px;color:#8ecae6;text-align:center}
+#board{display:grid;grid-template-rows:repeat(6,1fr);gap:6px;margin-bottom:12px}
+.row{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.cell{aspect-ratio:1/1;border:2px solid #2a3160;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;font-family:Consolas,monospace;background:#151a30;text-transform:uppercase}
+.cell.g{background:#2ec27e;border-color:#2ec27e;color:#08131c}
+.cell.y{background:#ffd166;border-color:#ffd166;color:#1a1d33}
+.cell.b{background:#3a4165;border-color:#3a4165;color:#8a92bd}
+.cell.now{border-color:#8ecae6}
+#kb{display:flex;flex-direction:column;gap:6px}
+#kb .krow{display:flex;gap:4px;justify-content:center}
+#kb button{flex:1;max-width:44px;height:48px;border:none;border-radius:6px;background:#232a4d;color:#e8eaf6;font-size:14px;font-weight:bold;cursor:pointer;font-family:inherit;padding:0}
+#kb button.wide{max-width:64px;font-size:12px}
+#kb button.g{background:#2ec27e;color:#08131c}
+#kb button.y{background:#ffd166;color:#1a1d33}
+#kb button.b{background:#181d3a;color:#5a6189}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+.shake{animation:shk .4s}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+</style>
+</head>
+<body>
+<h1>五字玄机</h1>
+<p id="tip">六次机会猜出 5 字母单词 · 绿=位置正确 黄=有此字母位置不对 灰=没有 · 支持物理键盘 · 词义提示在上方</p>
+<div id="wrap">
+<div id="hint">词义提示:…</div>
+<div id="board"></div>
+<div id="kb"></div>
+<div id="ov"><h2 id="ovT">五字玄机</h2><p id="ovP">每次整词提交,根据色块推理答案
+绿格字母位置正确,黄格字母存在但位置不对</p><button id="ovB">开始游戏</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  ["apple","苹果"],["beach","海滩"],["brave","勇敢的"],["bread","面包"],["brush","刷子"],
+  ["chair","椅子"],["cheap","便宜的"],["chess","国际象棋"],["class","班级"],["clean","干净的"],
+  ["clear","清晰的"],["climb","攀爬"],["clock","时钟"],["cloud","云"],["dance","跳舞"],
+  ["dream","梦想"],["drink","饮料"],["eagle","老鹰"],["earth","地球"],["feast","盛宴"],
+  ["field","田野"],["floor","地板"],["fresh","新鲜的"],["ghost","幽灵"],["giant","巨人"],
+  ["glass","玻璃"],["grape","葡萄"],["green","绿色"],["happy","快乐的"],["heart","心脏"],
+  ["house","房子"],["juice","果汁"],["light","光"],["lemon","柠檬"],["lucky","幸运的"],
+  ["mango","芒果"],["money","钱"],["mouse","老鼠"],["music","音乐"],["night","夜晚"],
+  ["ocean","海洋"],["party","派对"],["peace","和平"],["piano","钢琴"],["plant","植物"],
+  ["smile","微笑"],["snake","蛇"],["spark","火花"],["spoon","勺子"],["storm","风暴"],
+  ["sugar","糖"],["sunny","晴朗的"],["sweet","甜的"],["tiger","老虎"],["water","水"],
+  ["whale","鲸鱼"],["world","世界"],["zebra","斑马"],["crane","鹤"],["peach","桃子"]
+];
+var ROWS = 6, LEN = 5;
+var board = document.getElementById("board");
+var hintEl = document.getElementById("hint");
+var kb = document.getElementById("kb");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var target = "", zh = "", row = 0, col = 0;
+var grid = [], playing = false, shakeTimer = null, flashTimer = null;
+var streak = 0, best = 0;
+var keyState = {};
+
+function buildBoard() {
+  board.innerHTML = "";
+  grid = [];
+  for (var r = 0; r < ROWS; r++) {
+    var rowEl = document.createElement("div");
+    rowEl.className = "row";
+    var cells = [];
+    for (var c = 0; c < LEN; c++) {
+      var d = document.createElement("div");
+      d.className = "cell";
+      rowEl.appendChild(d);
+      cells.push(d);
+    }
+    board.appendChild(rowEl);
+    grid.push(cells);
+  }
+}
+
+function buildKb() {
+  var rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+  kb.innerHTML = "";
+  for (var i = 0; i < rows.length; i++) {
+    var kr = document.createElement("div");
+    kr.className = "krow";
+    if (i === 2) kr.appendChild(makeKey("enter", "提交", true));
+    for (var j = 0; j < rows[i].length; j++) kr.appendChild(makeKey(rows[i][j], rows[i][j].toUpperCase(), false));
+    if (i === 2) kr.appendChild(makeKey("back", "删除", true));
+    kb.appendChild(kr);
+  }
+}
+
+function makeKey(id, label, wide) {
+  var b = document.createElement("button");
+  b.id = "kb-" + id;
+  b.textContent = label;
+  if (wide) b.className = "wide";
+  b.onclick = function () {
+    if (id === "enter") submit();
+    else if (id === "back") del();
+    else type(id);
+  };
+  return b;
+}
+
+function type(ch) {
+  if (!playing || col >= LEN) return;
+  grid[row][col].textContent = ch;
+  grid[row][col].classList.add("now");
+  if (col > 0) grid[row][col - 1].classList.remove("now");
+  col++;
+}
+
+function del() {
+  if (!playing || col <= 0) return;
+  col--;
+  grid[row][col].textContent = "";
+  grid[row][col].classList.remove("now");
+  if (col > 0) grid[row][col - 1].classList.add("now");
+}
+
+function currentWord() {
+  var s = "";
+  for (var i = 0; i < LEN; i++) s += grid[row][i].textContent;
+  return s;
+}
+
+function judge(g, t) {
+  var res = ["b", "b", "b", "b", "b"];
+  var cnt = {};
+  var i;
+  for (i = 0; i < LEN; i++) {
+    if (g[i] === t[i]) res[i] = "g";
+    else cnt[t[i]] = (cnt[t[i]] || 0) + 1;
+  }
+  for (i = 0; i < LEN; i++) {
+    if (res[i] !== "g" && cnt[g[i]] > 0) { res[i] = "y"; cnt[g[i]]--; }
+  }
+  return res;
+}
+
+function paintKey(ch, cls) {
+  var b = document.getElementById("kb-" + ch);
+  if (!b) return;
+  if (cls === "g" || (cls === "y" && keyState[ch] !== "g") || (!keyState[ch])) {
+    keyState[ch] = cls;
+    b.className = cls;
+  }
+}
+
+function submit() {
+  if (!playing) return;
+  var g = currentWord();
+  if (col < LEN || g.length < LEN) { flash("字母不够"); return; }
+  var res = judge(g, target);
+  var i;
+  for (i = 0; i < LEN; i++) {
+    grid[row][i].classList.remove("now");
+    grid[row][i].classList.add(res[i]);
+    paintKey(g[i], res[i]);
+  }
+  if (g === target) {
+    playing = false;
+    streak++;
+    if (streak > best) best = streak;
+    setTimeout(function () {
+      ovT.textContent = "破解成功!";
+      ovP.textContent = "用了 " + (row + 1) + " 次 · " + target.toUpperCase() + "(" + zh + ")\n连胜 " + streak + " · 最佳 " + best;
+      ovB.textContent = "下一题";
+      ov.classList.remove("hide");
+    }, 600);
+    return;
+  }
+  row++;
+  col = 0;
+  if (row >= ROWS) {
+    playing = false;
+    streak = 0;
+    setTimeout(function () {
+      ovT.textContent = "破解失败";
+      ovP.textContent = "答案是 " + target.toUpperCase() + "(" + zh + ")\n历史最佳连胜 " + best;
+      ovB.textContent = "再来一局";
+      ov.classList.remove("hide");
+    }, 600);
+  }
+}
+
+function flash(msg) {
+  hintEl.textContent = msg;
+  board.classList.remove("shake");
+  void board.offsetWidth;
+  board.classList.add("shake");
+  if (shakeTimer) clearTimeout(shakeTimer);
+  shakeTimer = setTimeout(function () { hintEl.textContent = "词义提示:" + zh; }, 900);
+}
+
+function newGame() {
+  if (flashTimer) clearTimeout(flashTimer);
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  target = pick[0]; zh = pick[1];
+  row = 0; col = 0; keyState = {}; playing = true;
+  buildBoard();
+  buildKb();
+  hintEl.textContent = "词义提示:" + zh;
+}
+
+ovB.onclick = function () {
+  ov.classList.add("hide");
+  newGame();
+};
+
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") submit();
+  else if (e.key === "Backspace") del();
+  else {
+    var k = e.key.toLowerCase();
+    if (k.length === 1 && k >= "a" && k <= "z") type(k);
+  }
+});
+</script>
+</body>
+</html>

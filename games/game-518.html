@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>邻座花园</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.cell{position:relative;height:62px;border:1px solid #2e3554;border-radius:10px;background:#1b2138;cursor:pointer;overflow:hidden;text-align:center;user-select:none}
+.cell .fill{position:absolute;left:0;bottom:0;width:100%;height:0;background:rgba(255,255,255,.14)}
+.cell .lb{position:relative;z-index:1;font-size:11px;padding-top:5px;color:#f1f5f9}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px;align-items:center}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.blue{background:#0e7490;color:#cffafe;border-color:#22d3ee;font-weight:700}
+#cdTxt{font-size:12px;color:#8b90b0}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>邻座花园</h1>
+  <p class="hint">点击格子循环种花:空→红→黄→紫→空 · 相邻同色花互相加成,花开自动赚花币 · 花币累计 <b>3000</b> 获胜</p>
+  <div class="hud">
+    <span>花币 <b id="hCoin">0</b>/3000</span>
+    <span>花园美景 <b id="hBeauty">0</b></span>
+    <span>产币 <b id="hInc">0</b>/秒</span>
+    <span>花朵 <b id="hFlower">0</b>/16</span>
+  </div>
+  <div id="msg"></div>
+  <div id="grid"></div>
+  <div class="acts">
+    <button class="btn blue" id="btnWater">浇水 (+12% 生长)</button>
+    <span id="cdTxt">随时可浇</span>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">邻座花园</h2>
+    <p id="ovDesc">点格子依次切换:空地→红花→黄花→紫花→空。种下后慢慢生长,开花的产出 = 基础值 x(1 + 0.7 x 相邻同色花数)。规划同色花海收益爆炸,乱种则入不敷出。勤浇水、买沃土与喷灌,花币攒到 3000 就是镇上最美花园!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">翻土开工</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elCoin=$("hCoin"),elBeauty=$("hBeauty"),elInc=$("hInc"),elFlower=$("hFlower"),elMsg=$("msg");
+var gridEl=$("grid"),btnWater=$("btnWater"),cdTxt=$("cdTxt"),shopEl=$("shop");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=3000;
+var NAMES=["红花","黄花","紫花"];
+var COLS=["#dc2626","#eab308","#a855f7"];
+var ups=[
+ {nm:"沃土",ds:"生长速度 +30%",base:100,mult:2,max:5},
+ {nm:"珍稀花种",ds:"基础花值 +3",base:220,mult:2.2,max:4},
+ {nm:"自动喷灌",ds:"每隔几秒自动浇水",base:300,mult:2.5,max:2}
+];
+var N=16;
+var coins,cells,waterCd,upLv,state,msgT,cellEls=[],rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function growTime(){return 14/(1+0.3*upLv[0]);}
+function baseVal(){return 12+3*upLv[1];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function neighbors(i){
+  var r=Math.floor(i/4),c=i%4,out=[];
+  if(r>0)out.push(i-4);
+  if(r<3)out.push(i+4);
+  if(c>0)out.push(i-1);
+  if(c<3)out.push(i+1);
+  return out;
+}
+function mature(i){return cells[i].c>=0&&cells[i].g>=1;}
+function beautyOf(i){
+  if(!mature(i))return 0;
+  var s=0,j,ns=neighbors(i);
+  for(j=0;j<ns.length;j++)if(mature(ns[j])&&cells[ns[j]].c===cells[i].c)s++;
+  return baseVal()*(1+0.7*s);
+}
+function totalBeauty(){var s=0,i;for(i=0;i<N;i++)s+=beautyOf(i);return s;}
+function flowerN(){var s=0,i;for(i=0;i<N;i++)if(cells[i].c>=0)s++;return s;}
+function say(t){elMsg.textContent=t;msgT=2.4;}
+function buildUI(){
+  gridEl.innerHTML="";cellEls=[];
+  var i;
+  for(i=0;i<N;i++){
+    var c=document.createElement("div");
+    c.className="cell";
+    c.innerHTML='<div class="fill"></div><div class="lb"></div>';
+    (function(idx){c.addEventListener("click",function(){tapCell(idx);});})(i);
+    gridEl.appendChild(c);cellEls.push(c);
+  }
+  shopEl.innerHTML="";rows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function tapCell(i){
+  if(state!=="play")return;
+  cells[i].c=cells[i].c+1;
+  if(cells[i].c>2)cells[i].c=-1;
+  cells[i].g=0;
+}
+function water(){
+  if(state!=="play"||waterCd>0)return;
+  waterCd=6;
+  var i;
+  for(i=0;i<N;i++)if(cells[i].c>=0)cells[i].g=Math.min(1,cells[i].g+0.12);
+}
+btnWater.addEventListener("click",water);
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(coins<c){say("花币不够!");return;}
+  coins-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function startGame(){
+  coins=0;waterCd=0;upLv=[0,0,0];msgT=0;autoT=6;
+  cells=[];
+  var i;
+  for(i=0;i<N;i++)cells.push({c:-1,g:0});
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+  if(e.key===" "&&state==="play"){e.preventDefault();water();}
+});
+function render(){
+  var i;
+  elCoin.textContent=fmt(coins);
+  var b=totalBeauty();
+  elBeauty.textContent=Math.floor(b);
+  elInc.textContent=(b*0.03).toFixed(1);
+  elFlower.textContent=flowerN();
+  for(i=0;i<N;i++){
+    var el=cellEls[i],fill=el.querySelector(".fill"),lb=el.querySelector(".lb");
+    var cell=cells[i];
+    if(cell.c<0){
+      el.style.background="#1b2138";el.style.borderColor="#2e3554";
+      lb.textContent="空地";fill.style.height="0";
+    }else{
+      var pc=Math.min(100,cell.g*100);
+      fill.style.height=pc+"%";
+      lb.textContent=mature(i)?(NAMES[cell.c]+" 盛开+"):(NAMES[cell.c]+" "+Math.floor(pc)+"%");
+      el.style.background=mature(i)?COLS[cell.c]:"#1b2138";
+      el.style.borderColor=mature(i)?COLS[cell.c]:"#2e3554";
+    }
+  }
+  cdTxt.textContent=waterCd>0?("洒水壶充能 "+waterCd.toFixed(1)+"s"):"随时可浇";
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||coins<c);
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,i;
+  for(i=0;i<N;i++){
+    if(cells[i].c>=0&&cells[i].g<1)cells[i].g=Math.min(1,cells[i].g+ds/growTime());
+  }
+  if(waterCd>0)waterCd=Math.max(0,waterCd-ds);
+  if(upLv[2]>0){
+    autoT-=ds;
+    if(autoT<=0){
+      autoT=6-2*upLv[2];
+      for(i=0;i<N;i++)if(cells[i].c>=0)cells[i].g=Math.min(1,cells[i].g+0.12);
+    }
+  }
+  coins+=totalBeauty()*0.03*ds;
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(coins>=WIN){
+    state="over";
+    showOv("最美花园!","邻里争相合影,花园门票卖到脱销!","花币 "+fmt(coins)+" · 美景 "+Math.floor(totalBeauty()));
+  }
+}
+var autoT=5;
+coins=0;waterCd=0;upLv=[0,0,0];state="menu";msgT=0;
+cells=[];
+var _i;
+for(_i=0;_i<N;_i++)cells.push({c:-1,g:0});
+buildUI();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

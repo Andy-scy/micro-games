@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子对决</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#f95738;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#f95738;color:#fff;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:44px;height:44px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.die.foe{background:linear-gradient(145deg,#ffd9d0,#ffb4a2)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.hpbar{height:16px;background:#101426;border-radius:8px;overflow:hidden;border:1px solid #333c63}
+.hpfill{height:100%;background:linear-gradient(90deg,#7bd88f,#4cc9f0);transition:width .4s}
+.hpfill.foe{background:linear-gradient(90deg,#f95738,#f4a261)}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#f95738;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子对决</h1>
+  <p class="tips">斗骰王国决斗!你与敌将各 20 生命。<b>进攻</b>:你掷 3 骰对敌 2 骰,双方各自从大到小排队捉对厮杀,两对比点各造成 1 点伤害(平点守方胜);<b>防御</b>:掷 2 骰合计 ≥8 回血 2,否则被偷袭 -1。敌将行动在后,把它打到 0 即胜!</p>
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><span class="big">你</span><span class="mut" id="hp0tx">20 / 20</span></div>
+    <div class="hpbar"><div class="hpfill" id="hp0" style="width:100%"></div></div>
+    <div class="row" style="justify-content:space-between;margin-top:10px"><span class="big" style="color:#f95738">敌将</span><span class="mut" id="hp1tx">20 / 20</span></div>
+    <div class="hpbar"><div class="hpfill foe" id="hp1" style="width:100%"></div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="mut" id="plabel">你的骰</div>
+    <div class="row" id="pdice"></div>
+    <div class="mut" style="margin-top:8px">敌方骰</div>
+    <div class="row" id="edice"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="atk">进攻</button>
+      <button class="btn sec" id="def">防御回血</button>
+    </div>
+  </div>
+  <div class="card log" id="log">第 1 回合,选好战术,出手吧!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var hp=[20,20],round=1,over=false,busy=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function mkDie(v,foe){var d=document.createElement('div');d.className='die'+(foe?' foe':'');setDie(d,v);return d}
+function drawDice(pArr,eArr){
+  var P=$('pdice');P.innerHTML='';
+  for(var i=0;i<pArr.length;i++)P.appendChild(mkDie(pArr[i],false));
+  var E=$('edice');E.innerHTML='';
+  for(i=0;i<eArr.length;i++)E.appendChild(mkDie(eArr[i],true));
+}
+function drawHP(){
+  $('hp0').style.width=(hp[0]*5)+'%';$('hp1').style.width=(hp[1]*5)+'%';
+  $('hp0tx').textContent=Math.max(hp[0],0)+' / 20';
+  $('hp1tx').textContent=Math.max(hp[1],0)+' / 20';
+}
+function say(m){$('log').textContent=m}
+function setBtns(on){$('atk').disabled=!on||busy||over;$('def').disabled=!on||busy||over}
+function animRoll(nP,nE,cb){
+  busy=true;setBtns(false);
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<620){
+      if(t-last>80){last=t;
+        var p=[],e=[];
+        for(var i=0;i<nP;i++)p.push(rnd());
+        for(i=0;i<nE;i++)e.push(rnd());
+        drawDice(p,e);
+      }
+      requestAnimationFrame(step);
+    }else{
+      var p2=[],e2=[];
+      for(var i=0;i<nP;i++)p2.push(rnd());
+      for(i=0;i<nE;i++)e2.push(rnd());
+      drawDice(p2,e2);
+      busy=false;
+      cb(p2,e2);
+    }
+  }
+  requestAnimationFrame(step);
+}
+function clash(pD,eD){
+  pD=pD.slice().sort(function(a,b){return b-a});
+  eD=eD.slice().sort(function(a,b){return b-a});
+  var pHurt=0,eHurt=0,msgs=[];
+  for(var i=0;i<2;i++){
+    if(pD[i]>eD[i]){eHurt++;msgs.push('第'+(i+1)+' 对阵 '+pD[i]+':'+eD[i]+',命中!')}
+    else{pHurt++;msgs.push('第'+(i+1)+' 对阵 '+pD[i]+':'+eD[i]+',被格挡')}
+  }
+  return{p:pHurt,e:eHurt,msg:msgs.join(' | ')};
+}
+function afterPlayer(msg){
+  drawHP();
+  if(hp[1]<=0){win(true);return}
+  if(hp[0]<=0){win(false);return}
+  round++;
+  setTimeout(enemyAct,800);
+  say(msg+' 敌将蓄力反击……');
+}
+function enemyAct(){
+  if(over)return;
+  if(hp[1]<=5&&Math.random()<0.5){
+    animRoll(0,2,function(p,e){
+      var s=e[0]+e[1];
+      if(s>=8){hp[1]=Math.min(20,hp[1]+2);afterEnemy('敌将掷出 '+e[0]+'+'+e[1]+'='+s+',包扎回血 2!你继续。')}
+      else afterEnemy('敌将掷出 '+s+' 点防御失败,白白错失回合。你继续。');
+    });
+  }else{
+    animRoll(2,3,function(p,e){
+      var r=clash(e,p);
+      hp[0]-=r.e;
+      afterEnemy('敌将进攻:'+r.msg+'。你继续。');
+    });
+  }
+}
+function afterEnemy(msg){
+  drawHP();
+  if(hp[0]<=0){win(false);return}
+  if(hp[1]<=0){win(true);return}
+  setBtns(true);
+  say('第 '+round+' 回合 — '+msg);
+}
+function win(good){
+  over=true;setBtns(false);drawHP();
+  $('ovt').textContent=good?'大获全胜!':'力竭战败';
+  $('ovp').innerHTML=good?'敌将倒在骰盅之下,历经 '+round+' 回合,你是新任斗骰之王!':'你的生命归零,回去多练两天指法再来复仇。';
+  $('overlay').classList.add('show');
+}
+$('atk').onclick=function(){
+  if(over||busy)return;
+  animRoll(3,2,function(p,e){
+    var r=clash(p,e);
+    hp[1]-=r.e;hp[0]-=r.p;
+    afterPlayer('你发起进攻:'+r.msg);
+  });
+};
+$('def').onclick=function(){
+  if(over||busy)return;
+  animRoll(2,0,function(p,e){
+    var s=p[0]+p[1];
+    if(s>=8){hp[0]=Math.min(20,hp[0]+2);afterPlayer('你稳住阵脚掷出 '+s+' 点,回血 2!')}
+    else{hp[0]-=1;afterPlayer('你只掷出 '+s+' 点,门户大开被偷袭 1!')}
+  });
+};
+$('again').onclick=function(){
+  hp=[20,20];round=1;over=false;busy=false;
+  $('overlay').classList.remove('show');
+  drawHP();drawDice([1,2,3],[]);setBtns(true);
+  say('新对决开始,第 1 回合!');
+};
+drawHP();drawDice([1,2,3],[]);setBtns(true);
+</script>
+</body>
+</html>

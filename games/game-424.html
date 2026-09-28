@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>喷气背包侠</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb923c;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb923c;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb923c}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb923c;color:#2d1204;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>喷气背包侠</h1>
+  <p class="hint">按住 空格 / ↑ / 画面 喷气上升 · 松开下落 · 燃料有限,落地才能充能 · 碰到水雷或高塔即失败</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>燃料 <b id="fuel">100</b>%</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">喷气背包侠</h2>
+      <p id="ovDesc">背上喷气背包掠过废弃城区:喷气要省着用,燃料只在落地时补充。天上漂着水雷,地上立着高塔,全靠油门控制!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elFuel=$("fuel"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s424");
+var state="menu",dist,score,speed,obs,px,py,vy,held,fuel,nextGap,t,flame;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=300;obs=[];px=90;py=GY-42;vy=0;held=false;fuel=100;nextGap=420;t=0;flame=0;
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elFuel.textContent=Math.round(fuel);}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s424",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function hitMine(o){
+  var b={x:px+2,y:py+2,w:22,h:38};
+  var cx=Math.max(b.x,Math.min(o.x,b.x+b.w));
+  var cy=Math.max(b.y,Math.min(o.y,b.y+b.h));
+  var dx=o.x-cx,dy=o.y-cy;
+  return dx*dx+dy*dy<o.r*o.r;
+}
+function update(dt){
+  var s=dt/1000,i,o;
+  t+=s;
+  speed=Math.min(520,290+dist*0.016);
+  dist+=speed*s;score=Math.floor(dist/10);
+  var grounded=py>=GY-42;
+  if(held&&fuel>0){
+    vy-=1500*s;fuel-=52*s;flame=Math.min(1,flame+8*s);
+    if(fuel<0)fuel=0;
+  }else{
+    vy+=1250*s;flame=Math.max(0,flame-6*s);
+  }
+  if(vy<-340)vy=-340;if(vy>500)vy=500;
+  py+=vy*s;
+  if(py>=GY-42){py=GY-42;vy=0;}
+  if(py<28){py=28;vy=Math.max(vy,40);}
+  if(py>=GY-42&&vy===0)fuel=Math.min(100,fuel+85*s);
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    if(Math.random()<0.55){
+      obs.push({x:W+40,type:"mine",x2:0,y0:56+Math.random()*160,r:15,ph:Math.random()*6});
+    }else{
+      obs.push({x:W+30,type:"pylon",w:26,h:60+Math.random()*42,y:0});
+    }
+    nextGap=200+Math.random()*240+speed*0.35;
+  }
+  var b={x:px,y:py,w:26,h:42};
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.type==="mine")o.y=o.y0+Math.sin(t*2.2+o.ph)*10;
+    if(o.x<-90){obs.splice(i,1);continue;}
+    if(o.type==="mine"){
+      if(hitMine(o)){gameOver("轰!撞上了漂浮水雷!");return;}
+    }else{
+      var oy=GY-o.h;
+      if(b.x+b.w>o.x+3&&b.x<o.x+o.w-3&&b.y+b.h>oy+3){gameOver("一头栽在高塔上,燃料再省点吧!");return;}
+    }
+  }
+  updateHud();
+}
+function drawObstacle(o){
+  if(o.type==="mine"){
+    ctx.fillStyle="#5b6478";
+    ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#7d879e";ctx.lineWidth=2;
+    var a;
+    for(a=0;a<6;a++){
+      var an=a*Math.PI/3+t*0.5;
+      ctx.beginPath();ctx.moveTo(o.x+Math.cos(an)*o.r,o.y+Math.sin(an)*o.r);
+      ctx.lineTo(o.x+Math.cos(an)*(o.r+5),o.y+Math.sin(an)*(o.r+5));ctx.stroke();
+    }
+    ctx.lineWidth=1;
+    ctx.fillStyle=(Math.sin(t*6+o.ph)>0)?"#f87171":"#7f1d1d";
+    ctx.beginPath();ctx.arc(o.x,o.y,4.5,0,Math.PI*2);ctx.fill();
+  }else{
+    ctx.fillStyle="#6c5648";
+    rr(o.x,GY-o.h,o.w,o.h,4);ctx.fill();
+    ctx.fillStyle="#4e3d33";
+    ctx.fillRect(o.x+3,GY-o.h+6,o.w-6,4);
+    ctx.fillRect(o.x+3,GY-o.h+o.h-12,o.w-6,4);
+  }
+}
+function draw(){
+  var i,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#1a1424");grd.addColorStop(1,"#2e1c22");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(251,146,60,.5)";
+  for(i=0;i<14;i++){
+    ctx.globalAlpha=0.12+0.2*Math.abs(Math.sin(i*2.3+t));
+    ctx.fillRect((i*211+30)%W,(i*97)%100+20,3,3);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#241d2c";
+  var o1=(dist*0.14)%300;
+  for(i=-1;i<3;i++){ctx.fillRect(i*300-o1,GY-70,120,70);ctx.fillRect(i*300-o1+160,GY-40,90,40);}
+  ctx.fillStyle="#2c2333";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#fb923c";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%70;
+  ctx.fillStyle="rgba(255,255,255,.09)";
+  for(i=0;i<11;i++)ctx.fillRect(i*70-dsh,GY+16,32,3);
+  for(i=0;i<obs.length;i++)drawObstacle(obs[i]);
+  if(flame>0.05){
+    var fl=(8+Math.random()*10)*flame;
+    ctx.fillStyle="rgba(251,146,60,.9)";
+    ctx.beginPath();ctx.moveTo(px+6,py+40);ctx.lineTo(px+12,py+40+fl);ctx.lineTo(px+18,py+40);ctx.fill();
+    ctx.fillStyle="rgba(253,224,150,.9)";
+    ctx.beginPath();ctx.moveTo(px+8,py+40);ctx.lineTo(px+12,py+40+fl*0.55);ctx.lineTo(px+16,py+40);ctx.fill();
+  }
+  ctx.fillStyle="#94a3b8";
+  rr(px+7,py+14,12,26,4);ctx.fill();
+  ctx.fillStyle="#e2e8f0";
+  rr(px,py,26,24,7);ctx.fill();
+  ctx.fillStyle="#38bdf8";
+  ctx.fillRect(px+13,py+8,9,4);
+  ctx.fillStyle="#475569";
+  ctx.fillRect(px+4,py+38,8,4);ctx.fillRect(px+15,py+38,8,4);
+  ctx.fillStyle="rgba(251,146,60,.85)";
+  ctx.fillRect(px+20,py+18,7,10);
+}
+var lastT=0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=ts;
+  var dt=Math.min(50,ts-lastT);lastT=ts;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W")held=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W")held=false;
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();held=true;},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();held=false;},{passive:false});
+cv.addEventListener("mousedown",function(){held=true;});
+document.addEventListener("mouseup",function(){held=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

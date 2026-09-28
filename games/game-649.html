@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>科学实验室</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#7ee8fa;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#7ee8fa}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#7ee8fa;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:10px;min-height:52px}
+#wager{width:100%;border:2px solid #ffd166;background:#2a2410;color:#ffd166;border-radius:10px;padding:9px 0;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px;font-family:inherit}
+#wager:disabled{opacity:.35;cursor:default}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#7ee8fa}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#7ee8fa;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#7ee8fa;color:#06222a;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>科学实验室</h1>
+  <p class="tips">科学冷知识问答 + 押注机制:每题作答前可点「押注 ×2」消耗 1 枚筹码,答对得 200,答错倒扣 100!普通作答答对 +100。每题 20 秒,共 10 题,3 条命。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/10</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">筹码</div><div class="big" id="ch">◈◈◈</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <button id="wager">押注 ×2(本押 1 枚筹码)</button>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">科学实验室</h2><p id="ovp">· 每题限时 20 秒,四选一<br>· 开局带 3 枚筹码,答题前可「押注 ×2」<br>· 押注答对:+200;押注答错:-100 且 -1 命<br>· 普通答对:+100;普通答错:-1 命<br>· 分数最低为 0,3 命用完结束<br>· 有把握的题才押,稳中求胜!</p><button class="btn" id="obtn">进入实验室</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'闪电本质上是一种什么现象?',o:['放电现象','声波共振','光反射','磁悬浮']},
+{q:'声音不能在下列哪种环境中传播?',o:['真空','水中','钢铁里','空气里']},
+{q:'人体的水分大约占体重的百分之多少?',o:['60% 左右','10% 左右','90% 以上','30% 左右']},
+{q:'想让糖在水中溶解得更快,应该?',o:['搅拌并加热','放进冰箱','减少搅拌','盖上盖子静置']},
+{q:'磁铁能直接吸引下列哪种物品?',o:['铁钉','木块','塑料杯','橡皮']},
+{q:'影子的形成是因为?',o:['光沿直线传播','光的反射','光的折射','光的色散']},
+{q:'彩虹是阳光穿过小水滴时发生什么形成的?',o:['折射','燃烧','发光','摩擦']},
+{q:'水沸腾时大量冒出的气泡主要是?',o:['水蒸气','空气','氧气','氢气']},
+{q:'下列哪项属于化学变化?',o:['铁生锈','冰融化','玻璃打碎','酒精挥发']},
+{q:'月亮圆缺变化的周期大约是?',o:['一个月','一天','一星期','一年']},
+{q:'冬天摸铁比摸木头感觉更凉,是因为铁?',o:['导热更快','温度更低','更坚硬','更光滑']},
+{q:'鸡蛋在清水中沉底,加足量盐后会?',o:['浮起来','沉得更深','保持不变','慢慢溶解']},
+{q:'指南针静止时,N 极大致指向?',o:['北方','南方','东方','西方']},
+{q:'下列哪种能源属于可再生能源?',o:['风能','煤炭','石油','天然气']},
+{q:'光在水中的传播速度比在真空中?',o:['慢','快','完全一样','无法传播']},
+{q:'蝙蝠夜间飞行主要依靠?',o:['回声定位','敏锐的视力','灵敏的嗅觉','地球磁场记忆']},
+{q:'滑动摩擦力的方向与物体相对运动方向?',o:['相反','相同','垂直','毫无关系']},
+{q:'金属容易导电,是因为内部有?',o:['自由电子','自由质子','中子流','原子核碎片']},
+{q:'食物消化和营养吸收的主要场所是?',o:['小肠','胃','大肠','口腔']},
+{q:'用吸管喝饮料与下列哪个原理有关?',o:['大气压','磁力','浮力','静电']},
+{q:'绿色植物在阳光下主要释放的气体是?',o:['氧气','二氧化碳','氮气','甲烷']},
+{q:'湿衣服晾干属于什么现象?',o:['蒸发','升华','凝固','液化']},
+{q:'声音音调的高低取决于?',o:['频率','响度','音色','传播速度']},
+{q:'下列材料中导热性最差的是?',o:['棉花','铁','铜','铝']},
+{q:'水在约 4℃ 时密度?',o:['最大','最小','不变','为零']},
+{q:'透过放大镜看近处的字,看到的像是?',o:['正立放大的','倒立放大的','正立缩小的','倒立缩小的']},
+{q:'汽车急刹车时乘客身体前倾,是因为?',o:['惯性','引力','浮力','风力']},
+{q:'下列哪种做法能减小摩擦?',o:['加润滑油','增大压力','增加粗糙度','绑上防滑链']},
+{q:'台灯工作时,电能主要转化为?',o:['光能和热能','动能','化学能','声能']},
+{q:'北极星看起来常年不动,因为它基本位于?',o:['地球自转轴的指向','赤道上空','月球轨道上','太阳中心']}
+];
+var N=10,QLEN=20;
+var quiz=[],idx=0,score=0,lives=3,chips=3,armed=false,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function paintChips(){
+  var s='';
+  for(var i=0;i<3;i++)s+=i<chips?'◈':'◇';
+  $('ch').textContent=s;
+}
+function startGame(){
+  S++;idx=0;score=0;lives=3;chips=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  paintChips();
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;armed=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('q').textContent=it.q;
+  var w=$('wager');
+  w.disabled=chips<=0;
+  w.textContent=chips>0?'押注 ×2(本押 1 枚筹码)':'筹码已用完';
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function armWager(){
+  if(!playing||over||locked||armed||chips<=0)return;
+  armed=true;chips--;paintChips();
+  var w=$('wager');
+  w.disabled=true;
+  w.textContent='已押注 ×2!答对 +200 / 答错 -100';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  resolve(btn.dataset.ok==='1',btn);
+}
+function resolve(good,btn){
+  locked=true;
+  $('wager').disabled=true;
+  var btns=$('opts').children,i,delta;
+  if(good){
+    delta=armed?200:100;
+    score+=delta;
+    if(btn)btn.classList.add('ok');
+    $('msg').textContent=(armed?'押中!':'答对了!')+'+'+delta+' 分';
+  }else{
+    delta=armed?-100:0;
+    score=Math.max(0,score+delta);
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=(qLeft<=0?'超时!':'答错了!')+(armed?' 押注失败 -100':'')+' 正确答案已标出';
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1500);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1800?'首席研究员!':(score>=1200?'实验达人!':(score>=600?'初级学徒!':'安全第一!'));
+  $('ovt').textContent=win?'实验完成 · '+rank:'实验中断…';
+  $('ovp').innerHTML='完成 '+Math.min(idx+1,N)+'/'+N+' 题实验<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 押注要有把握,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('wager').addEventListener('click',armWager);
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)resolve(false,null);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

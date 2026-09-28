@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>夜路微光</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#05060c;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>夜路微光</h1>
+  <p class="tips">深夜国道,只有一束车灯:光锥外的路障几乎看不见,靠记忆和路灯的光池摸黑跑完 800 米!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/800</div></div>
+    <div class="stat"><div class="mut">时速</div><div class="big" id="sv">0</div></div>
+    <div class="stat"><div class="mut">记路障</div><div class="big" id="sw">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="400" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">夜路微光</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 转向(触屏拖动)<br>· 只有<b>车灯光锥</b>内看得清路障<br>· 被灯照过的路障会留下短暂残影,记位!<br>· 每隔一段有<b>路灯</b>,照亮一小片<br>· 撞上路障出局;跑完 800 米胜利</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=560,TOTAL=800;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var px,speed,dist,running,stripe,spawnT,lightDist,spotted;
+var obst=[],pools=[];
+var keys={};
+var PY=H-110;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;speed=300;dist=0;stripe=0;spawnT=0.6;lightDist=140;spotted=0;
+  obst.length=0;pools.length=0;
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/800';
+  $i('sv').textContent=Math.floor(speed*0.42);
+  $i('sw').textContent=spotted;
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawnObst(){
+  var kind=Math.floor(Math.random()*3);
+  var w=40+Math.random()*22;
+  var x=RM+20+Math.random()*(W-RM*2-40-w);
+  var i;
+  for(i=0;i<obst.length;i++){
+    if(obst[i].y<130&&Math.abs(obst[i].x-x)<90)return;
+  }
+  obst.push({x:x,y:-70,w:w,kind:kind,seen:0,lit:false});
+}
+var RM=24;
+function update(dt){
+  speed=Math.min(430,speed+5*dt);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%70;
+  spawnT-=dt;
+  if(spawnT<=0){spawnObst();spawnT=0.85+Math.random()*0.7;}
+  var st=330;
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  px=Math.max(RM+24,Math.min(W-RM-24,px));
+  if(dist+45>=lightDist){
+    pools.push({y:-60,x:Math.random()<0.5?RM+34:W-RM-34});
+    lightDist+=200;
+  }
+  var i,o;
+  for(i=obst.length-1;i>=0;i--){
+    o=obst[i];
+    o.y+=speed*dt;
+    if(o.seen>0)o.seen-=dt;
+    if(o.y>H+80){obst.splice(i,1);continue;}
+    var dy=PY-o.y;
+    var dx=o.x+o.w/2-(px+lean()*Math.max(0,dy));
+    var inCone=dy>-10&&dy<340&&Math.abs(dx)<26+Math.max(0,dy)*0.46;
+    if(inCone&&!o.lit){o.lit=true;spotted++;}
+    if(Math.abs(o.x+o.w/2-px)<o.w/2+17&&Math.abs(o.y+14-PY)<44){
+      endRun('撞上路障!','摸黑跑到 '+Math.floor(dist)+' m / 800 m<br>记住了 '+spotted+' 个路障<br>残影还在时,赶紧决定往哪边让!');
+      return;
+    }
+  }
+  for(i=pools.length-1;i>=0;i--){
+    pools[i].y+=speed*dt;
+    if(pools[i].y>H+120)pools.splice(i,1);
+  }
+  if(dist>=TOTAL){
+    endRun('天亮前抵达!','全程 '+Math.floor(dist)+' m,记下 '+spotted+' 个路障<br>夜路老司机,稳!');
+    return;
+  }
+  upd();
+}
+var leanV=0;
+function lean(){
+  var t=0;
+  if(keys.ArrowLeft||keys.a||keys.A)t=-1;
+  if(keys.ArrowRight||keys.d||keys.D)t=1;
+  leanV+=(t*26-leanV)*0.1;
+  return leanV;
+}
+function obsAlpha(o){
+  var dy=PY-o.y;
+  var dx=o.x+o.w/2-(px+leanV*Math.max(0,dy));
+  if(dy>-10&&dy<340&&Math.abs(dx)<26+Math.max(0,dy)*0.46)return 1;
+  var i;
+  for(i=0;i<pools.length;i++){
+    if(Math.abs(o.y+14-pools[i].y)<85&&Math.abs(o.x+o.w/2-W/2)<150)return 0.85;
+  }
+  if(o.seen>0)return 0.05+0.22*(o.seen/1.2);
+  return 0.05;
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  lean();
+  ctx.fillStyle='#04050b';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#12172e';ctx.fillRect(RM,0,W-RM*2,H);
+  ctx.strokeStyle='rgba(200,210,255,.25)';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(RM+2,0);ctx.lineTo(RM+2,H);ctx.moveTo(W-RM-2,0);ctx.lineTo(W-RM-2,H);ctx.stroke();
+  ctx.strokeStyle='rgba(200,210,255,.12)';
+  ctx.setLineDash([20,34]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  var i,o,a;
+  for(i=0;i<pools.length;i++){
+    var g=ctx.createRadialGradient(pools[i].x,pools[i].y,4,pools[i].x,pools[i].y,120);
+    g.addColorStop(0,'rgba(255,240,190,.5)');
+    g.addColorStop(1,'rgba(255,240,190,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(pools[i].x,pools[i].y,120,0,6.2832);ctx.fill();
+    ctx.fillStyle='#cfd6ff';
+    ctx.fillRect(pools[i].x-3,pools[i].y-6,6,60);
+    ctx.beginPath();ctx.arc(pools[i].x,pools[i].y-8,7,0,6.2832);ctx.fill();
+  }
+  var cg=ctx.createLinearGradient(0,PY-360,0,PY-20);
+  cg.addColorStop(0,'rgba(255,240,190,0)');
+  cg.addColorStop(1,'rgba(255,240,190,.16)');
+  ctx.fillStyle=cg;
+  ctx.beginPath();
+  ctx.moveTo(px-24,PY-24);
+  ctx.lineTo(px+24,PY-24);
+  ctx.lineTo(px+leanV*300+180,PY-360);
+  ctx.lineTo(px+leanV*300-180,PY-360);
+  ctx.closePath();ctx.fill();
+  for(i=0;i<obst.length;i++){
+    o=obst[i];a=obsAlpha(o);
+    ctx.globalAlpha=a;
+    if(o.kind===0){
+      ctx.fillStyle='#8a8f9e';rr(o.x,o.y,o.w,26,4);ctx.fill();
+      ctx.fillStyle='#e04444';
+      for(var s2=0;s2<o.w;s2+=16)ctx.fillRect(o.x+s2+2,o.y+8,9,10);
+    }else if(o.kind===1){
+      ctx.fillStyle='#5d6472';
+      ctx.beginPath();ctx.moveTo(o.x+o.w/2,o.y-14);ctx.lineTo(o.x+o.w,o.y+22);ctx.lineTo(o.x,o.y+22);ctx.closePath();ctx.fill();
+    }else{
+      ctx.fillStyle='#7d5a2e';rr(o.x,o.y,o.w,30,6);ctx.fill();
+      ctx.fillStyle='#4c3517';ctx.fillRect(o.x+6,o.y+6,o.w-12,6);
+    }
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle='#ff5c5c';rr(px-20,PY-34,40,66,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';rr(px-15,PY-19,30,18,5);ctx.fill();
+  ctx.fillStyle='#fff7c9';
+  ctx.fillRect(px-17,PY-36,10,6);ctx.fillRect(px+7,PY-36,10,6);
+  var vg=ctx.createRadialGradient(W/2,H*0.55,140,W/2,H*0.55,420);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,5,.72)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn&&running)px=Math.max(RM+24,Math.min(W-RM-24,ptrX(e)));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

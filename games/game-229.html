@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极速接点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04283f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>极速接点</h1>
+  <p class="hint">移动挡板接住高速下坠的小点 · 漏接或接到炸弹扣机会</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>速度 <b id="spd">x1.0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="380"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">极速接点</h2>
+      <p id="ovDesc">小点会以越来越快的速度从天而降,移动鼠标 / 手指(或按←→)操纵底部挡板把它们全部接住!漏接一个扣一次机会;混在其中的红色炸弹绝不能碰。看看你能接住多少!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=380,KEY="mg_s229";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSpd=$("spd"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,lives=3,dots=[],spawnAt=0,startAt=0;
+var paddle={x:240,tx:240,w:92,h:12,y:352};
+var keyL=false,keyR=false,flashUntil=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function clampX(x){
+  if(x<paddle.w/2)x=paddle.w/2;
+  if(x>W-paddle.w/2)x=W-paddle.w/2;
+  return x;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+  var sec=state==="playing"?(performance.now()-startAt)/1000:0;
+  elSpd.textContent="x"+(1+sec*7/230).toFixed(1);
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="速度失控,没能接住所有小点!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.18)";
+    ctx.fillRect(0,0,W,H);
+  }
+  var i;
+  for(i=0;i<dots.length;i++){
+    var d=dots[i];
+    if(d.bomb){
+      ctx.fillStyle="#ef4444";
+      ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle="#7f1d1d";ctx.lineWidth=2.5;
+      ctx.beginPath();
+      ctx.moveTo(d.x-4,d.y-4);ctx.lineTo(d.x+4,d.y+4);
+      ctx.moveTo(d.x+4,d.y-4);ctx.lineTo(d.x-4,d.y+4);
+      ctx.stroke();ctx.lineWidth=1;
+    }else{
+      ctx.fillStyle="#38bdf8";
+      ctx.shadowColor="#38bdf8";ctx.shadowBlur=12;
+      ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="#e0f2fe";
+      ctx.beginPath();ctx.arc(d.x-2.5,d.y-2.5,2.5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.fillStyle="#e2e8f0";
+  ctx.beginPath();
+  var px=paddle.x-paddle.w/2,py=paddle.y;
+  ctx.moveTo(px+6,py);
+  ctx.lineTo(px+paddle.w-6,py);
+  ctx.arcTo(px+paddle.w,py,px+paddle.w,py+paddle.h,6);
+  ctx.lineTo(px+paddle.w,py+paddle.h-6);
+  ctx.arcTo(px+paddle.w,py+paddle.h,px+paddle.w-6,py+paddle.h,6);
+  ctx.lineTo(px+6,py+paddle.h);
+  ctx.arcTo(px,py+paddle.h,px,py+paddle.h-6,6);
+  ctx.lineTo(px,py+6);
+  ctx.arcTo(px,py,px+6,py,6);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle="#38bdf8";
+  ctx.fillRect(paddle.x-paddle.w/2+8,paddle.y+3,paddle.w-16,3);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state==="playing"){
+    var sec=(t-startAt)/1000;
+    if(keyL)paddle.tx=clampX(paddle.tx-460*dt/1000);
+    if(keyR)paddle.tx=clampX(paddle.tx+460*dt/1000);
+    paddle.x=paddle.tx;
+    if(t>=spawnAt){
+      dots.push({
+        x:30+Math.random()*(W-60),
+        y:-12,
+        vy:Math.min(560,230+sec*7),
+        r:9,
+        bomb:Math.random()<0.16
+      });
+      spawnAt=t+Math.max(400,880-sec*14);
+    }
+    var i;
+    for(i=dots.length-1;i>=0;i--){
+      var d=dots[i];
+      d.y+=d.vy*dt/1000;
+      if(d.y>paddle.y-14&&d.y<paddle.y+18&&Math.abs(d.x-paddle.x)<paddle.w/2+d.r){
+        if(d.bomb){
+          lives--;
+          flashUntil=t+300;
+        }else{
+          score+=10+Math.floor((d.vy-230)/40);
+        }
+        dots.splice(i,1);
+        updateHud();
+        if(lives<=0){endGame();return;}
+        continue;
+      }
+      if(d.y>H+20){
+        if(!d.bomb){
+          lives--;
+          updateHud();
+          if(lives<=0){endGame();return;}
+        }
+        dots.splice(i,1);
+      }
+    }
+  }
+  draw(t);
+}
+function setPointer(clientX){
+  var r=cv.getBoundingClientRect();
+  paddle.tx=clampX((clientX-r.left)*(W/r.width));
+}
+cv.addEventListener("mousemove",function(e){setPointer(e.clientX);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();setPointer(e.changedTouches[0].clientX);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();setPointer(e.changedTouches[0].clientX);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=true;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=true;
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function startGame(){
+  score=0;lives=3;dots=[];keyL=false;keyR=false;
+  paddle.x=240;paddle.tx=240;
+  state="playing";
+  startAt=performance.now();
+  spawnAt=startAt+400;
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

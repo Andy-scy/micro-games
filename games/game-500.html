@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日靶场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffd54f;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd54f;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffd54f}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffd54f;color:#332600;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>每日靶场</h1>
+  <p class="hint">今天的靶阵全天下一模一样 · 十箭拿 70 分 · 金靶双倍</p>
+  <div class="hud">
+    <span>今日 <b id="dy">--</b></span>
+    <span>箭 <b id="ar">0</b>/10</span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>今日最佳 <b id="bs">0</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">每日靶场</h2>
+      <p id="ovD">每日一局,全服同题:五只靶的大小、位置、金靶归属,都由今天的日期唯一决定——所有人面对的是同一张靶阵图。环数计分,金靶上的每环双倍。十箭之内冲击 70 分,把你的名字写进今日最佳。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">今日开靶</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elDy=$("dy"),elAr=$("ar"),elSc=$("sc"),elBs=$("bs"),elMsg=$("msg");
+const GOAL=70,OX=240,OY=540,FLIGHT=0.2,KEY="archeryDailyBest500";
+let state="menu",score=0,used=0,tp=0,endT=-1,best=0,dayStr="";
+let mouse={x:240,y:250},targets=[],flies=[],marks=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function mulberry32(a){
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function pad2(n){return(n<10?"0":"")+n;}
+function genDay(){
+  const now=new Date();
+  dayStr=now.getFullYear()+"-"+pad2(now.getMonth()+1)+"-"+pad2(now.getDate());
+  elDy.textContent=dayStr;
+  const seed=now.getFullYear()*10000+(now.getMonth()+1)*100+now.getDate();
+  const rnd=mulberry32(seed);
+  const pool=[46,42,38,34,30];
+  for(let i=pool.length-1;i>0;i--){
+    const j=Math.floor(rnd()*(i+1));
+    const tmp=pool[i];pool[i]=pool[j];pool[j]=tmp;
+  }
+  targets=[];
+  for(let i=0;i<5;i++){
+    let px=0,py=0,ok=false,guard=0;
+    while(!ok&&guard<300){
+      guard++;
+      px=60+rnd()*360;
+      py=90+rnd()*330;
+      ok=true;
+      for(let j=0;j<targets.length;j++){
+        if(Math.hypot(px-targets[j].x,py-targets[j].y)<92){ok=false;break;}
+      }
+    }
+    targets.push({x:px,y:py,r:pool[i],gold:false});
+  }
+  targets[Math.floor(rnd()*5)].gold=true;
+}
+function loadBest(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(raw){
+      const o=JSON.parse(raw);
+      if(o&&o.date===dayStr&&typeof o.best==="number")best=o.best;
+      else best=0;
+    }else best=0;
+  }catch(e){best=0;}
+  elBs.textContent=best;
+}
+function saveBest(){
+  try{localStorage.setItem(KEY,JSON.stringify({date:dayStr,best:best}));}catch(e){}
+}
+function swayAim(){return{x:mouse.x+Math.sin(tp*2.1)*2.5,y:mouse.y+Math.cos(tp*1.6)*2.3};}
+function fire(){
+  if(state!=="play"||used>=10||flies.length>=3)return;
+  const a=swayAim();
+  flies.push({x0:OX,y0:OY,x1:a.x,y1:a.y,t:0});
+}
+function resolve(f){
+  let v=0,goldHit=false;
+  for(let i=0;i<targets.length;i++){
+    const t=targets[i];
+    const d=Math.hypot(f.x1-t.x,f.y1-t.y);
+    if(d<=t.r){
+      v=Math.max(1,10-Math.floor(d/(t.r/10)));
+      if(t.gold){v*=2;goldHit=true;}
+      break;
+    }
+  }
+  used++;score+=v;
+  marks.push({x:f.x1,y:f.y1,v:v});
+  elMsg.textContent=v>0?(v+" 分"+(goldHit?"(金靶双倍!)":"")):"脱靶";
+  elAr.textContent=used;elSc.textContent=score;
+  if(used>=10)endT=0.7;
+}
+function startGame(){
+  score=0;used=0;flies=[];marks=[];endT=-1;tp=0;
+  elMsg.textContent="";elAr.textContent="0";elSc.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  let newBest=false;
+  if(score>best){best=score;saveBest();newBest=true;}
+  elBs.textContent=best;
+  const win=score>=GOAL;
+  ovT.textContent=win?"今日靶王!":"明日再来";
+  ovT.style.color=win?"#ffd54f":"#ef9a9a";
+  ovD.textContent=win?"今天的这张靶阵图,你已经射到顶了。":"今日靶阵不会变:记住每只靶的位置和金靶在哪,明天再来、或者明天换个思路——靶阵也换。"+(newBest?"\n新纪录!":"");
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分 · 今日最佳 "+best;
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  if(state!=="menu")tp+=dt;
+  if(state==="play"){
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];f.t+=dt/FLIGHT;
+      if(f.t>=1){resolve(f);flies.splice(i,1);}
+    }
+    if(endT>0){endT-=dt;if(endT<=0)finish();}
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#1c2438");g.addColorStop(1,"#101422");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#16241c";ctx.fillRect(0,486,W,H-486);
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  for(let i=0;i<targets.length;i++){
+    const t=targets[i];
+    for(let k=10;k>=1;k--){
+      ctx.fillStyle=t.gold&&k<=5?"#ffd54f":(k%2===0?"#eceff1":"#e53935");
+      if(t.gold)ctx.strokeStyle="rgba(120,90,0,0.5)";
+      else ctx.strokeStyle="rgba(0,0,0,0.35)";
+      ctx.beginPath();ctx.arc(t.x,t.y,t.r*k/10,0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
+    if(t.gold){
+      ctx.save();ctx.translate(t.x,t.y-t.r-10);
+      ctx.fillStyle="#ffd54f";ctx.font="bold 12px system-ui";ctx.textAlign="center";
+      ctx.fillText("×2",0,0);
+      ctx.restore();
+    }
+  }
+  for(let i=0;i<marks.length;i++){
+    const m=marks[i];
+    ctx.strokeStyle=m.v>=18?"#00e676":"#ffffff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(m.x-5,m.y-5);ctx.lineTo(m.x+5,m.y+5);ctx.moveTo(m.x+5,m.y-5);ctx.lineTo(m.x-5,m.y+5);ctx.stroke();
+  }
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(OX,OY+6,14,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i],e=Math.min(1,f.t);
+    const px=f.x0+(f.x1-f.x0)*e,py=f.y0+(f.y1-f.y0)*e;
+    const ang=Math.atan2(f.y1-f.y0,f.x1-f.x0);
+    ctx.save();ctx.translate(px,py);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==="play"&&used<10){
+    const a=swayAim();
+    ctx.strokeStyle="#ffd54f";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(a.x,a.y,11,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(a.x-16,a.y);ctx.lineTo(a.x-5,a.y);
+    ctx.moveTo(a.x+5,a.y);ctx.lineTo(a.x+16,a.y);
+    ctx.moveTo(a.x,a.y-16);ctx.lineTo(a.x,a.y-5);
+    ctx.moveTo(a.x,a.y+5);ctx.lineTo(a.x,a.y+16);ctx.stroke();
+  }
+}
+genDay();
+loadBest();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

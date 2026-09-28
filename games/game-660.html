@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识天梯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:24px;text-align:center;color:#ffc857;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;align-items:center}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffc857}
+#ladder{display:flex;gap:4px;margin:4px 0 8px}
+.seg{flex:1;height:12px;border-radius:4px;background:#232a48}
+.seg.done{background:#ffc857}
+.seg.cur{background:#ffe29a;box-shadow:0 0 8px rgba(255,200,87,.7)}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#ffc857;border-radius:6px}
+#qhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+#badge{display:inline-block;border-radius:999px;padding:4px 14px;font-size:13px;font-weight:800}
+.t1{background:#173327;color:#51d88a;border:1px solid #2c5a41}
+.t2{background:#10283a;color:#6ee7ff;border:1px solid #2c4a66}
+.t3{background:#3a2c10;color:#ffc857;border:1px solid #66522a}
+.t4{background:#3a1a28;color:#ff6b9d;border:1px solid #66304a}
+#lvltxt{font-size:14px;color:#9aa3c0;font-weight:700}
+#q{text-align:center;font-size:19px;font-weight:700;line-height:1.6;background:#232a48;border:2px solid #2c3357;border-radius:12px;padding:16px 12px;margin-bottom:12px;min-height:86px;display:flex;align-items:center;justify-content:center}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:11px 13px;font-size:16px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#ffc857}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+.ctrl{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:2px}
+#swap{border:1px solid #66522a;background:#232a48;color:#ffc857;border-radius:10px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit}
+#swap:disabled{opacity:.4;cursor:default}
+.keys{font-size:12px;color:#9aa3c0}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:8px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffc857;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ffc857;color:#33230a;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>知识天梯</h1>
+  <p class="tips">12 阶天梯步步登高,题目越爬越难,答错即刻坠落!没有复活,只有一次「换题保险」,敢不敢登顶?</p>
+  <div class="card">
+    <div id="ladder"></div>
+    <div class="row">
+      <div class="stat"><div class="mut">当前</div><div class="big" id="lv">1/12 阶</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">保险</div><div class="big" id="sw">×1</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="qhead"><span id="badge" class="t1">简单</span><span id="lvltxt">第 1 阶</span></div>
+    <div id="q">准备开始…</div>
+    <div id="opts"></div>
+    <div class="ctrl">
+      <button id="swap">换一题(剩 1 次)</button>
+      <span class="keys">键盘 1-4 选答案,S 换题</span>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">知识天梯</h2><p id="ovp">玩法说明:<br>· 12 阶天梯,每 3 阶一档:简单 → 进阶 → 困难 → 大师<br>· 四选一,每题限时 18 秒<br>· 答对得分 = 难度档 × 100,越往上越值钱<br>· 答错或超时立刻坠落,一答定音!<br>· 每局一次「换题保险」:难题可换同档题<br>· 登顶第 12 阶额外 +500 荣耀分</p><button class="btn" id="obtn">开始攀登</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{t:1,q:'一周共有几天?',a:'7 天',w:['5 天','6 天','8 天']},
+{t:1,q:'彩虹七色中排在最外圈的是什么颜色?',a:'红色',w:['紫色','蓝色','橙色']},
+{t:1,q:'一年共有几个季节?',a:'4 个',w:['3 个','5 个','6 个']},
+{t:1,q:'交通信号灯里,红灯表示什么?',a:'停止通行',w:['加速通过','左右观望','下车推行']},
+{t:1,q:'我国国旗上有几颗五角星?',a:'5 颗',w:['4 颗','6 颗','8 颗']},
+{t:1,q:'《西游记》里孙悟空的兵器是什么?',a:'金箍棒',w:['九齿钉耙','月牙铲','青龙偃月刀']},
+{t:1,q:'汉语拼音声母表排在最前面的是?',a:'b',w:['a','p','m']},
+{t:1,q:'农历五月初五是什么传统节日?',a:'端午节',w:['中秋节','重阳节','元宵节']},
+{t:1,q:'12 的平方等于多少?',a:'144',w:['124','132','156']},
+{t:2,q:'「床前明月光」的下一句是?',a:'疑是地上霜',w:['低头思故乡','举头望明月','夜半钟声到客船']},
+{t:2,q:'成语「亡羊补牢」常见的后半句是?',a:'为时不晚',w:['悔之晚矣','于事无补','雪上加霜']},
+{t:2,q:'世界上面积最大的大洋是?',a:'太平洋',w:['大西洋','印度洋','北冰洋']},
+{t:2,q:'我国最长的河流是?',a:'长江',w:['黄河','珠江','黑龙江']},
+{t:2,q:'「欲穷千里目」的下一句是?',a:'更上一层楼',w:['高处不胜寒','一览众山小','手可摘星辰']},
+{t:2,q:'被后人称为「诗仙」的唐代诗人是?',a:'李白',w:['杜甫','白居易','王维']},
+{t:2,q:'世界上最大的热沙漠是?',a:'撒哈拉沙漠',w:['塔克拉玛干沙漠','戈壁沙漠','卡拉哈里沙漠']},
+{t:2,q:'二十四节气中,「立春」之后紧跟着的是?',a:'雨水',w:['惊蛰','春分','谷雨']},
+{t:2,q:'「春眠不觉晓」的下一句是?',a:'处处闻啼鸟',w:['花落知多少','夜来风雨声','疑是地上霜']},
+{t:3,q:'光在真空中的传播速度约为每秒多少?',a:'30 万公里',w:['3 万公里','300 万公里','3000 万公里']},
+{t:3,q:'人体血液中负责运输氧气的是?',a:'红细胞',w:['白细胞','血小板','血浆']},
+{t:3,q:'下列哪项不属于我国古代「四大发明」?',a:'地动仪',w:['造纸术','活字印刷','指南针']},
+{t:3,q:'元素周期表中排在第一位的元素是?',a:'氢',w:['氦','碳','锂']},
+{t:3,q:'「破釜沉舟」出自哪位古代将领的故事?',a:'项羽',w:['韩信','曹操','岳飞']},
+{t:3,q:'植物进行光合作用主要吸收的气体是?',a:'二氧化碳',w:['氧气','氮气','氢气']},
+{t:3,q:'古典名著《红楼梦》的作者是?',a:'曹雪芹',w:['罗贯中','吴承恩','施耐庵']},
+{t:3,q:'太阳系中体积最大的行星是?',a:'木星',w:['土星','地球','海王星']},
+{t:3,q:'声音在下列哪种介质中传播最快?',a:'钢铁',w:['空气','水','木头']},
+{t:4,q:'成语「司空见惯」中的「司空」原本是指?',a:'古代官名',w:['人名','地名','乐器']},
+{t:4,q:'蜜蜂主要靠什么方式告诉同伴花蜜的位置?',a:'跳「8 字舞」',w:['鸣叫','留下气味','振动翅膀']},
+{t:4,q:'下列哪种动物拥有世界上最大的心脏?',a:'蓝鲸',w:['非洲象','长颈鹿','鲸鲨']},
+{t:4,q:'古代「三更」大约相当于现在的什么时间?',a:'23 点至 1 点',w:['19 点至 21 点','1 点至 3 点','3 点至 5 点']},
+{t:4,q:'世界上现存规模最大的宫殿建筑群是?',a:'故宫',w:['卢浮宫','白金汉宫','克里姆林宫']},
+{t:4,q:'「一光年」指的是?',a:'光走一年的距离',w:['一年的时间','一颗恒星的亮度','光绕地球一圈的长度']},
+{t:4,q:'成语「入木三分」最初形容的是哪项技艺?',a:'书法',w:['雕刻','绘画','木匠']},
+{t:4,q:'章鱼的血液是什么颜色?',a:'蓝色',w:['红色','绿色','无色']},
+{t:4,q:'算上海外领地,世界上时区最多的国家是?',a:'法国',w:['俄罗斯','美国','中国']}
+];
+var MAXLV=12,QTIME=18;
+var TNAME=['','简单','进阶','困难','大师'];
+var used=[],level=1,score=0,swaps=1,timeLeft=QTIME;
+var playing=false,over=false,locked=false,revealT=0,curTier=1,curOk=false;
+function $(id){return document.getElementById(id)}
+function tierOf(lv){return Math.min(4,Math.ceil(lv/3));}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function buildLadder(){
+  var box=$('ladder');box.innerHTML='';
+  for(var i=1;i<=MAXLV;i++){
+    var d=document.createElement('div');
+    d.className='seg'+(i<level?' done':(i===level?' cur':''));
+    box.appendChild(d);
+  }
+}
+function pickQ(){
+  var cand=[],i;
+  for(i=0;i<BANK.length;i++)if(BANK[i].t===curTier&&!used[i])cand.push(i);
+  if(cand.length===0){
+    for(i=0;i<BANK.length;i++)if(BANK[i].t===curTier)used[i]=false;
+    for(i=0;i<BANK.length;i++)if(BANK[i].t===curTier)cand.push(i);
+  }
+  var k=cand[Math.floor(Math.random()*cand.length)];
+  used[k]=true;
+  return BANK[k];
+}
+function showQ(){
+  var it=pickQ();
+  locked=false;curOk=false;
+  timeLeft=QTIME;
+  $('lv').textContent=level+'/'+MAXLV+' 阶';
+  $('lvltxt').textContent='第 '+level+' 阶';
+  var badge=$('badge');
+  badge.className='t'+curTier;
+  badge.textContent=TNAME[curTier];
+  $('q').textContent=it.q;
+  var arr=[{t:it.a,ok:1},{t:it.w[0],ok:0},{t:it.w[1],ok:0},{t:it.w[2],ok:0}];
+  shuffle(arr);
+  var box=$('opts');box.innerHTML='';
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=(k+1)+'. '+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){answer(btn);});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function answer(btn){
+  if(!playing||over||locked)return;
+  locked=true;curOk=(btn.dataset.ok==='1');
+  var i,btns=$('opts').children;
+  for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+  if(curOk){
+    var gain=curTier*100;
+    score+=gain;
+    $('sc').textContent=score;
+    $('msg').textContent='稳!+'+gain+' 分'+(level===MAXLV?',登顶!':' · 上升一阶');
+  }else{
+    btn.classList.add('bad');
+    $('msg').textContent='失手了…正确答案已标绿';
+  }
+  revealT=curOk?0.85:1.5;
+}
+function timeout(){
+  if(!playing||over||locked)return;
+  locked=true;curOk=false;
+  var i,btns=$('opts').children;
+  for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+  $('msg').textContent='超时!一答定音,天梯无情…';
+  revealT=1.5;
+}
+function doSwap(){
+  if(!playing||over||locked)return;
+  if(swaps<=0)return;
+  swaps--;
+  $('sw').textContent='×'+swaps;
+  var sb=$('swap');
+  sb.disabled=true;
+  sb.textContent='换一题(已用完)';
+  showQ();
+  $('msg').textContent='已换同档新题,计时重置';
+}
+function finish(win){
+  playing=false;over=true;
+  var reached=win?MAXLV:level;
+  var tail;
+  if(win){
+    score+=500;
+    tail='登顶成功!额外 +500 荣耀分<br>最终得分 <b>'+score+'</b> 分<br>12 阶全过,知识就是天梯!';
+  }else{
+    tail='从第 '+reached+' 阶坠落<br>最终得分 <b>'+score+'</b> 分<br>再爬一次,这次稳一点!';
+  }
+  $('ovt').textContent=win?'登顶 · 大师级!':'天梯坠落…';
+  $('ovp').innerHTML=tail;
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  used=[];level=1;score=0;swaps=1;over=false;playing=true;locked=false;revealT=0;
+  curTier=1;
+  $('sc').textContent='0';$('sw').textContent='×1';
+  var sb=$('swap');sb.disabled=false;sb.textContent='换一题(剩 1 次)';
+  buildLadder();
+  $('overlay').classList.add('hide');
+  showQ();
+}
+$('obtn').addEventListener('click',startGame);
+$('swap').addEventListener('click',doSwap);
+document.addEventListener('keydown',function(e){
+  if(!playing||over||locked)return;
+  var k=e.key;
+  if(k>='1'&&k<='4'){
+    var btns=$('opts').children;
+    var n=k.charCodeAt(0)-49;
+    if(btns[n])answer(btns[n]);
+  }else if(k==='s'||k==='S'){
+    doSwap();
+  }
+});
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    if(locked){
+      revealT-=dt;
+      if(revealT<=0){
+        if(curOk){
+          level++;
+          buildLadder();
+          if(level>MAXLV)finish(true);
+          else{curTier=tierOf(level);showQ();}
+        }else{
+          finish(false);
+        }
+      }
+    }else{
+      timeLeft-=dt;
+      var f=timeLeft/QTIME;
+      if(f<0)f=0;
+      var bar=$('tbar');
+      bar.style.width=(f*100)+'%';
+      bar.style.background=f>0.5?'#ffc857':(f>0.25?'#ff9e5c':'#ff5c5c');
+      if(timeLeft<=0)timeout();
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

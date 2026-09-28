@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>巨物拉锯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>巨物拉锯</h1>
+<p class="tip">按住空格/屏幕收线;鱼狂奔时(红条警告)必须松手,否则断线风险飙升!把鱼磨到没力气,再拉到船边抄网上岸。</p>
+<div id="hud"><span>对手 <b id="s3">?</b></span><span>时间 <b id="s2">60</b> 秒</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">巨物拉锯</h2><p id="op">一条巨物咬死了鱼钩!<br>它冲你就放,它停你就收,把它拖到船边即可获胜。<br>三步走:避其锋芒 → 消耗体力 → 全力收线。</p><button id="ob">扬竿开战</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eT=document.getElementById('s2'),eN=document.getElementById('s3');
+var W=cv.width,H=cv.height,WL=210;
+var state='ready',tl=60,msg='';
+var boss=null,dist=65,power=100,risk=0,fstate='calm',ft=1,spd=1,held=false,fx=0;
+var bosses=[['青背巨鲤',100,1],['银鳞大草',125,1.15],['金鳞湖主',150,1.35]];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function clamp(v,a,b){return v<a?a:(v>b?b:v)}
+function finish(win,why){
+  state='over';held=false;ob.textContent='再战一场';
+  var sc=Math.round(power*3+tl*5);
+  ot.textContent=win?'巨物上岸!':'功亏一篑…';
+  op.innerHTML=why+'<br>评分 <b style="color:#ffd75e">'+(win?sc:0)+'</b>'+(win?'<br>整片湖区都在传颂这一竿!':'<br>记住:它冲你就放,它停你就收。');
+  ov.classList.remove('hide');
+}
+function start(){
+  boss=bosses[Math.floor(Math.random()*3)];
+  power=boss[1];spd=boss[2];dist=65;risk=0;fstate='calm';ft=1.2;held=false;tl=60;msg='巨物咬钩了!按住收线!';
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(false,'时间耗尽,巨物挣脱了…');return}
+  ft-=dt;
+  if(power>0){
+    if(fstate==='calm'&&ft<=0){fstate='tele';ft=0.35}
+    else if(fstate==='tele'&&ft<=0){fstate='burst';ft=rnd(0.9,1.4)}
+    else if(fstate==='burst'&&ft<=0){fstate='calm';ft=rnd(1.4,2.6)/spd}
+  }
+  var pull;
+  if(power<=0){fstate='tired';pull=0}
+  else if(fstate==='burst')pull=44*spd;
+  else pull=9*spd;
+  if(held){
+    dist-=(power<=0?85:55)*dt;
+    power=Math.max(0,power-13*dt);
+    risk+=(power>0&&fstate==='burst'?62:7)*dt;
+  }else{
+    risk-=34*dt;
+    dist+=pull*dt;
+  }
+  risk=clamp(risk,0,100);dist=clamp(dist,0,100);
+  if(power<=0)msg='鱼没力气了!全力收线!';
+  else if(fstate==='burst')msg='鱼在狂奔——快松手!';
+  else if(fstate==='tele')msg='鱼要发力了,准备放线…';
+  else msg='按住空格 / 屏幕 收线';
+  if(dist<=2){finish(true,'你把巨物拖到了船边!');return}
+  if(dist>=100){finish(false,'鱼线被拉到了极限,巨物跑掉了…');return}
+  if(risk>=100){finish(false,'啪!鱼线绷断了…');return}
+}
+function bar(y,label,val,col){
+  X.fillStyle='rgba(200,215,235,.85)';X.font='12px system-ui';X.textAlign='left';
+  X.fillText(label,16,y-6);
+  X.fillStyle='rgba(10,16,32,.8)';X.fillRect(70,y-18,W-140,16);
+  X.fillStyle=col;X.fillRect(70,y-18,(W-140)*clamp(val,0,100)/100,16);
+  X.strokeStyle='rgba(127,212,255,.4)';X.lineWidth=1;X.strokeRect(70,y-18,W-140,16);
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WL);g.addColorStop(0,'#151c36');g.addColorStop(1,'#232a4d');
+  X.fillStyle=g;X.fillRect(0,0,W,WL);
+  bar(30,'鱼距',dist,'#4fa8e0');
+  bar(58,'鱼力',power,power>40?'#63c97a':'#e08a4f');
+  bar(86,'断线风险',risk,risk>60?'#e05555':'#d9c14f');
+  var g2=X.createLinearGradient(0,WL,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#091631');
+  X.fillStyle=g2;X.fillRect(0,WL,W,H-WL);
+  var t=Date.now()*0.001,i,xx,yy;
+  X.strokeStyle='rgba(127,212,255,.15)';X.lineWidth=2;
+  for(i=0;i<3;i++){X.beginPath();for(xx=0;xx<=W;xx+=16){yy=WL+40+i*90+Math.sin(xx*0.04+t*(1+i*0.3))*5;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke()}
+  fx=90+dist*3.5;
+  var fy=WL+120+Math.sin(t*2)*8+(fstate==='burst'?rnd(-6,6):0);
+  X.fillStyle='#dfe6f2';X.fillRect(30,WL-16,10,60);
+  X.fillStyle='#4a3a26';X.fillRect(6,WL+40,88,16);
+  X.fillStyle='#3a2e20';X.beginPath();X.moveTo(6,WL+56);X.lineTo(6,WL+72);X.lineTo(24,WL+56);X.fill();
+  X.strokeStyle='rgba(230,238,246,.75)';X.lineWidth=2;
+  X.beginPath();X.moveTo(35,WL-14);X.quadraticCurveTo((35+fx)/2,WL-40,fx,fy-16);X.stroke();
+  var fcol=boss?['#3f6e8f','#5f8f6e','#8f7a3f'][bosses.indexOf(boss)]:'#3f6e8f';
+  X.fillStyle=fcol;
+  X.beginPath();X.ellipse(fx,fy,40,17,Math.sin(t*3)*0.1,0,7);X.fill();
+  X.beginPath();X.moveTo(fx+34,fy);X.lineTo(fx+58,fy-13);X.lineTo(fx+58,fy+13);X.closePath();X.fill();
+  X.fillStyle='#0f1220';X.beginPath();X.arc(fx-22,fy-4,3.4,0,7);X.fill();
+  if(fstate==='burst'){X.fillStyle='#ff6b6b';X.font='bold 24px system-ui';X.textAlign='center';X.fillText('!!!',fx,fy-30)}
+  else if(fstate==='tele'){X.fillStyle='#ffd75e';X.font='bold 22px system-ui';X.textAlign='center';X.fillText('!',fx,fy-30)}
+  else if(power<=0){X.fillStyle='#7fe0a0';X.font='bold 16px system-ui';X.textAlign='center';X.fillText('筋疲力尽',fx,fy-30)}
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,140);
+  if(boss){X.fillStyle='#7fd4ff';X.font='bold 15px system-ui';X.fillText('—— '+boss[0]+' ——',W/2,168)}
+}
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else held=true;
+  }
+});
+document.addEventListener('keyup',function(e){
+  if(e.key===' '||e.code==='Space')held=false;
+});
+cv.addEventListener('pointerdown',function(){if(state==='play')held=true});
+window.addEventListener('pointerup',function(){held=false});
+window.addEventListener('pointercancel',function(){held=false});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eT.textContent=Math.ceil(tl);
+  if(boss)eN.textContent=boss[0];
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

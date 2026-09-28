@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>花色对决 8球挑战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#5eead4;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#5eead4}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#5eead4;color:#042f2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>花色对决</h1>
+  <p class="hint">按住画布拖拽瞄准,松开出杆 · 第一颗落袋定花色,清完花色再进黑8</p>
+  <div class="hud">
+    <span>轮到 <b id="hTurn">你</b></span>
+    <span>你方剩余 <b id="hMine">待定</b></span>
+    <span>对手剩余 <b id="hFoe">待定</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="290"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">花色对决</h2>
+      <p id="ovD">简化8球对战:第一颗落袋的花色(全色/花色)归你,另一花色归对手。清完自己的 7 颗后打进黑8获胜;提前打进黑8即判负。母球落袋会被重置并交换球权。拖拽越远力度越大。</p>
+      <button id="btnGo">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hTurn=$("hTurn"),hMine=$("hMine"),hFoe=$("hFoe");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo");
+var W=470,H=290,RL=16,RT=16,RR=454,RB=274,R=8,TAU=6.28318;
+var PK=[[19,19],[235,13],[451,19],[19,271],[235,277],[451,271]];
+var CAPR=13.5;
+var balls=[],cue=null;
+var state="menu",moving=false;
+var aiming=false,aimDx=1,aimDy=0,power=0;
+var turn="you",group=null,aiGroup=null,aiWait=0,pottedShot=[],cuePotted=false;
+var fx=[];
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function mkBall(x,y,o){var b={x:x,y:y,vx:0,vy:0,r:R,live:true,kind:"cue",col:"#f5f5f0",num:0};if(o)for(var k in o)b[k]=o[k];balls.push(b);return b;}
+function freeSpot(x,y){var n=0;while(n<90){var ok=true,i;for(i=0;i<balls.length;i++){var b=balls[i];if(b.live){var dx=b.x-x,dy=b.y-y;if(dx*dx+dy*dy<440){ok=false;break;}}}if(ok)return{x:x,y:y};x=RL+22+Math.random()*(RR-RL-44);y=RT+22+Math.random()*(RB-RT-44);n++;}return{x:x,y:y};}
+function anyMoving(){for(var i=0;i<balls.length;i++){var b=balls[i];if(b.live&&(b.vx*b.vx+b.vy*b.vy)>25)return true;}return false;}
+function remaining(kind){var n=0;for(var i=0;i<balls.length;i++){var b=balls[i];if(b.live&&b.kind===kind)n++;}return n;}
+function onPot(b){
+  if(b.kind==="cue"){cuePotted=true;addFx(b.x,b.y,"母球落袋","#f87171");return;}
+  pottedShot.push(b);
+  addFx(b.x,b.y,b.kind==="eight"?"黑8!":"落袋","#fbbf24");
+}
+function onClack(){}
+function onRail(){}
+function physics(dt){
+  var i,j,b;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    var f=1-1.8*dt;if(f<0)f=0;b.vx*=f;b.vy*=f;
+    if(b.vx*b.vx+b.vy*b.vy<36){b.vx=0;b.vy=0;}}
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    for(j=0;j<PK.length;j++){var px=b.x-PK[j][0],py=b.y-PK[j][1];
+      if(px*px+py*py<CAPR*CAPR){b.live=false;b.vx=0;b.vy=0;onPot(b);break;}}}
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    if(b.x<RL+b.r){b.x=RL+b.r;if(b.vx<0)b.vx=-b.vx*0.75;}
+    else if(b.x>RR-b.r){b.x=RR-b.r;if(b.vx>0)b.vx=-b.vx*0.75;}
+    if(b.y<RT+b.r){b.y=RT+b.r;if(b.vy<0)b.vy=-b.vy*0.75;}
+    else if(b.y>RB-b.r){b.y=RB-b.r;if(b.vy>0)b.vy=-b.vy*0.75;}}
+  for(i=0;i<balls.length;i++){var a=balls[i];if(!a.live)continue;
+    for(j=i+1;j<balls.length;j++){b=balls[j];if(!b.live)continue;
+      var dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy,mn=a.r+b.r;
+      if(d2<mn*mn&&d2>0.0001){var d=Math.sqrt(d2),nx=dx/d,ny=dy/d,ovp=(mn-d)/2;
+        a.x-=nx*ovp;a.y-=ny*ovp;b.x+=nx*ovp;b.y+=ny*ovp;
+        var rel=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+        if(rel<0){var im=-0.975*rel;a.vx-=im*nx;a.vy-=im*ny;b.vx+=im*nx;b.vy+=im*ny;}}}}
+}
+function segPtDist(ax,ay,bx,by,px,py){var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy;if(L2<0.0001)return Math.hypot(px-ax,py-ay);var t=((px-ax)*dx+(py-ay)*dy)/L2;t=Math.max(0,Math.min(1,t));return Math.hypot(ax+dx*t-px,ay+dy*t-py);}
+function pathClear(ax,ay,bx,by,ig1,ig2){for(var i=0;i<balls.length;i++){var b=balls[i];if(!b.live||b===ig1||b===ig2)continue;if(segPtDist(ax,ay,bx,by,b.x,b.y)<b.r+R-1.5)return false;}return true;}
+function aiShoot(){
+  var my=[],i,j,b;
+  for(i=0;i<balls.length;i++){b=balls[i];if(b.live&&b.kind===aiGroup)my.push(b);}
+  if(my.length===0){for(i=0;i<balls.length;i++){b=balls[i];if(b.live&&b.kind==="eight")my.push(b);}}
+  var best=null,bs=-99;
+  for(i=0;i<my.length;i++){var t=my[i];
+    for(j=0;j<PK.length;j++){var p=PK[j];
+      var pd=Math.hypot(p[0]-t.x,p[1]-t.y);if(pd<1)continue;
+      var ux=(p[0]-t.x)/pd,uy=(p[1]-t.y)/pd;
+      var gx=t.x-ux*2*R,gy=t.y-uy*2*R;
+      var cd=Math.hypot(gx-cue.x,gy-cue.y);if(cd<4)continue;
+      var adx=(gx-cue.x)/cd,ady=(gy-cue.y)/cd;
+      var cut=adx*ux+ady*uy;if(cut<0.3)continue;
+      if(!pathClear(cue.x,cue.y,gx,gy,cue,null))continue;
+      if(!pathClear(t.x,t.y,p[0],p[1],t,null))continue;
+      var sc=cut*3-cd/700-pd/900+Math.random()*0.2;
+      if(sc>bs){bs=sc;best={adx:adx,ady:ady,cd:cd,pd:pd};}}}
+  var v,err;
+  if(best){err=(Math.random()-0.5)*0.085;v=Math.min(1500,340+best.cd*2.2+best.pd*1.6);}
+  else{var nb=null,nd=1e9;
+    for(i=0;i<my.length;i++){b=my[i];var d=Math.hypot(b.x-cue.x,b.y-cue.y);if(d<nd){nd=d;nb=b;}}
+    if(!nb)nb=my[0];
+    var dd=Math.hypot(nb.x-cue.x,nb.y-cue.y)||1;
+    best={adx:(nb.x-cue.x)/dd,ady:(nb.y-cue.y)/dd};err=(Math.random()-0.5)*0.13;v=720;}
+  var ca=Math.atan2(best.ady,best.adx)+err;
+  cue.vx=Math.cos(ca)*v;cue.vy=Math.sin(ca)*v;moving=true;
+}
+function respotCue(){var s=freeSpot(110,145);cue.x=s.x;cue.y=s.y;cue.vx=0;cue.vy=0;cue.live=true;}
+function updHud(){
+  hTurn.textContent=turn==="you"?"你":"对手";
+  hMine.textContent=group?(remaining(group)+" 颗"):"待定";
+  hFoe.textContent=aiGroup?(remaining(aiGroup)+" 颗"):"待定";
+}
+function endShot(){
+  var i,b,mine=0,eight=false,first=null;
+  for(i=0;i<pottedShot.length;i++){b=pottedShot[i];
+    if(b.kind==="eight"){eight=true;continue;}
+    if(!first)first=b;}
+  if(eight){
+    var sg=(turn==="you")?group:aiGroup;
+    var okWin=(sg!==null&&!cuePotted&&remaining(sg)===0);
+    state="over";
+    if(okWin)showOv(turn==="you"?"胜利":"惜败",turn==="you"?"你抢先打进黑8,赢下对决!\n黑8同杆清彩也作胜。":"对手清台后打进黑8,你输了。");
+    else showOv(turn==="you"?"惜败":"胜利",turn==="you"?"黑8提前落袋,你输了。":"对手误打进黑8,你赢了!");
+    return;
+  }
+  if(first&&!group){
+    var t=first.kind;
+    if(turn==="you"){group=t;aiGroup=(t==="solid")?"stripe":"solid";}
+    else{aiGroup=t;group=(t==="solid")?"stripe":"solid";}
+    addFx(235,60,turn==="you"?"你打"+(group==="solid"?"全色":"花色"):"对手打"+(aiGroup==="solid"?"全色":"花色"),"#5eead4");
+  }
+  if(first){var sg2=(turn==="you")?group:aiGroup;
+    for(i=0;i<pottedShot.length;i++){b=pottedShot[i];if(b.kind===sg2)mine++;}}
+  if(cuePotted)respotCue();
+  if(!(mine>0&&!cuePotted)){turn=(turn==="you")?"ai":"you";if(turn==="ai")aiWait=1.0;}
+  pottedShot=[];cuePotted=false;updHud();
+}
+function reset(){
+  balls=[];fx=[];pottedShot=[];cuePotted=false;
+  turn="you";group=null;aiGroup=null;aiWait=0;moving=false;power=0;aiming=false;
+  cue=mkBall(110,145);
+  var nums=[1,2,3,4,5,6,7,9,10,11,12,13,14,15],i,j,n;
+  for(i=nums.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));n=nums[i];nums[i]=nums[j];nums[j]=n;}
+  var idx=0;
+  for(i=0;i<5;i++)for(j=0;j<=i;j++){
+    var x=340+i*14.8,y=145+(j-i/2)*16.6,o;
+    if(i===2&&j===1)o={kind:"eight",col:"#141420",num:8};
+    else{n=nums[idx++];o=(n<8)?{kind:"solid",col:"#f59e0b",num:n}:{kind:"stripe",col:"#3b82f6",num:n};}
+    mkBall(x,y,o);}
+  state="play";updHud();
+}
+function showOv(t,d){ovT.textContent=t;ovD.textContent=d;ovT.style.color=(t==="胜利")?"#5eead4":"#f87171";btnGo.textContent="再来一局";ov.classList.remove("hide");}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play"||moving||turn!=="you")return;e.preventDefault();aiming=true;mv(e);}
+function mv(e){if(!aiming)return;e.preventDefault();var p=ptr(e);var dx=cue.x-p.x,dy=cue.y-p.y,d=Math.hypot(dx,dy);if(d<8){power=0;return;}power=Math.min(d,150)/150;aimDx=dx/d;aimDy=dy/d;}
+function up(e){if(!aiming)return;if(e&&e.preventDefault)e.preventDefault();aiming=false;if(power>0.04&&cue.live){var v=120+power*1500;cue.vx=aimDx*v;cue.vy=aimDy*v;moving=true;}power=0;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+btnGo.addEventListener("click",function(){ov.classList.add("hide");reset();});
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function segHit(x,y,dx,dy,b,rad){var fxv=x-b.x,fyv=y-b.y;var bq=dx*fxv+dy*fyv;var c=fxv*fxv+fyv*fyv-rad*rad;var disc=bq*bq-c;if(disc<0)return -1;var t=-bq-Math.sqrt(disc);return t>0?t:-1;}
+function drawBall(b){
+  ctx.save();ctx.translate(b.x,b.y);
+  ctx.beginPath();ctx.arc(0,0,b.r,0,TAU);
+  if(b.kind==="stripe"){ctx.fillStyle="#f2f2ea";ctx.fill();ctx.save();ctx.clip();ctx.fillStyle=b.col;ctx.fillRect(-b.r,-b.r*0.45,b.r*2,b.r*0.9);ctx.restore();}
+  else{ctx.fillStyle=b.col;ctx.fill();}
+  if(b.num>0){ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(0,0,b.r*0.52,0,TAU);ctx.fill();ctx.fillStyle="#1a1a24";ctx.font="bold 7px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(b.num,0,0.5);}
+  ctx.fillStyle="rgba(255,255,255,.35)";ctx.beginPath();ctx.arc(-b.r*0.32,-b.r*0.35,b.r*0.3,0,TAU);ctx.fill();
+  ctx.restore();
+}
+function drawAim(){
+  if(!aiming||power<=0)return;
+  var x=cue.x,y=cue.y,dx=aimDx,dy=aimDy,bt=1e9,hb=null,tw=1e9,i,b,t;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live||b===cue)continue;
+    t=segHit(x,y,dx,dy,b,b.r+R);if(t>0&&t<bt){bt=t;hb=b;}}
+  if(dx<-1e-6)tw=Math.min(tw,(RL+R-x)/dx);else if(dx>1e-6)tw=Math.min(tw,(RR-R-x)/dx);
+  if(dy<-1e-6)tw=Math.min(tw,(RT+R-y)/dy);else if(dy>1e-6)tw=Math.min(tw,(RB-R-y)/dy);
+  if(tw<bt){bt=tw;hb=null;}
+  if(bt>1e8)bt=0;
+  var ex=x+dx*bt,ey=y+dy*bt;
+  ctx.strokeStyle="rgba(245,245,240,.7)";ctx.lineWidth=1.5;ctx.setLineDash([5,5]);
+  ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(ex,ey);ctx.stroke();ctx.setLineDash([]);
+  if(hb){ctx.strokeStyle="rgba(251,191,36,.9)";ctx.beginPath();ctx.arc(ex,ey,R,0,TAU);ctx.stroke();
+    var nd=Math.hypot(hb.x-ex,hb.y-ey)||1;
+    ctx.strokeStyle="rgba(251,191,36,.55)";ctx.beginPath();ctx.moveTo(hb.x,hb.y);
+    ctx.lineTo(hb.x+(hb.x-ex)/nd*26,hb.y+(hb.y-ey)/nd*26);ctx.stroke();}
+  ctx.fillStyle="rgba(0,0,0,.45)";ctx.fillRect(RL,4,RR-RL,9);
+  ctx.fillStyle=power>0.8?"#f87171":"#5eead4";ctx.fillRect(RL+1,5,(RR-RL-2)*power,7);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#22283f";rr(1,1,W-2,H-2,12);ctx.fill();
+  ctx.fillStyle="#0e4034";rr(RL-8,RT-8,RR-RL+16,RB-RT+16,6);ctx.fill();
+  var i,b;
+  for(i=0;i<PK.length;i++){ctx.fillStyle="#05070f";ctx.beginPath();ctx.arc(PK[i][0],PK[i][1],CAPR+3,0,TAU);ctx.fill();}
+  for(i=0;i<balls.length;i++){b=balls[i];if(b.live)drawBall(b);}
+  drawAim();
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.t-=0.02;if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+  if(turn==="ai"&&state==="play"){ctx.fillStyle="rgba(139,144,176,.9)";ctx.font="12px system-ui";ctx.textAlign="center";ctx.fillText("对手思考中…",235,150);}
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);if(!lastT)lastT=t;var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play"){
+    if(turn==="ai"&&!moving&&state==="play"){aiWait-=dt;if(aiWait<=0)aiShoot();}
+    if(moving){var acc=dt,n=0;
+      while(acc>0&&n<60){var s=Math.min(acc,1/240);physics(s);acc-=s;n++;}
+      if(!anyMoving()){moving=false;endShot();}}}
+  draw();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

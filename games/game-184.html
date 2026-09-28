@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>步步为营</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stLeft{font-size:16px}
+#stLeft.low{color:#ff6b81}
+#stage{position:relative;width:100%;max-width:420px}
+#board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+.card{position:relative;aspect-ratio:1/1;cursor:pointer;perspective:700px}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s}
+.card.open .inner,.card.done .inner{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(20px,7vw,32px)}
+.bk{background:linear-gradient(145deg,#28325f,#1c2447);border:2px solid #46508c;color:#6a76c9;font-weight:bold}
+.ft{background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;transform:rotateY(180deg)}
+.card.done{cursor:default;animation:pop .35s}
+.card.done .ft{border-color:#7ee0a3;background:linear-gradient(145deg,#1f5b41,#1a4a34)}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>步步为营</h1>
+<div class="hint">步数极限挑战!每翻开两张卡牌记为 1 步,总共只有 20 步机会;步数用尽前配齐 8 对即胜,剩余步数越多得分越高。</div>
+<div class="bar"><span>剩余步数 <b id="stLeft">20</b></span><span>已配对 <b id="stPairs">0/8</b></span><span>用时 <b id="stTime">0.0</b> 秒</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var SYMS=['🍎','🍋','🍉','🍇','🍓','🐶','🐱','🦊'];
+var LIMIT=20;
+var board=document.getElementById('board');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elLeft=document.getElementById('stLeft');
+var elPairs=document.getElementById('stPairs');
+var elTime=document.getElementById('stTime');
+var btnAgain=document.getElementById('btnAgain');
+var lock=true,first=null,moves=0,pairs=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);el.sym=sym;
+  board.appendChild(el);return el;
+}
+function newGame(){
+  clearTimers();board.innerHTML='';
+  lock=true;first=null;moves=0;pairs=0;running=false;over=false;
+  elLeft.textContent=String(LIMIT);elLeft.classList.remove('low');
+  elPairs.textContent='0/8';elTime.textContent='0.0';
+  overlay.classList.remove('show');
+  var syms=shuffle(SYMS.concat(SYMS));
+  for(var i=0;i<syms.length;i++)makeCard(syms[i]);
+  later(function(){lock=false;running=true;startAt=performance.now();},400);
+}
+function fail(){
+  over=true;running=false;
+  ovTitle.textContent='步数用尽…';
+  ovDesc.innerHTML='已配对 '+pairs+'/8 · 共用 '+moves+' 步<br>下次先规划好路线再出手!';
+  overlay.classList.add('show');
+}
+function finish(){
+  over=true;running=false;
+  var left=LIMIT-moves;
+  var score=500+left*40;
+  var grade=left>=8?'★★★ 精打细算':(left>=4?'★★☆ 稳健出手':'★☆☆ 惊险过关');
+  ovTitle.textContent='步数内完成!';
+  ovDesc.innerHTML='剩余 '+left+' 步 · 用时 '+((performance.now()-startAt)/1000).toFixed(1)+' 秒<br>得分 <b style="color:#ffd166">'+score+'</b><br>'+grade;
+  overlay.classList.add('show');
+}
+function onCard(el){
+  if(lock||over||!running)return;
+  if(el.classList.contains('open')||el.classList.contains('done'))return;
+  el.classList.add('open');
+  if(!first){first=el;return;}
+  moves++;
+  var left=LIMIT-moves;
+  elLeft.textContent=String(left);
+  elLeft.classList.toggle('low',left<=5);
+  var a=first,b=el;first=null;
+  if(a.sym===b.sym){
+    pairs++;elPairs.textContent=pairs+'/8';
+    a.classList.remove('open');b.classList.remove('open');
+    a.classList.add('done');b.classList.add('done');
+    if(pairs===SYMS.length)finish();
+    else if(moves>=LIMIT)fail();
+  }else{
+    lock=true;
+    later(function(){
+      a.classList.remove('open');b.classList.remove('open');lock=false;
+      if(moves>=LIMIT)fail();
+    },700);
+  }
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+var tick=function(){
+  if(running&&!over)elTime.textContent=((performance.now()-startAt)/1000).toFixed(1);
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

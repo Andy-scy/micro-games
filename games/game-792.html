@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暴雨鱼汛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>暴雨鱼汛</h1>
+<p class="tip">暴雨催潮,鱼群疯狂跃出水面!点中空中跃起的鱼即可入篓——鱼越小跳得越快,分越高。雷雨交加也要盯紧,60 秒冲 450 分!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">60</b> 秒</span><span>目标 <b>450</b> 分</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">暴雨鱼汛</h2><p id="op">闪电劈开夜空,鱼群顶雨飞跃!<br>每一波鱼潮 3~6 条齐跳,手快有手慢无;<br>小快鱼 80 分,大肥鱼 20 分,取舍在你。</p><button id="ob">冒雨出竿</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var W=cv.width,H=cv.height,WL=210;
+var state='ready',tl=60,score=0,msg='';
+var rain=[],leapers=[],pops=[],rings=[];
+var waveT=2,singleT=2,pending=[],boltT=6,flash=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function makeRain(){
+  rain=[];
+  var i;
+  for(i=0;i<70;i++)rain.push({x:rnd(0,W),y:rnd(0,H),v:rnd(380,560)});
+}
+function spawnLeaper(){
+  var r=rnd(10,22);
+  leapers.push({
+    x:rnd(60,W-60),y:WL+14,
+    vx:(Math.random()<0.5?-1:1)*rnd(50,160),
+    vy:-rnd(320,470),
+    r:r,v:Math.round(30+(24-r)*5),t:0
+  });
+  rings.push({x:leapers[leapers.length-1].x,y:WL,t:0});
+}
+function queueWave(){
+  var n=3+Math.floor(Math.random()*4),i;
+  for(i=0;i<n;i++)pending.push(rnd(0,1.2));
+}
+function finish(win){
+  state='over';ob.textContent='再战一场雨';
+  ot.textContent=win?'篓满鱼跳!':'雨停了…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 450 分<br>'+(win?'这场暴雨就是你的丰收季!':'盯紧浪头,鱼出水的瞬间就该出手。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=60;score=0;msg='';leapers=[];pops=[];rings=[];pending=[];
+  waveT=1.5;singleT=2;boltT=6;flash=0;
+  makeRain();
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  var i;
+  for(i=0;i<rain.length;i++){
+    var d=rain[i];
+    d.y+=d.v*dt;d.x-=d.v*0.12*dt;
+    if(d.y>WL){d.y=rnd(-40,0);d.x=rnd(0,W+40)}
+  }
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>0.7)rings.splice(i,1)}
+  for(i=pops.length-1;i>=0;i--){pops[i].t+=dt;if(pops[i].t>0.7)pops.splice(i,1)}
+  if(flash>0)flash-=dt;
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(score>=450);return}
+  boltT-=dt;
+  if(boltT<=0){boltT=rnd(6,11);flash=0.5}
+  waveT-=dt;singleT-=dt;
+  if(waveT<=0){waveT=rnd(3.5,6);queueWave()}
+  if(singleT<=0){singleT=1.8;if(Math.random()<0.35)pending.push(0)}
+  for(i=pending.length-1;i>=0;i--){
+    pending[i]-=dt;
+    if(pending[i]<=0){pending.splice(i,1);spawnLeaper()}
+  }
+  for(i=leapers.length-1;i>=0;i--){
+    var f=leapers[i];
+    f.t+=dt;
+    f.vy+=620*dt;
+    f.x+=f.vx*dt;f.y+=f.vy*dt;
+    if(f.x<20||f.x>W-20)f.vx*=-1;
+    if(f.y>WL+60&&f.vy>0){
+      rings.push({x:f.x,y:WL,t:0});
+      leapers.splice(i,1);
+    }
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WL);g.addColorStop(0,'#0d1324');g.addColorStop(1,'#1d2440');
+  X.fillStyle=g;X.fillRect(0,0,W,WL);
+  var i;
+  X.fillStyle='rgba(20,26,46,.9)';
+  for(i=0;i<5;i++){
+    X.beginPath();X.ellipse(40+i*105,34+((i%2)*16),62,26,0,0,7);X.fill();
+  }
+  var g2=X.createLinearGradient(0,WL,0,H);g2.addColorStop(0,'#16355c');g2.addColorStop(1,'#081527');
+  X.fillStyle=g2;X.fillRect(0,WL,W,H-WL);
+  X.strokeStyle='rgba(150,190,235,.30)';X.lineWidth=1.4;
+  X.beginPath();
+  for(i=0;i<rain.length;i++){
+    var d=rain[i];
+    X.moveTo(d.x,d.y);X.lineTo(d.x-2.2,d.y+13);
+  }
+  X.stroke();
+  X.strokeStyle='rgba(127,212,255,.14)';X.lineWidth=2;
+  var t=Date.now()*0.001,xx,yy;
+  X.beginPath();for(xx=0;xx<=W;xx+=16){yy=WL+8+Math.sin(xx*0.06+t*3)*4;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke();
+  for(i=0;i<rings.length;i++){
+    var rg=rings[i],k=rg.t/0.7;
+    X.strokeStyle='rgba(180,220,255,'+(0.6*(1-k)).toFixed(2)+')';X.lineWidth=2;
+    X.beginPath();X.ellipse(rg.x,rg.y,8+k*36,3+k*13,0,0,7);X.stroke();
+  }
+  for(i=0;i<leapers.length;i++){
+    var f=leapers[i],ang=Math.atan2(f.vy,f.vx);
+    X.save();
+    X.translate(f.x,f.y);X.rotate(ang);
+    X.fillStyle='#8fb7d9';
+    X.beginPath();X.ellipse(0,0,f.r,f.r*0.45,0,0,7);X.fill();
+    X.beginPath();X.moveTo(-f.r*0.85,0);X.lineTo(-f.r*1.45,-f.r*0.4);X.lineTo(-f.r*1.45,f.r*0.4);X.closePath();X.fill();
+    X.fillStyle='#0f1220';X.beginPath();X.arc(f.r*0.4,-f.r*0.12,1.6,0,7);X.fill();
+    X.restore();
+  }
+  for(i=0;i<pops.length;i++){
+    var p=pops[i];
+    X.globalAlpha=1-p.t/0.7;
+    X.fillStyle='#ffd75e';X.font='bold 16px system-ui';X.textAlign='center';
+    X.fillText(p.txt,p.x,p.y-24-p.t*40);
+    X.globalAlpha=1;
+  }
+  if(flash>0){
+    if(flash>0.3){
+      X.strokeStyle='rgba(240,248,255,.9)';X.lineWidth=2.5;
+      X.beginPath();
+      X.moveTo(330,0);X.lineTo(305,60);X.lineTo(325,70);X.lineTo(295,140);
+      X.stroke();
+    }
+    X.fillStyle='rgba(235,242,255,'+(flash*0.55).toFixed(2)+')';
+    X.fillRect(0,0,W,H);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,WL+30);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('点中跃起的鱼!',W/2,H-14);
+}
+function tap(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width),my=(e.clientY-r.top)*(H/r.height);
+  if(state!=='play')return;
+  var i;
+  for(i=leapers.length-1;i>=0;i--){
+    var f=leapers[i],dx=mx-f.x,dy=my-f.y;
+    if(dx*dx+dy*dy<30*30){
+      score+=f.v;
+      pops.push({x:f.x,y:f.y,txt:'+'+f.v,t:0});
+      leapers.splice(i,1);
+      return;
+    }
+  }
+  msg='扑了个空…';
+}
+cv.addEventListener('pointerdown',tap);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

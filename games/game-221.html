@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极速变色</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+#panel{height:240px;border-radius:12px;background:#1b2138;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;letter-spacing:4px;cursor:pointer;user-select:none;text-align:center;padding:10px;transition:background-color .05s}
+#panel.wait{background:#241727;color:#7c6f86}
+#panel.live{background:#22c55e;color:#05230f}
+#panel.ok{background:#1e3a8a;color:#bfdbfe}
+#panel.bad{background:#7f1d1d;color:#fecaca}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04283f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>极速变色</h1>
+  <p class="hint">面板变绿的瞬间立刻点击 / 按空格 · 抢跑将重测本轮</p>
+  <div class="hud">
+    <span>轮次 <b id="round">0/10</b></span>
+    <span>上轮 <b id="last">--</b></span>
+    <span>平均 <b id="avg">--</b></span>
+    <span>最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <div id="panel">点击「开始挑战」</div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">极速变色</h2>
+      <p id="ovDesc">共 10 轮:面板会在随机等待后突然变绿,看到变绿的瞬间立刻点击面板或按空格键!抢跑该轮重测,最终以平均反应时间评级,越快越强。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var panel=$("panel"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elRound=$("round"),elLast=$("last"),elAvg=$("avg"),elBest=$("best");
+var ROUNDS=10,KEY="mg_s221";
+var state="menu",times=[],t0=0,timers=[];
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseFloat(localStorage.getItem(k));return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function clearTimers(){var i;for(i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function later(fn,ms){timers.push(setTimeout(fn,ms));}
+function setPanel(cls,txt){panel.className=cls;panel.textContent=txt;}
+function updateHud(){
+  elRound.textContent=times.length+"/"+ROUNDS;
+  var n=times.length;
+  if(n>0){
+    var s=0,i,min=1e9;
+    for(i=0;i<n;i++){s+=times[i];if(times[i]<min)min=times[i];}
+    elAvg.textContent=Math.round(s/n)+" ms";
+    elLast.textContent=Math.round(times[n-1])+" ms";
+  }else{elAvg.textContent="--";elLast.textContent="--";}
+  elBest.textContent=best>0?Math.round(best)+" ms":"--";
+}
+function startRound(){
+  state="wait";
+  setPanel("wait","等待变色…");
+  later(function(){
+    if(state!=="wait")return;
+    state="live";
+    t0=Date.now();
+    setPanel("live","点 !");
+  },1200+Math.random()*2600);
+}
+function finish(){
+  state="over";
+  var s=0,i,min=1e9;
+  for(i=0;i<times.length;i++){s+=times[i];if(times[i]<min)min=times[i];}
+  var avg=s/times.length;
+  if(best===0||avg<best){best=avg;saveBest(KEY,best);}
+  var grade=avg<230?"S · 闪电之手":avg<290?"A · 反应敏锐":avg<360?"B · 状态不错":"C · 还需热身";
+  ovTitle.textContent="挑战完成";
+  ovDesc.textContent="最快一轮 "+Math.round(min)+" ms\n评级 "+grade;
+  ovScore.style.display="block";
+  ovScore.textContent="平均反应 "+Math.round(avg)+" ms";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function onTap(){
+  if(state==="menu"||state==="over")return;
+  if(state==="wait"){
+    clearTimers();
+    state="cool";
+    setPanel("bad","抢跑!重测本轮");
+    later(startRound,800);
+    return;
+  }
+  if(state==="live"){
+    var rt=Date.now()-t0;
+    times.push(rt);
+    state="cool";
+    setPanel("ok",Math.round(rt)+" ms");
+    updateHud();
+    if(times.length>=ROUNDS)later(finish,900);
+    else later(startRound,900);
+  }
+}
+function startGame(){
+  clearTimers();
+  times=[];
+  state="cool";
+  setPanel("","准备…");
+  ov.classList.add("hide");
+  updateHud();
+  later(startRound,700);
+}
+panel.addEventListener("click",onTap);
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state==="menu"||state==="over")startGame();
+    else onTap();
+  }
+});
+btnGo.addEventListener("click",startGame);
+updateHud();
+})();
+</script>
+</body>
+</html>

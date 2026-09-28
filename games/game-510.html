@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蜜蜂工坊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#f87171;font-size:13px;margin-bottom:6px}
+#hiveArea{position:relative;background:#131728;border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:8px}
+#hive{width:150px;height:120px;border:none;border-radius:14px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;color:#5b3a12;background:radial-gradient(circle at 35% 30%,#ffe08a,#f0a92e 60%,#c07d16);box-shadow:0 8px 20px rgba(0,0,0,.5);transition:transform .06s}
+#hive:active{transform:scale(.94)}
+#combBar{width:100%;height:16px;background:#0b0e1a;border-radius:8px;overflow:hidden;border:1px solid #2e3554}
+#combFill{height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#fde68a)}
+#combTxt{font-size:12px;color:#8b90b0}
+#bear{position:absolute;top:8px;right:10px;font-size:44px;cursor:pointer;display:none;z-index:4;user-select:none;animation:shake .3s linear infinite}
+@keyframes shake{0%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}100%{transform:rotate(-8deg)}}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蜜蜂工坊</h1>
+  <p class="hint">蜂群自动酿蜜,蜜脾存满就停产 · 点蜂箱收蜜装罐换钱 · 棕熊来袭时点它赶走! · 累计装罐 <b>150</b> 罐获胜</p>
+  <div class="hud">
+    <span>金币 <b id="hMoney">0</b></span>
+    <span>累计装罐 <b id="hJars">0</b>/150</span>
+    <span>酿蜜 <b id="hRate">1</b>/秒</span>
+    <span>每罐价值 <b id="hVal">4</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="hiveArea">
+    <button id="hive">🐝 收蜜装罐</button>
+    <div id="combBar"><div id="combFill"></div></div>
+    <div id="combTxt">蜜脾 0 / 30</div>
+    <div id="bear" title="点它!">🐻</div>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">蜜蜂工坊</h2>
+    <p id="ovDesc">蜜蜂不知疲倦,但蜜脾容量有限——存满就白干,记得常点蜂箱把蜜收走。升级蜂群提速、扩建蜜脾、开垦花田抬价。听到「吼——」棕熊就来偷蜜,四秒内点它赶跑,否则 40% 存蜜进熊肚子!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">入驻蜂场</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elJars=$("hJars"),elRate=$("hRate"),elVal=$("hVal"),elMsg=$("msg");
+var hive=$("hive"),combFill=$("combFill"),combTxt=$("combTxt"),bear=$("bear"),hiveArea=$("hiveArea");
+var shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=150;
+var ups=[
+ {nm:"扩编蜂群",ds:"酿蜜速度 +1.3/秒",base:60,mult:1.9,max:10},
+ {nm:"蜜脾加层",ds:"容量 +28",base:80,mult:1.9,max:8},
+ {nm:"七彩花田",ds:"每罐价值 +2",base:110,mult:2.1,max:6}
+];
+var money,jars,stored,upLv,bearOn,bearT,bearNext,state,msgT,rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function rate(){return 1+1.3*upLv[0];}
+function cap(){return 30+28*upLv[1];}
+function jarVal(){return 4+2*upLv[2];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够,先收几罐蜜!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function collect(){
+  if(state!=="play")return;
+  var n=Math.floor(stored);
+  if(n<=0){say("蜜脾还是空的,稍等片刻~");return;}
+  stored-=n;jars+=n;money+=n*jarVal();
+}
+hive.addEventListener("click",collect);
+bear.addEventListener("click",function(){
+  if(state!=="play"||!bearOn)return;
+  bearOn=false;bear.style.display="none";
+  bearNext=12+Math.random()*8;
+  money+=10;
+  say("棕熊被赶跑了!顺手掉落 10 金币!");
+});
+function startGame(){
+  money=0;jars=0;stored=0;upLv=[0,0,0];
+  bearOn=false;bearT=0;bearNext=13;msgT=0;
+  bear.style.display="none";
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+  if(e.key===" "&&state==="play"){e.preventDefault();collect();}
+});
+function render(){
+  elMoney.textContent=fmt(money);elJars.textContent=jars;
+  elRate.textContent=rate().toFixed(1);elVal.textContent=jarVal();
+  combFill.style.width=Math.min(100,stored/cap()*100)+"%";
+  combFill.style.background=stored>=cap()?"linear-gradient(90deg,#ef4444,#fca5a5)":"linear-gradient(90deg,#f59e0b,#fde68a)";
+  combTxt.textContent=stored>=cap()?"蜜脾已满,停产中!快收蜜!":"蜜脾 "+Math.floor(stored)+" / "+cap();
+  var i;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  if(stored<cap())stored=Math.min(cap(),stored+rate()*ds);
+  if(bearOn){
+    bearT-=ds;
+    if(bearT<=0){
+      bearOn=false;bear.style.display="none";
+      bearNext=12+Math.random()*8;
+      stored*=0.6;
+      say("棕熊饱餐一顿跑了,损失了四成存蜜!");
+    }
+  }else{
+    bearNext-=ds;
+    if(bearNext<=0){
+      bearOn=true;bearT=4;
+      bear.style.display="block";
+      say("吼——!棕熊来袭,快点它!");
+    }
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(jars>=WIN){
+    state="over";
+    showOv("金牌蜂农!","一百五十罐金灿灿的蜂蜜贴上标签,订单排到明年!","累计装罐 "+jars+" 罐 · 资金 "+fmt(money));
+  }
+}
+money=0;jars=0;stored=0;upLv=[0,0,0];bearOn=false;bearT=0;bearNext=13;state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

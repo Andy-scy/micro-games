@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>成语接龙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#f9c74f;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#f9c74f}
+#chain{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;min-height:34px}
+.pill{background:#232a48;border:1px solid #2c3357;border-radius:999px;padding:5px 12px;font-size:13px;color:#cdd6f4}
+.pill.new{border-color:#f9c74f;color:#f9c74f}
+#tailBox{text-align:center;margin-bottom:12px}
+#prev{font-size:22px;letter-spacing:4px;color:#e8eaf6;margin-bottom:6px}
+#tail{display:inline-block;background:#f9c74f;color:#161203;border-radius:10px;padding:4px 14px;font-size:22px;font-weight:800}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#f9c74f;border-radius:6px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:16px;margin-bottom:8px;cursor:pointer;text-align:center;font-family:inherit;letter-spacing:3px}
+.opt:hover{border-color:#f9c74f}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#f9c74f;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#f9c74f;color:#161203;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>成语接龙</h1>
+  <p class="tips">经典接龙:上一个成语的最后一个字,就是下一个成语的第一个字。看尾字,从四个选项中接出正确的成语。每环 20 秒,连成 8 环即通关,3 条命。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">接龙进度</div><div class="big" id="pg">0/8</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div id="chain"></div>
+    <div id="tailBox"><div id="prev">一心一意</div><span id="tail">意</span></div>
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">成语接龙</h2><p id="ovp">· 每环给出上一个成语,高亮它的尾字<br>· 选出以该字开头的成语完成接龙<br>· 每环限时 20 秒,答对 +100<br>· 答错或超时 -1 条命,龙链跳到下一环<br>· 连成 8 环通关(+300)<br>· 3 命用完,长龙断裂</p><button class="btn" id="obtn">开始接龙</button></div></div>
+<script>
+'use strict';
+var CHAIN=['一心一意','意气风发','发扬光大','大快人心','心旷神怡','怡然自得','得心应手','手到擒来','来日方长','长年累月','月下老人','人山人海','海阔天空','空前绝后','后来居上','上行下效'];
+var EXTRA=['画蛇添足','守株待兔','一鸣惊人','四海为家','家喻户晓','月白风清','清风明月','日落西山','山盟海誓','二话不说','不约而同','同舟共济','危言耸听','听天由命','命中注定','定国安邦'];
+var LINKS=8,QLEN=20;
+var start=0,link=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;link=0;score=0;lives=3;over=false;playing=true;locked=false;
+  start=Math.floor(Math.random()*(CHAIN.length-LINKS));
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  $('chain').innerHTML='';
+  showLink();
+}
+function showLink(){
+  if(link>=LINKS){finish(true);return;}
+  var prev=CHAIN[start+link];
+  var tail=prev.charAt(prev.length-1);
+  var answer=CHAIN[start+link+1];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=link+'/8';
+  $('prev').textContent=prev;
+  $('tail').textContent=tail;
+  var ch=$('chain');
+  var keep=Math.max(0,link-2);
+  for(var i=keep;i<link;i++){
+    var p=document.createElement('span');
+    p.className='pill';
+    p.textContent=CHAIN[start+i];
+    ch.appendChild(p);
+  }
+  var opts=[];
+  var disPool=CHAIN.concat(EXTRA).slice();
+  shuffle(disPool);
+  var picked=0;
+  for(var k=0;k<disPool.length&&picked<3;k++){
+    var cand=disPool[k];
+    if(cand===answer)continue;
+    if(cand.charAt(0)===tail)continue;
+    if(opts.indexOf(cand)>=0)continue;
+    opts.push(cand);picked++;
+  }
+  opts.push(answer);
+  shuffle(opts);
+  var box=$('opts');box.innerHTML='';
+  for(var m=0;m<opts.length;m++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=opts[m];
+    b.dataset.ok=(opts[m]===answer)?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  locked=true;
+  var btns=$('opts').children,i,ans='';
+  for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')ans=btns[i].textContent;
+  if(btn.dataset.ok==='1'){
+    score+=100;
+    btn.classList.add('ok');
+    var p=document.createElement('span');
+    p.className='pill new';
+    p.textContent=ans;
+    $('chain').appendChild(p);
+    $('msg').textContent='接得漂亮!+100';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    var p2=document.createElement('span');
+    p2.className='pill';
+    p2.textContent=ans;
+    $('chain').appendChild(p2);
+    $('msg').textContent='龙链一震…正确接法:'+ans;
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{link++;showLink();}
+  },1500);
+}
+function finish(win){
+  playing=false;over=true;
+  if(win){score+=300;$('sc').textContent=score;}
+  $('ovt').textContent=win?'八环贯通!长龙腾飞':'龙链断裂…';
+  $('ovp').innerHTML='完成 '+Math.min(link+1,8)+'/8 环<br>最终得分 <b>'+score+'</b> 分<br>'+(win?'接龙如流水,词库了得!':'多记成语的首尾字,再来一局!');
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0){
+      locked=true;
+      var btns=$('opts').children,i,ans='';
+      for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')ans=btns[i].textContent;
+      lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+      var p=document.createElement('span');
+      p.className='pill';
+      p.textContent=ans;
+      $('chain').appendChild(p);
+      $('msg').textContent='超时!正确接法:'+ans;
+      schedule(function(){
+        if(!playing||over)return;
+        if(lives<=0)finish(false);
+        else{link++;showLink();}
+      },1500);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

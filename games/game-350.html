@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>扩张键盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#fca5a5;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fca5a5;font-size:16px}
+.gbtn{background:#3d1616;color:#fca5a5;border:1px solid #fca5a5;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#fca5a5;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.pads{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:330px;margin:0 auto;touch-action:manipulation}
+.pad{aspect-ratio:1/1;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:rgba(255,255,255,.3);transition:transform .06s,box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none}
+.pad.off{visibility:hidden}
+.pad:active{transform:scale(.93)}
+.k0{background:#3d1114;border:2px solid #991b1b}.k0.lit{background:#ef4444;box-shadow:0 0 22px rgba(239,68,68,.85)}
+.k1{background:#39300a;border:2px solid #a16207}.k1.lit{background:#eab308;box-shadow:0 0 22px rgba(234,179,8,.85)}
+.k2{background:#0d2f1a;border:2px solid #166534}.k2.lit{background:#22c55e;box-shadow:0 0 22px rgba(34,197,94,.85)}
+.k3{background:#122a52;border:2px solid #1d4ed8}.k3.lit{background:#3b82f6;box-shadow:0 0 22px rgba(59,130,246,.85)}
+.k4{background:#2a1145;border:2px solid #7e22ce}.k4.lit{background:#a855f7;box-shadow:0 0 22px rgba(168,85,247,.85)}
+.k5{background:#082f36;border:2px solid #0e7490}.k5.lit{background:#06b6d4;box-shadow:0 0 22px rgba(6,182,212,.85)}
+.k6{background:#3a1d08;border:2px solid #c2410c}.k6.lit{background:#f97316;box-shadow:0 0 22px rgba(249,115,22,.85)}
+.k7{background:#3d0f2e;border:2px solid #be185d}.k7.lit{background:#ec4899;box-shadow:0 0 22px rgba(236,72,153,.85)}
+.k8{background:#1c1917;border:2px solid #57534e}.k8.lit{background:#a8a29e;box-shadow:0 0 22px rgba(168,162,158,.85)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#fca5a5;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#fca5a5;color:#3d1616;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>扩张键盘</h1>
+  <p class="hint">开局只有 3 个按键,每过 2 轮就多亮起 1 个新键,直到 9 键全开!序列每轮加长一步,可选范围还越来越大。新键加入时会先自我介绍一下。支持键盘 1-9。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>可用键 <b id="cnt">3</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="pads" id="pads"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">扩张键盘</h2>
+    <p id="ovDesc">别的记忆游戏按键固定,这里的战场越打越大:3 键起步,两轮一扩,九键封顶。旧序列还没背熟,新选项已经参战。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg350_best",FREQ=[261.63,293.66,329.63,349.23,392.00,440.00,493.88,523.25,587.33],GAP=620,FLASH=380;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null,prevCnt=3;
+var pads=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elCnt=$("cnt"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.28;v=v==null?0.14:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var box=$("pads");for(var i=0;i<9;i++){var d=document.createElement("div");d.className="pad k"+i;d.textContent=String(i+1);d.dataset.i=String(i);box.appendChild(d);pads.push(d);}})();
+function cntOf(lv){return Math.min(9,3+((lv/2)|0));}
+function applyCnt(){var c=cntOf(level);for(var i=0;i<9;i++){if(i<c)pads[i].classList.remove("off");else pads[i].classList.add("off");}return c;}
+function flash(i,ms){var el=pads[i];el.classList.add("lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<9;i++)pads[i].classList.remove("lit");}
+function rnd(c){var n;do{n=(Math.random()*c)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;elCnt.textContent=cntOf(level);elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";setMsg("演示中…");var i=0;(function step(){
+if(i>=seq.length){state="input";pos=0;setMsg("轮到你复述!");return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){var c=applyCnt();
+if(c>prevCnt){prevCnt=c;setMsg("第 "+c+" 号键加入战场!");flash(c-1,600);
+timers.push(setTimeout(function(){seq.push(rnd(c));updateHud();playSeq();},1000));}
+else{seq.push(rnd(c));updateHud();playSeq();}}
+function newGame(){clearTimers();clearLit();seq=[];pos=0;level=0;prevCnt=3;state="wait";applyCnt();setMsg("");updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;state="wait";setMsg("通过!序列加长…");updateHud();timers.push(setTimeout(nextRound,800));}
+function fail(){clearTimers();clearLit();state="over";tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="键盘失守";
+ovDesc.textContent="在 "+cntOf(level)+" 键战场上,序列于第 "+seq.length+" 步断链。键越多越考验注意力分配,再接再厉。";
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;if(i>=cntOf(level))return;flash(i,200);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+$("pads").addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+document.addEventListener("keydown",function(e){
+if(state==="menu"||state==="over"){if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}return;}
+var k=e.key;if(k>="1"&&k<="9")press(parseInt(k,10)-1);});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();applyCnt();
+})();
+</script>
+</body>
+</html>

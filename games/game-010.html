@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>限时赏金</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.hearts{color:#f87171;font-size:16px;letter-spacing:2px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>限时赏金</h1>
+  <p class="hint">方向键 / WASD 转向 · 触屏滑动 · 果实会过期!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span class="hearts" id="lives">♥♥♥</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">限时赏金</h2>
+      <p id="ovDesc">每枚果实只有 8 秒赏金期,超时未吃会失去 1 条命!撞墙或咬到自己同样扣命,并短暂获得无敌护体。3 条命耗尽,赏金梦碎。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=20,ROWS=20,CELL=24,W=480,H=480,TTL=8000;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLives=$("lives"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s010");
+var state="menu";
+var snake,dir,queue,food,foodTtl,lives,score,stepMs,acc,lastT,pulse,invuln;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function inSnake(x,y){
+  var i;
+  for(i=0;i<snake.length;i++){if(snake[i].x===x&&snake[i].y===y)return true;}
+  return false;
+}
+function freeCell(){
+  var p;
+  while(true){
+    p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0};
+    if(!inSnake(p.x,p.y))return p;
+  }
+}
+function spawnFood(){
+  food=freeCell();
+  foodTtl=TTL;
+}
+function reset(){
+  snake=[{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+  dir={x:1,y:0};queue=[];
+  lives=3;score=0;stepMs=125;acc=0;pulse=0;invuln=0;
+  spawnFood();
+  updateHud();
+}
+function updateHud(){
+  var h="",i;
+  for(i=0;i<lives;i++)h+="♥";
+  elLives.textContent=h||"——";
+  elScore.textContent=score;
+  elBest.textContent=best;
+}
+function queueDir(d){
+  var last=queue.length?queue[queue.length-1]:dir;
+  if(d.x===-last.x&&d.y===-last.y)return;
+  if(d.x===last.x&&d.y===last.y)return;
+  if(queue.length<2)queue.push(d);
+}
+function loseLife(msg){
+  lives--;
+  if(lives<=0){gameOver(msg);return false;}
+  invuln=1600;
+  updateHud();
+  return true;
+}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h=snake[0];
+  var nx=h.x+dir.x,ny=h.y+dir.y;
+  if(invuln>0){nx=(nx+COLS)%COLS;ny=(ny+ROWS)%ROWS;}
+  else if(nx<0||ny<0||nx>=COLS||ny>=ROWS){
+    if(!loseLife("果实与边界双双失守!"))return;
+    nx=(nx+COLS)%COLS;ny=(ny+ROWS)%ROWS;
+  }
+  var nh={x:nx,y:ny};
+  var ate=(nh.x===food.x&&nh.y===food.y);
+  snake.unshift(nh);
+  if(ate){score+=10;spawnFood();updateHud();}
+  else snake.pop();
+  if(invuln<=0){
+    var i;
+    for(i=1;i<snake.length;i++){
+      if(snake[i].x===nh.x&&snake[i].y===nh.y){
+        snake.shift();
+        if(!loseLife("灵蛇咬到了自己!"))return;
+        break;
+      }
+    }
+  }
+}
+function expireFood(){
+  if(!loseLife("果实接连过期,赏金猎人失业了!"))return;
+  spawnFood();
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s010",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var x,y,i,s;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<COLS;x++)for(y=0;y<ROWS;y++){if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);}
+  var fx=food.x*CELL+CELL/2,fy=food.y*CELL+CELL/2;
+  var pr=6.5+Math.sin(pulse)*1.8;
+  ctx.fillStyle=foodTtl<2500?"#f87171":"#fbbf24";
+  ctx.shadowColor=foodTtl<2500?"#f87171":"#fbbf24";
+  ctx.shadowBlur=14;
+  ctx.beginPath();ctx.arc(fx,fy,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle="rgba(251,191,36,0.9)";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.arc(fx,fy,11,-Math.PI/2,-Math.PI/2+Math.PI*2*(foodTtl/TTL));
+  ctx.stroke();
+  ctx.lineWidth=1;
+  if(invuln>0&&Math.floor(pulse*4)%2===0)ctx.globalAlpha=0.35;
+  for(i=snake.length-1;i>=0;i--){
+    s=snake[i];
+    if(s.x<0)continue;
+    ctx.fillStyle=i===0?"#86efac":"#4ade80";
+    rr(s.x*CELL+2,s.y*CELL+2,CELL-4,CELL-4,6);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  var h=snake[0],cx=h.x*CELL+CELL/2,cy=h.y*CELL+CELL/2;
+  var ex=dir.x*4.5,ey=dir.y*4.5,px=dir.y!==0?4:0,py=dir.x!==0?4:0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(cx+ex-px,cy+ey-py,2.2,0,Math.PI*2);
+  ctx.arc(cx+ex+px,cy+ey+py,2.2,0,Math.PI*2);
+  ctx.fill();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.006;
+  if(state==="playing"){
+    if(invuln>0)invuln-=dt;
+    foodTtl-=dt;
+    if(foodTtl<=0)expireFood();
+    if(state==="playing"){
+      acc+=dt;
+      var guard=0;
+      while(acc>=stepMs&&state==="playing"&&guard<5){acc-=stepMs;step();guard++;}
+    }
+  }
+  draw();
+}
+function keyDir(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")return{x:0,y:-1};
+  if(k==="ArrowDown"||k==="s"||k==="S")return{x:0,y:1};
+  if(k==="ArrowLeft"||k==="a"||k==="A")return{x:-1,y:0};
+  if(k==="ArrowRight"||k==="d"||k==="D")return{x:1,y:0};
+  return null;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=keyDir(e);
+  if(d){e.preventDefault();queueDir(d);}
+  else if(e.key===" ")e.preventDefault();
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueDir({x:dx>0?1:-1,y:0});
+  else queueDir({x:0,y:dy>0?1:-1});
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

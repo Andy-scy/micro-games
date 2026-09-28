@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>能量护盾</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8ecff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;gap:8px}
+h1{font-size:20px;letter-spacing:2px;color:#ffd76a}
+#hud{display:flex;gap:14px;font-size:14px;background:#181d33;border:1px solid #2a3155;border-radius:10px;padding:6px 14px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#7fe08a}
+#stage{position:relative}
+canvas{display:block;background:#10142a;border:1px solid #2a3155;border-radius:12px;max-width:96vw;height:auto}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;border-radius:12px;padding:14px}
+#ov h2{font-size:24px;color:#ffd76a}
+#ov p{font-size:13px;color:#aab3d8;line-height:1.8;max-width:430px}
+.btn{background:#ffd76a;color:#1a1c2e;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:700;cursor:pointer}
+.btn:active{transform:scale(.95)}
+#pad{display:none;gap:14px;margin-top:8px;user-select:none;-webkit-user-select:none;align-items:center;flex-wrap:wrap;justify-content:center}
+#dpad{display:grid;grid-template-areas:". u ." "l d r";gap:6px}
+.pbtn{width:54px;height:54px;border-radius:14px;background:#232a4d;border:1px solid #3a4373;color:#e8ecff;font-size:18px;display:flex;align-items:center;justify-content:center;touch-action:none}
+.pbtn.fire{width:74px;height:74px;border-radius:50%;font-size:15px;font-weight:700;background:#5a2a2a;border-color:#8a4444}
+.pbtn.shield{width:74px;height:74px;border-radius:14px;font-size:14px;font-weight:700;background:#1a3a4a;border-color:#3a7a9a}
+@media(pointer:coarse){#pad{display:flex}}
+</style>
+</head>
+<body>
+<h1>能量护盾</h1>
+<div id="hud"><span>装甲 <b id="hA">2</b></span><span>护盾 <b id="hB">100%</b></span><span>波次 <b id="hC">1/3</b></span><span>残敌 <b id="hD">0</b></span><span>分数 <b id="hE">0</b></span></div>
+<div id="stage">
+<canvas id="cv" width="480" height="416"></canvas>
+<div id="ov">
+  <h2>能量护盾</h2>
+  <p id="ovP">你的装甲极薄(2 点),但装备了能量护盾:按 E 或「护盾」按钮开启,<br>可完全挡住敌方炮弹;开启时持续耗能,关闭时缓慢充能,<br>能量耗尽会过热锁死 2.5 秒——掌握开合节奏才能活下来!</p>
+  <button class="btn" id="ovB">开始游戏</button>
+</div>
+</div>
+<div id="pad">
+  <div id="dpad">
+    <div class="pbtn" data-k="ArrowUp" style="grid-area:u">▲</div>
+    <div class="pbtn" data-k="ArrowLeft" style="grid-area:l">◀</div>
+    <div class="pbtn" data-k="ArrowDown" style="grid-area:d">▼</div>
+    <div class="pbtn" data-k="ArrowRight" style="grid-area:r">▶</div>
+  </div>
+  <div class="pbtn fire" data-k="Space">开火</div>
+  <div class="pbtn shield" data-k="KeyE">护盾</div>
+</div>
+<script>
+"use strict";
+const TS=32,COLS=15,ROWS=13;
+const DIRS=[[0,-1],[1,0],[0,1],[-1,0]];
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const ov=document.getElementById('ov'),ovP=document.getElementById('ovP'),ovB=document.getElementById('ovB');
+const hA=document.getElementById('hA'),hB=document.getElementById('hB'),hC=document.getElementById('hC'),hD=document.getElementById('hD'),hE=document.getElementById('hE');
+const MAP=[
+"...............",
+".BB........BB..",
+".BB...SS...BB..",
+"...............",
+"....B.....B....",
+"...............",
+"...............",
+"...............",
+"....B.....B....",
+"...............",
+".BB...SS...BB..",
+".BB........BB..",
+"..............."
+];
+let grid,score,lives,wave,queue,energy,shieldOn,lockT,enemies,bullets,sparks,player,spawnT,frame=0,state='start',banner,bannerT,prevE=false;
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code.indexOf('Arrow')===0||e.code==='Space')e.preventDefault();});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
+document.querySelectorAll('.pbtn').forEach(b=>{
+  const k=b.getAttribute('data-k');
+  const dn=e=>{e.preventDefault();keys[k]=true;};
+  const up=e=>{e.preventDefault();keys[k]=false;};
+  b.addEventListener('pointerdown',dn);b.addEventListener('pointerup',up);
+  b.addEventListener('pointercancel',up);b.addEventListener('pointerleave',up);
+});
+function initGame(){
+  grid=MAP.map(r=>r.split('').map(c=>c==='B'?1:(c==='S'?2:0)));
+  score=0;lives=1;wave=0;queue=4;enemies=[];bullets=[];sparks=[];
+  energy=100;shieldOn=false;lockT=0;
+  banner='第 1 波';bannerT=90;spawnT=40;
+  player={x:7*TS+2,y:11*TS+2,dir:0,cd:0,inv:80,hp:2};
+}
+function startGame(){initGame();state='play';ov.style.display='none';}
+ovB.addEventListener('click',startGame);
+function rectVsGrid(x,y){
+  if(x<0||y<0||x+28>cv.width||y+28>cv.height)return true;
+  const x0=Math.floor(x/TS),y0=Math.floor(y/TS),x1=Math.floor((x+27)/TS),y1=Math.floor((y+27)/TS);
+  for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){if(grid[ty][tx]!==0)return true;}
+  return false;
+}
+function tankOverlap(x,y,self){
+  for(const t of enemies){if(t===self)continue;if(Math.abs(t.x-x)<27&&Math.abs(t.y-y)<27)return true;}
+  if(player&&Math.abs(player.x-x)<27&&Math.abs(player.y-y)<27)return true;
+  return false;
+}
+function moveTank(t,d){
+  if(t.dir!==d){
+    if(t.dir%2!==d%2){
+      if(d%2===0)t.x=Math.round((t.x-2)/TS)*TS+2;else t.y=Math.round((t.y-2)/TS)*TS+2;
+    }
+    t.dir=d;
+  }
+  const v=DIRS[d],nx=t.x+v[0]*t.spd,ny=t.y+v[1]*t.spd;
+  if(!rectVsGrid(nx,ny)&&!tankOverlap(nx,ny,t)){t.x=nx;t.y=ny;return true;}
+  return false;
+}
+function fire(t,from){
+  const v=DIRS[t.dir];
+  bullets.push({x:t.x+14+v[0]*17-3,y:t.y+14+v[1]*17-3,vx:v[0]*5,vy:v[1]*5,from:from,life:200});
+}
+function boom(x,y,n,c){for(let i=0;i<n;i++)sparks.push({x:x,y:y,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:20+Math.random()*14,max:34,c:c||'#ffb050'});}
+function mkEnemy(x,y){
+  const r=Math.random();
+  const kind=r<0.35?'g':'e';
+  return {x:x,y:y,dir:2,kind:kind,spd:kind==='g'?1.5:1.15,cd:kind==='g'?45:80+Math.random()*40,think:20};
+}
+function updPlayer(){
+  const eKey=keys.KeyE||keys.KeyQ;
+  if(eKey&&!prevE&&lockT<=0){
+    shieldOn=!shieldOn;
+  }
+  prevE=eKey;
+  if(shieldOn){
+    energy-=0.75;
+    if(energy<=0){energy=0;shieldOn=false;lockT=150;boom(player.x+14,player.y+14,6,'#5ac8e8');}
+  }else{
+    if(lockT>0)lockT--;
+    else energy=Math.min(100,energy+0.37);
+  }
+  let d=-1;
+  if(keys.ArrowUp||keys.KeyW)d=0;else if(keys.ArrowRight||keys.KeyD)d=1;
+  else if(keys.ArrowDown||keys.KeyS)d=2;else if(keys.ArrowLeft||keys.KeyA)d=3;
+  if(d>=0)moveTank(player,d);
+  if(player.inv>0)player.inv--;
+  player.cd--;
+  if((keys.Space||keys.KeyJ)&&player.cd<=0){
+    let n=0;for(const b of bullets)if(b.from==='p')n++;
+    if(n<2){fire(player,'p');player.cd=18;}
+  }
+}
+function updEnemies(){
+  for(const e of enemies){
+    e.think--;e.cd--;
+    const moved=moveTank(e,e.dir);
+    if(!moved||e.think<=0){
+      let d=Math.floor(Math.random()*4);
+      if(player&&Math.random()<0.55){
+        d=Math.abs(player.x-e.x)>Math.abs(player.y-e.y)?(player.x>e.x?1:3):(player.y>e.y?2:0);
+      }
+      e.dir=d;e.think=25+Math.random()*45;
+    }
+    if(e.cd<=0&&player){
+      if(Math.abs(e.x-player.x)<14){e.dir=player.y>e.y?2:0;}
+      else if(Math.abs(e.y-player.y)<14){e.dir=player.x>e.x?1:3;}
+      else{e.cd=15;continue;}
+      fire(e,'e');e.cd=e.kind==='g'?70:110+Math.random()*60;
+    }
+  }
+}
+function killPlayer(){
+  boom(player.x+14,player.y+14,16,'#7fe08a');
+  player.hp--;
+  if(player.hp<=0){end(false,'装甲击穿,护盾没能救你!');return;}
+  player.inv=150;player.cd=40;
+  player.hp=1;
+}
+function end(win,msg){
+  state=win?'win':'over';
+  ov.children[0].textContent=win?'护盾大师!':'游戏结束';
+  ovP.innerHTML=msg+'<br>最终得分:'+score;
+  ovB.textContent='再来一局';
+  ov.style.display='flex';
+}
+function updBullets(){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];let dead=false;
+    b.x+=b.vx;b.y+=b.vy;b.life--;
+    if(b.life<=0)dead=true;
+    if(b.x<0||b.y<0||b.x+6>cv.width||b.y+6>cv.height)dead=true;
+    if(!dead){
+      const tx=Math.floor((b.x+3)/TS),ty=Math.floor((b.y+3)/TS);
+      if(tx>=0&&ty>=0&&tx<COLS&&ty<ROWS){
+        const t=grid[ty][tx];
+        if(t===1){grid[ty][tx]=0;dead=true;boom(b.x+3,b.y+3,4,'#d08a50');}
+        else if(t===2){dead=true;boom(b.x+3,b.y+3,3,'#cfd6ee');}
+      }
+    }
+    if(!dead&&b.from==='e'&&player){
+      const pd=Math.hypot(b.x+3-(player.x+14),b.y+3-(player.y+14));
+      if(shieldOn&&pd<26){
+        dead=true;
+        boom(b.x+3,b.y+3,5,'#5ac8e8');
+        energy=Math.max(0,energy-4);
+        continue;
+      }
+      if(player.inv<=0&&pd<16){dead=true;killPlayer();}
+    }
+    if(!dead&&b.from==='p'){
+      for(const e of enemies){
+        if(Math.abs(b.x+3-(e.x+14))<16&&Math.abs(b.y+3-(e.y+14))<16){
+          dead=true;enemies.splice(enemies.indexOf(e),1);
+          const v=e.kind==='g'?180:120;
+          score+=v;boom(e.x+14,e.y+14,12,'#ffb050');break;
+        }
+      }
+    }
+    if(dead)bullets.splice(i,1);
+  }
+}
+function updSpawns(){
+  if(queue<=0)return;
+  spawnT--;
+  if(spawnT>0||enemies.length>=4)return;
+  spawnT=130;
+  const pts=[[0,0],[7,0],[14,0]];
+  for(const p of pts){
+    const px=p[0]*TS+2,py=p[1]*TS+2;
+    if(!rectVsGrid(px,py)&&!tankOverlap(px,py,null)){
+      enemies.push(mkEnemy(px,py));queue--;return;
+    }
+  }
+}
+function checkWave(){
+  if(queue>0||enemies.length>0)return;
+  if(wave>=2){end(true,'三波攻势被护盾挡在门外!');return;}
+  wave++;score+=300;queue=4+wave*2;spawnT=80;
+  banner='第 '+(wave+1)+' 波';bannerT=100;
+}
+function updParts(){
+  for(let i=sparks.length-1;i>=0;i--){
+    const p=sparks[i];p.x+=p.vx;p.y+=p.vy;p.life--;
+    if(p.life<=0)sparks.splice(i,1);
+  }
+  if(bannerT>0)bannerT--;
+}
+function updHud(){
+  hA.textContent=player.hp;
+  hB.textContent=Math.round(energy)+'%'+(lockT>0?' 过热!':'');
+  hC.textContent=(wave+1)+'/3';
+  hD.textContent=enemies.length+queue;hE.textContent=score;
+}
+function draw(){
+  ctx.fillStyle='#10142a';ctx.fillRect(0,0,cv.width,cv.height);
+  for(let ty=0;ty<ROWS;ty++)for(let tx=0;tx<COLS;tx++){
+    const t=grid[ty][tx],X=tx*TS,Y=ty*TS;
+    if(t===1){
+      ctx.fillStyle='#8a4a28';ctx.fillRect(X,Y,TS,TS);
+      ctx.fillStyle='#5c2f18';ctx.fillRect(X,Y+15,TS,2);
+      ctx.fillStyle='#a55c32';ctx.fillRect(X+1,Y+1,14,13);ctx.fillRect(X+17,Y+1,14,13);
+    }else if(t===2){
+      ctx.fillStyle='#6b7694';ctx.fillRect(X+1,Y+1,TS-2,TS-2);
+      ctx.fillStyle='#9aa6c4';ctx.fillRect(X+5,Y+5,TS-10,TS-10);
+    }
+  }
+  const drawT=(t,c)=>{
+    ctx.fillStyle='#171b2e';ctx.fillRect(t.x,t.y,28,28);
+    ctx.fillStyle=c;ctx.fillRect(t.x+4,t.y+4,20,20);
+    const cc=t.x+14;
+    ctx.fillStyle='#12152a';
+    if(t.dir===0)ctx.fillRect(cc-2,t.y,4,14);
+    else if(t.dir===1)ctx.fillRect(cc,t.y+12,14,4);
+    else if(t.dir===2)ctx.fillRect(cc-2,t.y+14,4,14);
+    else ctx.fillRect(t.x,t.y+12,14,4);
+    ctx.fillStyle=c;ctx.fillRect(t.x+9,t.y+9,10,10);
+  };
+  for(const e of enemies)drawT(e,e.kind==='g'?'#b070d0':'#8fa0c8');
+  if(player&&!(player.inv>0&&frame%6<3)){
+    drawT(player,'#5fbf68');
+    if(shieldOn){
+      ctx.strokeStyle='rgba(90,200,232,'+(0.5+0.3*Math.sin(frame/4))+')';
+      ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(player.x+14,player.y+14,24,0,Math.PI*2);ctx.stroke();
+    }
+    if(lockT>0){
+      ctx.fillStyle='rgba(255,90,74,0.8)';
+      ctx.font='bold 12px system-ui';ctx.textAlign='center';
+      ctx.fillText('过热!',player.x+14,player.y-16);
+    }
+  }
+  for(const b of bullets){
+    ctx.fillStyle=b.from==='p'?'#ffe9a0':'#ff9d6a';
+    ctx.fillRect(b.x,b.y,6,6);
+  }
+  for(const p of sparks){
+    ctx.globalAlpha=Math.max(p.life/p.max,0);
+    ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#3a4373';ctx.fillRect(12,cv.height-14,120,6);
+  ctx.fillStyle=lockT>0?'#ff5a4a':'#5ac8e8';
+  ctx.fillRect(12,cv.height-14,120*energy/100,6);
+  if(bannerT>0&&banner){
+    ctx.globalAlpha=Math.min(bannerT/40,1);
+    ctx.fillStyle='#ffd76a';ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText(banner,cv.width/2,cv.height/2-10);
+    ctx.globalAlpha=1;
+  }
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==='play'){
+    frame++;
+    updPlayer();updEnemies();updBullets();updSpawns();checkWave();updParts();updHud();
+  }
+  draw();
+}
+initGame();
+loop();
+</script>
+</body>
+</html>

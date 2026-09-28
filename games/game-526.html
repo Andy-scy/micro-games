@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分秒合击</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#4dd0c4;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#4dd0c4;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4dd0c4}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#4dd0c4;color:#05302c;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>分秒合击</h1>
+  <p class="hint">拖动方块到相邻同级方块上完成合成<br>60 秒冲刺!2 秒内连合触发连击倍率</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">×1</b></span>
+    <span>时间 <b id="time">60</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="336" height="336"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">分秒合击</h2>
+      <p id="ovP">按住方块拖到相邻同级方块上松手即合成\n合成快过 2 秒一次,连击倍率节节攀升!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var N=7,CELL=46,BX=7,BY=7;
+var CCOL=['','#8d99ae','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#e56399','#a06cd5','#ffd166'];
+var grid=[],score=0,best=0,combo=1,comboT=0,timeLeft=60,state='ready';
+var drag=null,flashes=[];
+function randL(){var r=Math.random();return r<0.6?1:(r<0.9?2:3);}
+function addScore(n){score+=n;if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function newBoard(){
+  var r,c;
+  grid=[];
+  for(r=0;r<N;r++){grid.push([]);for(c=0;c<N;c++)grid[r].push(randL());}
+}
+function compactRefill(){
+  var r,c,stack,i;
+  for(c=0;c<N;c++){
+    stack=[];
+    for(r=N-1;r>=0;r--)if(grid[r][c]>0)stack.push(grid[r][c]);
+    for(r=N-1,i=0;r>=0;r--,i++){
+      if(i<stack.length)grid[r][c]=stack[i];
+      else grid[r][c]=Math.random()<0.8?1:2;
+    }
+  }
+}
+function doMerge(fr,fc,tr,tc){
+  var nl=Math.min(10,grid[tr][tc]+1);
+  grid[fr][fc]=0;grid[tr][tc]=nl;
+  compactRefill();
+  var gain=nl*nl*5*combo;
+  addScore(gain);
+  flashes.push({r:tr,c:tc,t:0,gain:gain});
+  if(comboT>0)combo=Math.min(9,combo+1);else combo=1;
+  comboT=2.2;
+  $('combo').textContent='×'+combo;
+}
+function finish(){
+  state='over';
+  $('ovT').textContent='时间到!';
+  $('ovP').textContent='60 秒冲刺结束,最高合到了 '+maxLvl()+' 级';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function maxLvl(){
+  var m=0,r,c;
+  for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]>m)m=grid[r][c];
+  return m;
+}
+function start(){
+  newBoard();score=0;combo=1;comboT=0;timeLeft=60;flashes=[];drag=null;
+  $('score').textContent='0';$('combo').textContent='×1';$('time').textContent='60';$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function update(dt){
+  timeLeft-=dt;
+  $('time').textContent=Math.ceil(Math.max(0,timeLeft));
+  if(timeLeft<=0){finish();return;}
+  if(comboT>0){comboT-=dt;if(comboT<=0){combo=1;$('combo').textContent='×1';}}
+  var i;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.4)k.push(flashes[i]);
+  flashes=k;
+}
+function cellOf(x,y){
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=N||c<0||c>=N)return null;
+  return {r:r,c:c};
+}
+function posOf(e){
+  var t=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  var rc=cv.getBoundingClientRect();
+  return {x:(t.clientX-rc.left)*336/rc.width,y:(t.clientY-rc.top)*336/rc.height};
+}
+function onDown(e){
+  if(state!=='play')return;
+  var p=posOf(e),cl=cellOf(p.x,p.y);
+  if(cl&&grid[cl.r][cl.c]>0)drag={fr:cl.r,fc:cl.c,x:p.x,y:p.y};
+  e.preventDefault();
+}
+function onMove(e){
+  if(state!=='play'||!drag)return;
+  var p=posOf(e);
+  drag.x=p.x;drag.y=p.y;
+  if(e.type!=='mousemove')e.preventDefault();
+}
+function onUp(e){
+  if(state!=='play'){drag=null;return;}
+  if(drag){
+    var p=posOf(e),cl=cellOf(p.x,p.y);
+    if(cl){
+      var dr=Math.abs(cl.r-drag.fr),dc=Math.abs(cl.c-drag.fc);
+      if(dr+dc===1&&grid[cl.r][cl.c]===grid[drag.fr][drag.c]){
+        doMerge(drag.fr,drag.fc,cl.r,cl.c);
+      }
+    }
+    drag=null;
+  }
+  if(e.type!=='mousemove')e.preventDefault();
+}
+cv.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('touchstart',onDown,{passive:false});
+cv.addEventListener('touchmove',onMove,{passive:false});
+cv.addEventListener('touchend',onUp,{passive:false});
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,336,336);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,336,336);
+  var r,c,i;
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    ctx.strokeStyle='rgba(255,255,255,.05)';
+    ctx.strokeRect(BX+c*CELL+0.5,BY+r*CELL+0.5,CELL-1,CELL-1);
+    var e=grid.length?grid[r][c]:0;
+    var isDrag=drag&&drag.fr===r&&drag.fc===c;
+    if(e>0&&!(isDrag&&state==='play')){
+      ctx.fillStyle=CCOL[Math.min(e,10)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,9);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      ctx.font='700 '+Math.min(22,12+e)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(Math.pow(2,e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  if(drag&&state==='play'){
+    var e2=grid[drag.fr][drag.c];
+    ctx.save();ctx.globalAlpha=0.9;
+    ctx.fillStyle=CCOL[Math.min(e2,10)];
+    roundRect(drag.x-CELL/2+3,drag.y-CELL/2+3,CELL-6,CELL-6,9);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.9)';
+    ctx.font='700 20px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(String(Math.pow(2,e2)),drag.x,drag.y+1);
+    ctx.restore();
+    var fc=drag.fc,fr=drag.fr;
+    ctx.save();ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=2;ctx.setLineDash([4,4]);
+    ctx.strokeRect(BX+fc*CELL+2,BY+fr*CELL+2,CELL-4,CELL-4);
+    ctx.restore();
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.4;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*6,BY+f.r*CELL+3-pr*6,CELL-6+pr*12,CELL-6+pr*12,9);ctx.stroke();
+    ctx.fillStyle='#fbbf24';ctx.font='700 14px system-ui';ctx.textAlign='center';
+    ctx.fillText('+'+f.gain,BX+f.c*CELL+CELL/2,BY+f.r*CELL-2-pr*16);
+    ctx.restore();
+  }
+  if(state==='play'&&combo>1){
+    ctx.fillStyle='rgba(77,208,196,'+(0.5+0.4*Math.sin(Date.now()/80))+')';
+    ctx.font='700 26px system-ui';ctx.textAlign='center';
+    ctx.fillText('连击 ×'+combo,168,30);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

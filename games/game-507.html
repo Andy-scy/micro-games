@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>神奇蛋图鉴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+.cols{display:flex;gap:10px;flex-wrap:wrap}
+#eggArea{flex:1;min-width:200px;background:#131728;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px}
+#egg{width:130px;height:160px;border:none;cursor:pointer;font-family:inherit;font-weight:700;color:#5b3a12;background:radial-gradient(circle at 35% 25%,#fff7e0,#ffe8a8 55%,#e8c46a);border-radius:50% 50% 50% 50%/60% 60% 42% 42%;box-shadow:0 8px 20px rgba(0,0,0,.5);transition:transform .06s;font-size:13px;line-height:1.5}
+#egg:active{transform:scale(.94)}
+#lastHatch{min-height:44px;text-align:center;font-size:14px;font-weight:700}
+.dex{flex:1.2;min-width:240px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;align-content:start}
+.slot{background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 4px;text-align:center;font-size:11px;color:#8b90b0;min-height:58px}
+.slot .em{font-size:22px;line-height:1.2}
+.slot.got{border-color:#f472b6}
+.shop{width:100%;display:flex;gap:6px;flex-wrap:wrap}
+.item{flex:1;min-width:150px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:12.5px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12px;color:#ffd76a;font-weight:700}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>神奇蛋图鉴</h1>
+  <p class="hint">点蛋攒能量,满 15 自动孵化 · 重复生物变金币,金币升级孵化装备 · 集齐 <b>12 种</b>神奇生物获胜</p>
+  <div class="hud">
+    <span>能量 <b id="hEn">0</b></span>
+    <span>金币 <b id="hCoin">0</b></span>
+    <span>图鉴 <b id="hDex">0</b>/12</span>
+    <span>孵化数 <b id="hHatch">0</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="cols">
+    <div id="eggArea">
+      <button id="egg">轻点孵蛋<br>能量 0/15</button>
+      <div id="lastHatch">…</div>
+    </div>
+    <div class="dex" id="dex"></div>
+  </div>
+  <div class="shop" id="shop" style="margin-top:8px"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">神奇蛋图鉴</h2>
+    <p id="ovDesc">点击魔法蛋积攒能量,凑满 15 点立刻孵化,随机孵出 12 种神奇生物。孵到重复的会变成金币,金币可买孵化灯、香薰与幸运符。连续 7 次没出新图鉴还会触发保底!集齐全图鉴你就是驯兽大师。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开始孵蛋</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elEn=$("hEn"),elCoin=$("hCoin"),elDex=$("hDex"),elHatch=$("hHatch"),elMsg=$("msg");
+var egg=$("egg"),lastH=$("lastHatch"),dexEl=$("dex"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var species=[
+ {nm:"咕咕鸡",em:"🐤",w:9,rar:0},{nm:"呱呱鸭",em:"🦆",w:9,rar:0},{nm:"慢慢龟",em:"🐢",w:9,rar:0},
+ {nm:"蓝喜鹊",em:"🐦",w:9,rar:0},{nm:"团子鼠",em:"🐹",w:9,rar:0},{nm:"小刺猬",em:"🦔",w:9,rar:0},
+ {nm:"赤焰狐",em:"🦊",w:3,rar:1},{nm:"雪羽鸮",em:"🦉",w:3,rar:1},{nm:"斑点鹿",em:"🦌",w:3,rar:1},{nm:"月夜猫",em:"🐱",w:3,rar:1},
+ {nm:"独角兽",em:"🦄",w:0.9,rar:2},{nm:"小神龙",em:"🐲",w:0.25,rar:3}
+];
+var rarNm=["普通","稀有","史诗","传说"],rarCol=["#9ca3af","#60a5fa","#c084fc","#fbbf24"];
+var dupCoin=[5,5,5,5,5,5,22,22,22,22,90,260];
+var ups=[
+ {nm:"孵化灯",ds:"每秒能量 +1.5",base:100,mult:2,max:8},
+ {nm:"魔力香薰",ds:"点击能量 +4",base:80,mult:2,max:6},
+ {nm:"幸运符",ds:"稀有及以上概率大增",base:150,mult:2.4,max:3}
+];
+var COST=15;
+var energy,coins,known,hatches,sinceNew,upLv,state,msgT,rows=[],slots=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function autoRate(){return 1.5+1.5*upLv[0];}
+function clickGain(){return 5+4*upLv[1];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildUI(){
+  var i;
+  dexEl.innerHTML="";slots=[];
+  for(i=0;i<species.length;i++){
+    var s=document.createElement("div");
+    s.className="slot";
+    s.innerHTML='<div class="em">❓</div><div class="nm">？？？</div>';
+    dexEl.appendChild(s);slots.push(s);
+  }
+  shopEl.innerHTML="";rows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(coins<c){say("金币不够,多孵点重复的!");return;}
+  coins-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function pickSpecies(){
+  var missing=[],i;
+  for(i=0;i<species.length;i++)if(!known[i])missing.push(i);
+  if(missing.length===0)return -1;
+  if(sinceNew>=7)return missing[Math.floor(Math.random()*missing.length)];
+  var total=0;
+  for(i=0;i<species.length;i++){
+    var w=species[i].w;
+    if(species[i].rar>0)w*=1+0.8*upLv[2];
+    if(!known[i])total+=w;
+  }
+  var r=Math.random()*total;
+  for(i=0;i<species.length;i++){
+    if(known[i])continue;
+    var w2=species[i].w;
+    if(species[i].rar>0)w2*=1+0.8*upLv[2];
+    r-=w2;
+    if(r<=0)return i;
+  }
+  return missing[missing.length-1];
+}
+function hatch(){
+  var idx=pickSpecies();
+  hatches++;
+  if(idx<0)return;
+  var sp=species[idx];
+  if(known[idx]){
+    coins+=dupCoin[idx];
+    sinceNew++;
+    lastH.innerHTML='<span style="color:'+rarCol[sp.rar]+'">'+sp.em+" "+sp.nm+'</span><br><span style="font-size:11px;color:#8b90b0">重复!换成 '+dupCoin[idx]+' 金币</span>';
+  }else{
+    known[idx]=true;sinceNew=0;
+    lastH.innerHTML='<span style="color:'+rarCol[sp.rar]+'">'+sp.em+" 新图鉴:"+sp.nm+'('+rarNm[sp.rar]+')</span>';
+    say("新发现:"+sp.nm+"!"+rarNm[sp.rar]+"生物入册!");
+  }
+  renderDex();
+}
+egg.addEventListener("click",function(){
+  if(state!=="play")return;
+  energy+=clickGain();
+});
+function startGame(){
+  energy=0;coins=0;hatches=0;sinceNew=0;upLv=[0,0,0];msgT=0;
+  known=[];
+  var i;
+  for(i=0;i<species.length;i++)known.push(false);
+  lastH.textContent="…";elMsg.textContent="";
+  renderDex();
+  ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function renderDex(){
+  var i;
+  for(i=0;i<species.length;i++){
+    var s=slots[i];
+    if(known[i]){
+      s.classList.add("got");
+      s.innerHTML='<div class="em">'+species[i].em+'</div><div class="nm" style="color:'+rarCol[species[i].rar]+'">'+species[i].nm+'</div>';
+    }
+  }
+}
+function render(){
+  var i;
+  elEn.textContent=Math.floor(energy);elCoin.textContent=fmt(coins);
+  var got=0;
+  for(i=0;i<species.length;i++)if(known[i])got++;
+  elDex.textContent=got;elHatch.textContent=hatches;
+  egg.innerHTML="轻点孵蛋<br>能量 "+Math.floor(energy)+"/"+COST;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c)+"金";
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||coins<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  energy+=autoRate()*ds;
+  var guard=0;
+  while(energy>=COST&&guard<8){energy-=COST;hatch();guard++;}
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  var got=0,i;
+  for(i=0;i<species.length;i++)if(known[i])got++;
+  if(got>=12){
+    state="over";
+    showOv("图鉴集齐!","十二种神奇生物尽收册中,神龙都在你肩上打盹!","共孵化 "+hatches+" 次 · 剩余金币 "+fmt(coins));
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+energy=0;coins=0;hatches=0;sinceNew=0;upLv=[0,0,0];state="menu";msgT=0;
+known=[];
+var _i;
+for(_i=0;_i<species.length;_i++)known.push(false);
+buildUI();renderDex();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

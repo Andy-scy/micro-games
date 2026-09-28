@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上菜小路</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2408;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>上菜小路</h1>
+  <p class="hint">方向键 / WASD 移动服务生(触屏滑动)· 先去<b style="color:#fbbf24">🍳厨房</b>端菜<br>再送到闪烁的餐桌,送一单加时 2 秒,限时 75 秒!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>时间 <b id="time">75</b>秒</span>
+    <span>手上 <b id="hands">空手</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="352"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">上菜小路</h2>
+      <p id="ovDesc">在格子后厨里穿行:先走到厨房取餐,再绕过隔断把菜送到不断闪烁的目标餐桌。每送出一单 +10 分并 +2 秒,时间归零即打烊。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elTime=$("time"),elHands=$("hands"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s808");
+var MAP=[
+"###############",
+"#t...#.....#t.#",
+"#....#..#..#..#",
+"#.##.#..#..##.#",
+"#..#....K....t#",
+"#..#.#...#.#..#",
+"#.....#.#.....#",
+"###.#.#.#.#.###",
+"#t..#.....#..t#",
+"#.....###.....#",
+"###############"
+];
+var COLS=15,ROWS=11,CELL=32;
+var DIRS={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
+var KEYMAP={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+var state="menu",px,py,hands,score,timeLeft,target,lastT,moveCd,pending,dirStack,elapsed;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function tables(){
+  var r=[],x,y;
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++)if(MAP[y].charAt(x)==="t")r.push({x:x,y:y});
+  return r;
+}
+var TABS=tables();
+function reset(){
+  px=2;py=9;hands=false;score=0;timeLeft=75;moveCd=0;pending=null;elapsed=0;
+  dirStack=[];
+  pickTarget();
+  updateHud();
+}
+function pickTarget(){
+  var i,t;
+  do{t=TABS[(Math.random()*TABS.length)|0];}while(TABS.length>1&&target&&t.x===target.x&&t.y===target.y);
+  target=t;
+}
+function updateHud(){
+  elScore.textContent=score;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  elHands.textContent=hands?"端菜中":"空手";
+}
+function onEnter(x,y){
+  var c=MAP[y].charAt(x);
+  if(c==="K"&&!hands){
+    hands=true;updateHud();
+  }else if(c==="t"&&hands&&target&&x===target.x&&y===target.y){
+    score+=10;timeLeft+=2;hands=false;
+    pickTarget();updateHud();
+  }
+}
+function tryMove(d){
+  var nx=px+d.x,ny=py+d.y;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return;
+  if(MAP[ny].charAt(nx)==="#")return;
+  px=nx;py=ny;
+  onEnter(nx,ny);
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s808",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="75 秒里你跑堂送出了不少菜,脚步真快!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var x,y,i;
+  ctx.clearRect(0,0,480,352);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    var c=MAP[y].charAt(x),cx=x*CELL,cy=y*CELL;
+    if(c==="#"){
+      ctx.fillStyle="#262c50";
+      rr(cx+1,cy+1,CELL-2,CELL-2,5);ctx.fill();
+    }else{
+      ctx.fillStyle=(x+y)%2===0?"#10142a":"#0d1122";
+      ctx.fillRect(cx,cy,CELL,CELL);
+      if(c==="K"){
+        ctx.fillStyle="rgba(255,210,63,.18)";
+        rr(cx+1,cy+1,CELL-2,CELL-2,5);ctx.fill();
+        ctx.font="18px system-ui";ctx.textAlign="center";
+        ctx.fillText("🍳",cx+CELL/2,cy+CELL/2+7);
+      }else if(c==="t"){
+        ctx.fillStyle="#4a3428";
+        rr(cx+4,cy+4,CELL-8,CELL-8,6);ctx.fill();
+        ctx.fillStyle="#cfd4ea";
+        ctx.beginPath();ctx.arc(cx+CELL/2,cy+CELL/2,8,0,Math.PI*2);ctx.fill();
+        if(target&&x===target.x&&y===target.y){
+          ctx.strokeStyle="rgba(255,210,63,"+(0.45+0.45*Math.sin(elapsed*6))+")";
+          ctx.lineWidth=3;
+          rr(cx+1,cy+1,CELL-2,CELL-2,6);ctx.stroke();
+        }
+      }
+    }
+  }
+  ctx.fillStyle="#4ecdc4";
+  ctx.beginPath();ctx.arc(px*CELL+CELL/2,py*CELL+CELL/2,11,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(px*CELL+CELL/2,py*CELL+CELL/2-3,3,0,Math.PI*2);ctx.fill();
+  if(hands){
+    ctx.font="14px system-ui";ctx.textAlign="center";
+    ctx.fillText("🍛",px*CELL+CELL/2,py*CELL+2);
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  elapsed+=dt/1000;
+  if(state!=="playing"){draw();return;}
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;updateHud();gameOver();draw();return;}
+  moveCd-=dt/1000;
+  if(moveCd<=0){
+    var dname=pending;
+    if(!dname&&dirStack.length)dname=dirStack[dirStack.length-1];
+    if(dname){
+      tryMove(DIRS[dname]);
+      pending=null;
+      moveCd=0.13;
+    }
+  }
+  updateHud();
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var d=KEYMAP[e.key];
+  if(d){
+    e.preventDefault();
+    if(state!=="playing"){startGame();return;}
+    if(dirStack.indexOf(d)<0)dirStack.push(d);
+  }else if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();
+  }
+});
+document.addEventListener("keyup",function(e){
+  var d=KEYMAP[e.key];
+  if(d){
+    var i=dirStack.indexOf(d);
+    if(i>=0)dirStack.splice(i,1);
+  }
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var tt=e.changedTouches[0];tsx=tt.clientX;tsy=tt.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var tt=e.changedTouches[0],dx=tt.clientX-tsx,dy=tt.clientY-tsy;
+  if(Math.abs(dx)<16&&Math.abs(dy)<16)return;
+  if(Math.abs(dx)>Math.abs(dy))pending=dx>0?"right":"left";
+  else pending=dy>0?"down":"up";
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

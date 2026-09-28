@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主题三重奏</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:420px}
+#board{display:grid;gap:8px;width:100%}
+.card{position:relative;aspect-ratio:1/1;cursor:pointer;perspective:700px}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s}
+.card.open .inner,.card.done .inner{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(20px,7vw,32px)}
+.bk{background:linear-gradient(145deg,#28325f,#1c2447);border:2px solid #46508c;color:#6a76c9;font-weight:bold}
+.ft{background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;transform:rotateY(180deg)}
+.card.done{cursor:default;animation:pop .35s}
+.card.done .ft{border-color:#7ee0a3;background:linear-gradient(145deg,#1f5b41,#1a4a34)}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+#banner{position:absolute;top:40%;left:0;right:0;text-align:center;font-size:24px;color:#ffd166;font-weight:bold;opacity:0;transition:opacity .3s;pointer-events:none;z-index:8;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+#banner.show{opacity:1}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>主题三重奏</h1>
+<div class="hint">三大主题关卡连闯!第一关水果、第二关动物、第三关交通,一关更比一关大;三关全部通关即获胜,计时全程累计。</div>
+<div class="bar"><span id="stLevel">第 1 关 · 水果</span><span>总步数 <b id="stMoves">0</b></span><span>用时 <b id="stTime">0.0</b> 秒</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="banner"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var FRUITS=['🍎','🍋','🍉'];
+var ANIMALS=['🐶','🐱','🦊','🐼'];
+var CARS=['🚗','🚌','🚲','✈️','🚀','🚁'];
+var LEVELS=[
+  {name:'水果',cols:3,syms:FRUITS},
+  {name:'动物',cols:4,syms:ANIMALS},
+  {name:'交通',cols:4,syms:CARS}
+];
+var board=document.getElementById('board');
+var stage=document.getElementById('stage');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elLevel=document.getElementById('stLevel');
+var elMoves=document.getElementById('stMoves');
+var elTime=document.getElementById('stTime');
+var banner=document.getElementById('banner');
+var btnAgain=document.getElementById('btnAgain');
+var lock=true,first=null,level=0,pairsLv=0,totalMoves=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);el.sym=sym;
+  board.appendChild(el);return el;
+}
+function showBanner(text){
+  banner.textContent=text;banner.classList.add('show');
+  later(function(){banner.classList.remove('show');},1100);
+}
+function deal(){
+  var cfg=LEVELS[level];
+  board.innerHTML='';first=null;pairsLv=0;
+  board.style.gridTemplateColumns='repeat('+cfg.cols+',1fr)';
+  elLevel.textContent='第 '+(level+1)+' 关 · '+cfg.name;
+  var syms=shuffle(cfg.syms.concat(cfg.syms));
+  for(var i=0;i<syms.length;i++)makeCard(syms[i]);
+  lock=true;
+  later(function(){lock=false;},450);
+}
+function newGame(){
+  clearTimers();
+  lock=true;level=0;totalMoves=0;running=false;over=false;
+  elMoves.textContent='0';elTime.textContent='0.0';
+  overlay.classList.remove('show');
+  running=true;startAt=performance.now();
+  showBanner('第 1 关 · 水果');
+  deal();
+}
+function onCard(el){
+  if(lock||over||!running)return;
+  if(el.classList.contains('open')||el.classList.contains('done'))return;
+  el.classList.add('open');
+  if(!first){first=el;return;}
+  totalMoves++;elMoves.textContent=String(totalMoves);
+  var a=first,b=el;first=null;
+  if(a.sym===b.sym){
+    pairsLv++;
+    a.classList.remove('open');b.classList.remove('open');
+    a.classList.add('done');b.classList.add('done');
+    if(pairsLv===LEVELS[level].syms.length)levelClear();
+  }else{
+    lock=true;
+    later(function(){a.classList.remove('open');b.classList.remove('open');lock=false;},650);
+  }
+}
+function levelClear(){
+  if(level>=LEVELS.length-1){finish();return;}
+  showBanner('第 '+(level+1)+' 关 完成!');
+  later(function(){level++;deal();},1000);
+}
+function finish(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  var score=Math.max(200,1800-totalMoves*20-Math.round(sec)*8);
+  var grade=totalMoves<=18?'★★★ 主题大师':(totalMoves<=26?'★★☆ 顺利通关':'★☆☆ 全部通关');
+  ovTitle.textContent='三重奏完成!';
+  ovDesc.innerHTML='总用时 '+sec.toFixed(1)+' 秒 · 总步数 '+totalMoves+'<br>得分 <b style="color:#ffd166">'+score+'</b><br>'+grade;
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+var tick=function(){
+  if(running&&!over)elTime.textContent=((performance.now()-startAt)/1000).toFixed(1);
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

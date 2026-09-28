@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节拍拍点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#4a0e2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>节拍拍点</h1>
+  <p class="hint">光圈收缩到目标环的一瞬点击 / 按空格 · 越准分越高</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>机会 <b id="lives">5</b></span>
+    <span>节拍 <b id="bpm">72</b> BPM</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="320"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">节拍拍点</h2>
+      <p id="ovDesc">外圈光波每个节拍向内收缩一次,在它套准中央目标环的瞬间拍下!误差 9px 内为完美,26px 内为不错;太早会断连击,彻底错过扣一次机会。连击越高节拍越快,5 次失误后结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=320,KEY="mg_s233",CX=240,CY=160,R=64;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elCombo=$("combo"),elLives=$("lives"),elBpm=$("bpm");
+var state="menu",score=0,combo=0,lives=5,pulse=null,ratingTxt="",ratingUntil=0,bgGlow=0,lastT=0;
+var best=loadBest(KEY),audio=null;
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function bpm(){return Math.min(130,72+combo*2);}
+function beatMs(){return 60000/bpm();}
+function beep(freq,dur,vol){
+  if(!audio)return;
+  try{
+    var osc=audio.createOscillator(),g=audio.createGain();
+    osc.type="sine";osc.frequency.value=freq;
+    g.gain.setValueAtTime(vol,audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+dur);
+    osc.connect(g);g.connect(audio.destination);
+    osc.start();osc.stop(audio.currentTime+dur);
+  }catch(e){}
+}
+function spawnPulse(){
+  pulse={r:150,speed:(150-R)/beatMs()};
+  bgGlow=1;
+  beep(880,0.06,0.05);
+}
+function updateHud(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLives.textContent=lives;
+  elBpm.textContent=bpm();
+}
+function endGame(){
+  state="over";
+  pulse=null;
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="节拍落幕";
+  ovDesc.textContent="最终节拍 "+bpm()+" BPM";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function rate(txt){ratingTxt=txt;ratingUntil=performance.now()+700;}
+function tap(){
+  if(state!=="playing")return;
+  if(!pulse)return;
+  var err=pulse.r-R;
+  if(Math.abs(err)<=9){
+    score+=100+combo*10;
+    combo++;
+    rate("完美!");
+    beep(1320,0.09,0.09);
+    pulse=null;
+  }else if(Math.abs(err)<=26){
+    score+=40+combo*4;
+    combo++;
+    rate("不错");
+    beep(990,0.07,0.06);
+    pulse=null;
+  }else if(err>26){
+    combo=0;
+    rate("太早!");
+  }
+  updateHud();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  bgGlow=Math.max(0,bgGlow-dt*0.004);
+  if(state==="playing"){
+    if(!pulse)spawnPulse();
+    if(pulse){
+      pulse.r-=pulse.speed*dt;
+      if(pulse.r<=36){
+        pulse=null;
+        combo=0;
+        lives--;
+        rate("错过!");
+        beep(220,0.15,0.07);
+        updateHud();
+        if(lives<=0){endGame();return;}
+      }
+    }
+  }
+  draw(t);
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(244,114,182,"+(bgGlow*0.08)+")";
+  ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="#3b457c";
+  ctx.beginPath();ctx.arc(CX,CY,150,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle="#f472b6";
+  ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(CX,CY,R,0,Math.PI*2);ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.setLineDash([4,6]);
+  ctx.strokeStyle="rgba(244,114,182,0.4)";
+  ctx.beginPath();ctx.arc(CX,CY,R+26,0,Math.PI*2);ctx.stroke();
+  ctx.setLineDash([]);
+  if(pulse){
+    ctx.strokeStyle="#38bdf8";
+    ctx.lineWidth=5;
+    ctx.shadowColor="#38bdf8";ctx.shadowBlur=16;
+    ctx.beginPath();ctx.arc(CX,CY,pulse.r,0,Math.PI*2);ctx.stroke();
+    ctx.shadowBlur=0;ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#e8eaf6";
+  ctx.font="bold 26px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText(combo>0?"x"+combo:"拍!",CX,CY+9);
+  if(t<ratingUntil){
+    ctx.fillStyle="rgba(251,191,36,"+(0.4+0.6*(ratingUntil-t)/700)+")";
+    ctx.font="bold 24px system-ui,sans-serif";
+    ctx.fillText(ratingTxt,CX,CY-100);
+  }
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing")startGame();
+    else tap();
+  }
+});
+cv.addEventListener("mousedown",function(){if(state==="playing")tap();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();if(state==="playing")tap();},{passive:false});
+function startGame(){
+  score=0;combo=0;lives=5;pulse=null;
+  state="playing";
+  if(!audio){
+    try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){audio=null;}
+  }
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰晶滑道</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#7dd3fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#7dd3fc;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#7dd3fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#7dd3fc;color:#062a3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>冰晶滑道</h1>
+  <p class="hint">方向键 / WASD 出发 · 触屏滑动 · 冰面上会一路滑到撞墙为止</p>
+  <div class="hud">
+    <span>滑行次数 <b id="moves">0</b></span>
+    <span>最少滑行纪录 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">冰晶滑道</h2>
+      <p id="ovDesc">整座迷宫铺满了冰面:朝一个方向出发,就会一口气滑行到撞墙为止,无法中途停下。滑过的冰面会留下蓝色划痕。规划每一次滑行,用最少的次数撞进绿色出口!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">踏上冰面</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elMoves=$("moves"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s267");
+var state="menu";
+var grid,player,exitCell,trail,moves,slide,pending,pulse,bumpT;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function reset(){
+  grid=genMaze(10,10);
+  player={x:1,y:1};
+  exitCell={x:COLS-2,y:ROWS-2};
+  trail=[];
+  var y;
+  for(y=0;y<ROWS;y++)trail.push(new Array(COLS));
+  trail[1][1]=true;
+  moves=0;slide=null;pending=null;pulse=0;bumpT=0;
+  updateHud();
+}
+function updateHud(){
+  elMoves.textContent=moves;
+  elBest.textContent=best>0?best+" 次":"--";
+}
+function beginSlide(dx,dy){
+  var cx=player.x,cy=player.y,dist=0,path=[];
+  while(true){
+    var nx=cx+dx,ny=cy+dy;
+    if(nx<0||ny<0||nx>=COLS||ny>=ROWS)break;
+    if(grid[ny][nx]===1)break;
+    cx=nx;cy=ny;dist++;
+    path.push({x:cx,y:cy});
+    if(cx===exitCell.x&&cy===exitCell.y)break;
+  }
+  if(dist===0){bumpT=1;return;}
+  slide={sx:player.x,sy:player.y,tx:cx,ty:cy,t:0,dur:dist*0.045,path:path,pi:0};
+}
+function queueSlide(dx,dy){
+  if(state!=="playing")return;
+  if(slide){pending={x:dx,y:dy};return;}
+  beginSlide(dx,dy);
+}
+function finishSlide(){
+  player.x=slide.tx;player.y=slide.ty;
+  var i;
+  for(i=slide.pi;i<slide.path.length;i++)trail[slide.path[i].y][slide.path[i].x]=true;
+  slide=null;moves++;
+  updateHud();
+  if(player.x===exitCell.x&&player.y===exitCell.y){win();return;}
+  if(pending&&state==="playing"){
+    var p=pending;pending=null;
+    beginSlide(p.x,p.y);
+  }
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||moves<best){best=moves;saveBest("mg_s267",best);isNew=true;}
+  ovTitle.textContent="稳稳停进出口!";
+  ovDesc.textContent=isNew?"新纪录!每一次滑行都精确无比。":"冰面尽头,出口的绿光接住了你。";
+  ovScore.style.display="block";
+  ovScore.textContent="滑行 "+moves+" 次 · 最少纪录 "+(best>0?best+" 次":"--");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#1d2a4a";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#2a3d66";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function draw(){
+  var x,y,i;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1){drawWall(x,y);continue;}
+    ctx.fillStyle="rgba(125,211,252,0.10)";
+    ctx.fillRect(x*CELL+1,y*CELL+1,CELL-2,CELL-2);
+    if((x*7+y*13)%5===0){
+      ctx.strokeStyle="rgba(186,230,253,0.18)";
+      ctx.beginPath();
+      ctx.moveTo(x*CELL+5,y*CELL+CELL-6);
+      ctx.lineTo(x*CELL+CELL-6,y*CELL+5);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle="rgba(56,189,248,0.30)";
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(trail[y][x])ctx.fillRect(x*CELL+5,y*CELL+5,CELL-10,CELL-10);
+  }
+  var ex=exitCell.x*CELL+CELL/2,ey=exitCell.y*CELL+CELL/2;
+  var pr=8+Math.sin(pulse)*2;
+  ctx.fillStyle="#4ade80";
+  ctx.shadowColor="#4ade80";ctx.shadowBlur=16;
+  ctx.beginPath();ctx.arc(ex,ey,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  var fx=player.x,fy=player.y;
+  if(slide){
+    var pr2=Math.min(1,slide.t/slide.dur);
+    fx=slide.sx+(slide.tx-slide.sx)*pr2;
+    fy=slide.sy+(slide.ty-slide.sy)*pr2;
+    for(i=slide.pi;i<Math.floor(pr2*slide.path.length);i++){
+      trail[slide.path[i].y][slide.path[i].x]=true;
+      slide.pi=i+1;
+    }
+  }
+  var px=fx*CELL+CELL/2,py=fy*CELL+CELL/2;
+  if(bumpT>0){
+    px+=Math.sin(bumpT*30)*2;
+    bumpT=Math.max(0,bumpT-0.06);
+  }
+  ctx.fillStyle="#e0f2fe";
+  ctx.shadowColor="#7dd3fc";ctx.shadowBlur=14;
+  ctx.beginPath();ctx.arc(px,py,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#0ea5e9";
+  ctx.beginPath();ctx.arc(px-2.5,py-2,1.6,0,Math.PI*2);ctx.arc(px+2.5,py-2,1.6,0,Math.PI*2);ctx.fill();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(state==="playing"&&slide){
+    slide.t+=dt/1000;
+    if(slide.t>=slide.dur)finishSlide();
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();queueSlide(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();queueSlide(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();queueSlide(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();queueSlide(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueSlide(dx>0?1:-1,0);
+  else queueSlide(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

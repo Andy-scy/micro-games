@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本垒打大赛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ffb74d;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ffb74d;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ffb74d;color:#3e2200;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>本垒打大赛</h1>
+<p class="tip">球飞近本垒时按住屏幕或空格挥棒 · 时机越准球飞越远 · 10 球内打出 4 支全垒打获胜，挥空 3 次提前结束</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,GY=580,PLATE=396,FENCE=34,WALLY=470;
+var phase,ball,trail,pitchIdx,hr,miss,msg,resT,waitT,pitchSp,swingT,swung,stars,landDist;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  phase='wait';ball=null;trail=[];pitchIdx=1;hr=0;miss=0;msg='';resT=0;waitT=0.8;swingT=1;swung=false;stars=[];landDist=0;
+}
+function newPitch(){
+  var s=430+pitchIdx*14+rnd(0,55);
+  var y0=330+rnd(-28,28),ty=420+rnd(-52,52);
+  var t=(PLATE-58)/s;
+  ball={x:58,y:y0,vx:s,vy:(ty-y0)/t,t:t};
+  trail=[];phase='pitch';swung=false;
+}
+function swing(){
+  if(phase==='wait'||phase==='pitch'){if(swingT>0.12)swingT=0;}
+}
+function contact(q,cx,cy){
+  var vx0=-(150+q*320);
+  var vy0=-(200+q*250)-(ball.y-420)*1.1;
+  ball.vx=vx0;ball.vy=vy0;
+  landDist=0;trail=[];
+  stars.push({x:cx,y:cy,t:0});
+  phase='hitfly';
+}
+function resolveEnd(txt){
+  msg=txt;phase='res';resT=0;
+}
+function update(dt){
+  swingT+=dt;
+  for(var i=stars.length-1;i>=0;i--){stars[i].t+=dt;if(stars[i].t>0.5)stars.splice(i,1);}
+  if(phase==='wait'){
+    waitT-=dt;
+    if(waitT<=0)newPitch();
+  }
+  if(phase==='pitch'&&ball){
+    var steps=Math.max(1,Math.ceil(dt/0.006)),sd=dt/steps;
+    for(var k=0;k<steps;k++){
+      ball.vy+=60*sd;
+      ball.x+=ball.vx*sd;ball.y+=ball.vy*sd;
+      if(swingT<0.16&&ball.x>=356&&ball.x<=428&&Math.abs(ball.y-420)<74){
+        var qx=Math.max(0,1-Math.abs(ball.x-396)/36);
+        var qy=Math.max(0,1-Math.abs(ball.y-420)/78);
+        contact(0.65*qx+0.35*qy,ball.x,ball.y);
+        break;
+      }
+      if(ball.x>434){miss++;resolveEnd('挥空！');break;}
+    }
+  }
+  if(phase==='hitfly'&&ball){
+    var st2=Math.max(1,Math.ceil(dt/0.008)),sd2=dt/st2;
+    for(var j=0;j<st2;j++){
+      ball.vy+=480*sd2;
+      ball.x+=ball.vx*sd2;ball.y+=ball.vy*sd2;
+      landDist=Math.max(landDist,(PLATE-ball.x)/4);
+      if(ball.x<=FENCE){
+        if(ball.y<WALLY){hr++;resolveEnd('全垒打！！');}
+        else{ball.x=FENCE;ball.vx=Math.abs(ball.vx)*0.3;resolveEnd('击中墙沿，被接杀');}
+        break;
+      }
+      if(ball.y>=GY-8){ball.y=GY-8;resolveEnd('落地被接杀');break;}
+    }
+    trail.push({x:ball.x,y:ball.y});
+    if(trail.length>20)trail.shift();
+  }
+  if(phase==='res'){
+    resT+=dt;
+    if(resT>1.15){
+      if(miss>=3){end(false);return;}
+      if(pitchIdx>=10){end(hr>=4);return;}
+      pitchIdx++;waitT=rnd(0.6,1.3);ball=null;phase='wait';msg='';
+    }
+  }
+}
+function end(win){
+  phase='over';
+  ovT.textContent=win?'冠军挥棒！':'比赛结束';
+  ovX.textContent='共打出 '+hr+' 支全垒打（获胜需 4 支）· 挥空 '+miss+' 次。'+(win?'球场之王！':'等球进入好球带再出棒，越准飞越远。');
+  ov.classList.remove('hidden');
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var sky=ctx.createLinearGradient(0,0,0,GY);
+  sky.addColorStop(0,'#141c33');sky.addColorStop(1,'#1d2b22');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,GY);
+  ctx.fillStyle='#25462f';ctx.fillRect(0,GY-14,W,14);
+  ctx.fillStyle='#1c3626';ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle='#4e342e';ctx.beginPath();ctx.arc(90,GY-8,46,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#6d4c41';ctx.beginPath();ctx.arc(PLATE+16,GY-6,52,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#3e2723';ctx.fillRect(0,WALLY-2,FENCE,GY-WALLY+2);
+  ctx.fillStyle='#ffd54f';ctx.fillRect(0,WALLY-4,FENCE,4);
+  ctx.fillStyle='rgba(255,213,79,.6)';ctx.font='11px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.save();ctx.translate(18,520);ctx.rotate(-Math.PI/2);ctx.fillText('全 垒 打 墙',0,0);ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(58,GY-8);ctx.lineTo(58,300);ctx.stroke();
+  ctx.fillStyle='#eceff1';
+  ctx.beginPath();ctx.arc(58,GY-30,7,0,7);ctx.fill();
+  ctx.fillRect(54,GY-24,8,18);
+  ctx.strokeStyle='#eceff1';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(408,GY-18);ctx.lineTo(400,GY-46);ctx.stroke();
+  ctx.beginPath();ctx.arc(402,GY-54,7,0,7);ctx.stroke();
+  var batA=swingT<0.16?(-1.9+swingT/0.16*2.4):(-0.5+Math.sin(performance.now()/400)*0.06);
+  ctx.save();ctx.translate(406,GY-52);ctx.rotate(batA);
+  ctx.strokeStyle='#d7a86e';ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(40,-8);ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(356,340);ctx.lineTo(356,500);ctx.moveTo(428,340);ctx.lineTo(428,500);ctx.stroke();
+  for(var i2=0;i2<trail.length;i2++){
+    ctx.fillStyle='rgba(255,255,255,'+(i2/trail.length*0.4)+')';
+    ctx.beginPath();ctx.arc(trail[i2].x,trail[i2].y,5,0,7);ctx.fill();
+  }
+  if(ball){
+    ctx.fillStyle='#f5f5f5';ctx.beginPath();ctx.arc(ball.x,ball.y,7,0,7);ctx.fill();
+    ctx.strokeStyle='#e53935';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(ball.x,ball.y,7,0.6,2.4);ctx.stroke();
+  }
+  for(var s2=0;s2<stars.length;s2++){
+    var st3=stars[s2];
+    ctx.strokeStyle='rgba(255,213,79,'+(1-st3.t*2)+')';ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(st3.x,st3.y,10+st3.t*70,0,7);ctx.stroke();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('全垒打 '+hr,14,28);
+  ctx.fillText('第 '+Math.min(pitchIdx,10)+' / 10 球',14,52);
+  ctx.textAlign='right';ctx.fillText('挥空 '+miss+' / 3',W-14,28);
+  if(phase==='pitch'&&ball){
+    ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('球速 '+Math.round(ball.vx/2.6)+' km/h',W/2,60);
+  }
+  if(msg&&phase==='res'){
+    ctx.fillStyle=hr>0||msg.indexOf('全垒')===0?'#ffd54f':'#ef9a9a';
+    ctx.font='24px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText(msg,W/2,150);
+    if(landDist>0&&msg.indexOf('全垒')>=0){ctx.font='16px system-ui,sans-serif';ctx.fillText('飞行 '+Math.round(landDist)+' 米',W/2,180);}
+  }
+  if(phase==='wait'||phase==='pitch'){
+    ctx.fillStyle='#9fa8da';ctx.font='14px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('按住 出棒！',W/2,620);
+  }
+}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();swing();});
+window.addEventListener('keydown',function(e){if(e.code==='Space'){e.preventDefault();if(!e.repeat)swing();}});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

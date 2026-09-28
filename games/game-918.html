@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接力交接棒</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#80cbc4;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#80cbc4;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#80cbc4;color:#00332d;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>接力交接棒</h1>
+<p class="tip">按住屏幕或空格冲刺（耗体力），松开慢跑恢复 · 进入绿色交接区后，两棒距离条靠拢时点「传棒」钮（或 ↑ 键） · 4×100 米总时 38 秒内获胜，失误掉棒罚 4 秒</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,MPX=14,TRACK=468;
+var leg,xm,speed,stam,holding,locked,time,phase,legT,rx,zoneIn,msg,msgT;
+function reset(){
+  leg=1;xm=0;speed=0;stam=100;holding=false;locked=false;time=0;phase='run';legT=0;
+  rx=-99;zoneIn=false;msg='';msgT=0;
+}
+function legEnd(){return leg*100;}
+function legStart(){return (leg-1)*100;}
+function passBaton(){
+  if(phase!=='run'||!zoneIn)return;
+  var d=rx-xm;
+  if(d>=0&&d<1.6){
+    msg='完美交接！';msgT=1;
+    nextLeg(speed*0.98);
+  }else if(d>=0&&d<5.5){
+    msg='交接成功';msgT=0.8;
+    nextLeg(Math.max(6,speed*0.95-(d-1.6)*0.6));
+  }else{
+    dropSticks();
+  }
+}
+function dropSticks(){
+  msg='掉棒！+4 秒';msgT=1.3;
+  time+=4;
+  nextLeg(2);
+}
+function nextLeg(v){
+  leg++;
+  if(leg>4){finish();return;}
+  xm=legStart();speed=v;stam=Math.min(100,stam+18);
+  rx=-99;zoneIn=false;legT=0;
+}
+function finish(){
+  phase='over';
+  var win=time<38;
+  ovT.textContent=win?'冠军接力队！':'比赛结束';
+  ovX.textContent='4×100 米总用时 '+time.toFixed(2)+' 秒'+(win?'，掌声属于这支梦之队！':'（目标 38 秒）。按住冲刺别松到底，交接区里等距离条贴近再传棒。');
+  ov.classList.remove('hidden');
+}
+function update(dt){
+  msgT-=dt;
+  if(phase!=='run')return;
+  time+=dt;legT+=dt;
+  if(holding&&!locked){
+    speed=Math.min(13,speed+9*dt);
+    stam-=26*dt;
+    if(stam<=0){stam=0;locked=true;}
+  }else{
+    speed+=(6.5-speed)*3*dt;
+    stam=Math.min(100,stam+16*dt);
+    if(locked&&stam>30)locked=false;
+    if(locked)speed=Math.min(speed,5.2);
+  }
+  xm+=speed*dt;
+  var z0=legEnd()-25;
+  if(leg<4&&xm>=z0&&!zoneIn){
+    zoneIn=true;
+    rx=xm+4;
+  }
+  if(zoneIn){
+    var rv=speed*0.85+0.4;
+    rx+=rv*dt;
+  }
+  if(xm>=legEnd()){
+    if(leg===4){finish();return;}
+    if(zoneIn){msg='错过交接！';msgT=1;}
+    dropSticks();
+  }
+}
+function drawRunner(px2,py,c1,c2,withBat,moving){
+  var sw=moving?Math.sin(performance.now()*0.02+px2)*1:0.15;
+  ctx.strokeStyle=c1;ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.moveTo(px2,py-18);ctx.lineTo(px2+sw*11,py);
+  ctx.moveTo(px2,py-18);ctx.lineTo(px2-sw*11,py);
+  ctx.stroke();
+  ctx.fillStyle=c1;
+  ctx.beginPath();ctx.arc(px2,py-40,7,0,7);ctx.fill();
+  ctx.strokeStyle=c2;ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(px2,py-30);ctx.lineTo(px2+sw*6,py-18);ctx.stroke();
+  if(withBat){
+    ctx.save();ctx.translate(px2+12,py-34);ctx.rotate(-0.5);
+    ctx.fillStyle='#ffd54f';ctx.fillRect(-3,-8,6,16);
+    ctx.restore();
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#182038';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.05)';
+  for(var st=0;st<7;st++)ctx.fillRect(30+((st*160-time*40)%1200),120,90,110);
+  ctx.fillStyle='#243048';ctx.fillRect(0,300,W,TRACK-300);
+  ctx.fillStyle='#8e3b3b';ctx.fillRect(0,TRACK,W,H-TRACK);
+  ctx.fillStyle='#7d3232';ctx.fillRect(0,TRACK,W,6);
+  var cam=xm*MPX-190;
+  for(var m2=legStart();m2<=legEnd()+10;m2+=10){
+    var wx=m2*MPX-cam;
+    if(wx>-40&&wx<W+40){
+      ctx.fillStyle='rgba(255,255,255,.5)';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';
+      ctx.fillText(m2+'m',wx,TRACK-8);
+      ctx.fillRect(wx-1,TRACK,2,10);
+    }
+  }
+  var z0=legEnd()-25,z1=legEnd();
+  if(leg<4){
+    ctx.fillStyle='rgba(102,187,106,.30)';
+    ctx.fillRect(z0*MPX-cam,TRACK+6,(z1-z0)*MPX,H-TRACK-14);
+    ctx.strokeStyle='#66bb6a';ctx.lineWidth=2;
+    ctx.strokeRect(z0*MPX-cam,TRACK+6,(z1-z0)*MPX,H-TRACK-14);
+    ctx.fillStyle='#a5d6a7';ctx.font='12px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('交接区',((z0+z1)/2)*MPX-cam,H-20);
+  }
+  var sx=xm*MPX-cam;
+  drawRunner(sx,TRACK+52,'#80cbc4','#4db6ac',true,speed>1);
+  if(zoneIn&&rx>xm-30){
+    var rpx=rx*MPX-cam;
+    drawRunner(rpx,TRACK+52,'#ffcc80','#ffb74d',false,speed>1);
+    var d=rx-xm;
+    ctx.strokeStyle='rgba(255,255,255,.5)';ctx.setLineDash([4,5]);
+    ctx.beginPath();ctx.moveTo(sx,TRACK+30);ctx.lineTo(rpx,TRACK+30);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=d<1.6?'#66bb6a':(d<5.5?'#ffd54f':'#ef5350');
+    ctx.fillText(d.toFixed(1)+'m',(sx+rpx)/2,TRACK+22);
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+Math.min(4,leg)+' 棒',14,28);
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';
+  ctx.fillText('本棒 '+(xm-legStart()).toFixed(0)+' / 100 m · 速度 '+speed.toFixed(1)+' m/s',14,50);
+  ctx.textAlign='right';ctx.fillStyle='#e8eaf6';ctx.font='18px system-ui,sans-serif';
+  ctx.fillText(time.toFixed(2)+' s',W-14,30);
+  var bx=90,bw=300;
+  ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(bx,600,bw,13);
+  ctx.fillStyle=locked?'#ef5350':(stam>50?'#80cbc4':'#ffd54f');
+  ctx.fillRect(bx,600,bw*stam/100,13);
+  ctx.strokeStyle='#9fa8da';ctx.strokeRect(bx,600,bw,13);
+  ctx.fillStyle='#9fa8da';ctx.font='11px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('体力',bx,596);
+  ctx.fillStyle='#263238';ctx.fillRect(336,560,134,66);
+  ctx.fillStyle=zoneIn?'#66bb6a':'#546e7a';
+  ctx.font='19px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('传 棒',403,601);
+  if(msgT>0){ctx.fillStyle='#ffd54f';ctx.font='20px system-ui,sans-serif';ctx.fillText(msg,W/2,140);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect();
+  var px2=(e.clientX-r.left)*(W/r.width),py2=(e.clientY-r.top)*(H/r.height);
+  if(px2>330&&py2>552){passBaton();return;}
+  holding=true;
+});
+window.addEventListener('pointerup',function(){holding=false;});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();if(!e.repeat)holding=true;}
+  if(e.code==='ArrowUp'){e.preventDefault();if(!e.repeat)passBaton();}
+});
+window.addEventListener('keyup',function(e){if(e.code==='Space')holding=false;});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

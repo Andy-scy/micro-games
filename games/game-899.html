@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深渊下潜</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+#wrap{max-width:680px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:8px 0 2px;color:#8fd3ff;letter-spacing:1px}
+p.tip{margin:4px 0 10px;font-size:13px;color:#aab0d0;line-height:1.7}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#cfd3ee;margin:0 2px 8px}
+#hud b{color:#8fd3ff}
+#stage{position:relative;border-radius:14px;overflow:hidden;border:1px solid #2c3154;background:#0f1220}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(10,12,26,.84);text-align:center;padding:16px}
+.hidden{display:none}
+.ovBig{font-size:26px;font-weight:bold;color:#8fd3ff}
+#ovTitle{font-size:26px;font-weight:bold;color:#ff5d73}
+#ovInfo{font-size:14px;color:#aab0d0}
+button{background:#8fd3ff;color:#141628;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:bold;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>深渊下潜</h1>
+<p class="tip">探测器正坠向深渊底部:←→ / A D 左右移动,也可以直接拖动手指或移动鼠标横向操控。下坠会越来越快、越来越暗,躲开岩壁、石梁和向上漂浮的水母!深度即分数。</p>
+<div id="hud"><span>深度:<b id="score">0</b> m</span><span>最佳:<b id="best">0</b> m</span></div>
+<div id="stage">
+<canvas id="cv" width="640" height="420"></canvas>
+<div id="ovStart" class="overlay"><div class="ovBig">坠入深渊</div><div style="font-size:13px;color:#aab0d0">左右移动 · 越深越暗越快</div><button id="btnStart">开始游戏</button></div>
+<div id="ovOver" class="overlay hidden"><div id="ovTitle">探测器损毁!</div><div id="ovInfo"></div><button id="btnRe">再来一局</button></div>
+</div>
+</div>
+<script>
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var COL=8;
+var state="ready",tG=0;
+var scrollD,speed,depth,score;
+var px,keyL,keyR,ptrX,ledges,jellies,nextLedD,nextJelD;
+var best=0;
+function loadBest(k){try{var v=localStorage.getItem(k);return v?(parseInt(v,10)||0):0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+best=loadBest("mg899best");
+$("best").textContent=best;
+
+function centerAt(d){
+  return W/2+Math.sin(d*0.0042)*90+Math.sin(d*0.0117+1.3)*44;
+}
+function gapAt(d){
+  return Math.max(112,178-d*0.005);
+}
+function leftAt(d){return centerAt(d)-gapAt(d)/2;}
+function rightAt(d){return centerAt(d)+gapAt(d)/2;}
+function reset(){
+  scrollD=0;depth=0;score=0;
+  px=W/2;keyL=false;keyR=false;ptrX=null;
+  ledges=[];jellies=[];nextLedD=700;nextJelD=520;
+  updHud();
+}
+function pD(){return scrollD+150;}
+function updHud(){$("score").textContent=score;}
+function update(dt){
+  var fall=150+Math.min(240,scrollD*0.012);
+  scrollD+=fall*dt;
+  depth=scrollD/10;
+  score=Math.floor(depth);
+  while(nextLedD<scrollD+H+120)spawnLed();
+  while(nextJelD<scrollD+H+120)spawnJel();
+  var i;
+  for(i=ledges.length-1;i>=0;i--)if(ledges[i].d<scrollD-80)ledges.splice(i,1);
+  for(i=jellies.length-1;i>=0;i--){
+    var jl=jellies[i];
+    jl.d-=45*dt;
+    if(jl.d<scrollD-80){jellies.splice(i,1);continue;}
+  }
+  var kd=(keyL?-1:0)+(keyR?1:0);
+  if(kd!==0)px+=kd*270*dt;
+  else if(ptrX!==null)px+=(ptrX-px)*Math.min(1,6*dt);
+  if(px<24)px=24;
+  if(px>W-24)px=W-24;
+  var d=pD();
+  if(px-11<leftAt(d)||px+11>rightAt(d)){die("撞上了深渊岩壁!");return;}
+  for(i=0;i<ledges.length;i++){
+    var le=ledges[i];
+    if(Math.abs(le.d-d)<15){
+      var wX;
+      if(le.side==="L"){
+        wX=leftAt(le.d);
+        if(px+11>wX&&px-11<wX+le.len){die("撞上了石梁!");return;}
+      }else{
+        wX=rightAt(le.d);
+        if(px-11<wX&&px+11>wX-le.len){die("撞上了石梁!");return;}
+      }
+    }
+  }
+  for(i=0;i<jellies.length;i++){
+    var je=jellies[i];
+    var jy=150+(je.d-d);
+    var dx=je.x-px,dy=jy-150;
+    if(dx*dx+dy*dy<576){die("缠上了深渊水母!");return;}
+  }
+  updHud();
+}
+function spawnLed(){
+  var side=Math.random()<0.5?"L":"R";
+  ledges.push({d:nextLedD,side:side,len:60+Math.random()*70});
+  nextLedD+=260+Math.random()*220;
+}
+function spawnJel(){
+  var cL=leftAt(nextJelD),cR=rightAt(nextJelD);
+  var x=cL+40+Math.random()*Math.max(10,(cR-cL-80));
+  jellies.push({d:nextJelD,x:x,ph:Math.random()*6.28});
+  nextJelD+=300+Math.random()*260;
+}
+function die(msg){
+  if(state!=="play")return;
+  state="over";
+  if(score>best){best=score;saveBest("mg899best",best);$("best").textContent=best;}
+  $("ovInfo").textContent=msg+" 本次下潜 "+score+" m,最佳 "+best+" m";
+  $("ovOver").classList.remove("hidden");
+}
+function start(){reset();state="play";$("ovStart").classList.add("hidden");$("ovOver").classList.add("hidden");keyL=false;keyR=false;ptrX=null;}
+$("btnStart").addEventListener("click",function(){start();});
+$("btnRe").addEventListener("click",function(){start();});
+cv.addEventListener("mousemove",function(e){
+  var r=cv.getBoundingClientRect();
+  ptrX=(e.clientX-r.left)/r.width*W;
+});
+cv.addEventListener("mousedown",function(e){
+  e.preventDefault();
+  if(state==="ready"){start();return;}
+  var r=cv.getBoundingClientRect();
+  ptrX=(e.clientX-r.left)/r.width*W;
+});
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  if(state==="ready"){start();return;}
+  var r=cv.getBoundingClientRect();
+  ptrX=(e.touches[0].clientX-r.left)/r.width*W;
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect();
+  ptrX=(e.touches[0].clientX-r.left)/r.width*W;
+},{passive:false});
+window.addEventListener("keydown",function(e){
+  if(state==="ready"&&(e.code==="ArrowLeft"||e.code==="ArrowRight"||e.code==="KeyA"||e.code==="KeyD")){start();}
+  if(e.code==="ArrowLeft"||e.code==="KeyA"){e.preventDefault();keyL=true;}
+  if(e.code==="ArrowRight"||e.code==="KeyD"){e.preventDefault();keyR=true;}
+});
+window.addEventListener("keyup",function(e){
+  if(e.code==="ArrowLeft"||e.code==="KeyA")keyL=false;
+  if(e.code==="ArrowRight"||e.code==="KeyD")keyR=false;
+});
+window.addEventListener("blur",function(){keyL=false;keyR=false;});
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  var dt=Math.min(0.033,((t-lastT)/1000)||0);lastT=t;
+  tG+=dt;
+  if(state==="play")update(dt);
+  draw();
+}
+function yOf(d){return 150+(d-pD());}
+function drawBg(){
+  var bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,"#0a1524");bg.addColorStop(1,"#05080f");
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+}
+function drawWalls(){
+  ctx.fillStyle="#1c2a44";
+  ctx.beginPath();
+  var first=true;
+  for(var d=scrollD-40;d<scrollD+H+40;d+=COL){
+    var y=yOf(d);
+    if(first){ctx.moveTo(0,y);ctx.lineTo(leftAt(d),y);first=false;}
+    else ctx.lineTo(leftAt(d),y);
+  }
+  ctx.lineTo(0,yOf(scrollD+H+40));ctx.closePath();ctx.fill();
+  ctx.beginPath();first=true;
+  for(var d2=scrollD-40;d2<scrollD+H+40;d2+=COL){
+    var y2=yOf(d2);
+    if(first){ctx.moveTo(W,y2);ctx.lineTo(rightAt(d2),y2);first=false;}
+    else ctx.lineTo(rightAt(d2),y2);
+  }
+  ctx.lineTo(W,yOf(scrollD+H+40));ctx.closePath();ctx.fill();
+  ctx.strokeStyle="#4f7ea8";ctx.lineWidth=3;
+  ctx.beginPath();first=true;
+  for(var d3=scrollD-40;d3<scrollD+H+40;d3+=COL){
+    var y3=yOf(d3);
+    if(first){ctx.moveTo(leftAt(d3),y3);first=false;}
+    else ctx.lineTo(leftAt(d3),y3);
+  }
+  ctx.stroke();
+  ctx.beginPath();first=true;
+  for(var d4=scrollD-40;d4<scrollD+H+40;d4+=COL){
+    var y4=yOf(d4);
+    if(first){ctx.moveTo(rightAt(d4),y4);first=false;}
+    else ctx.lineTo(rightAt(d4),y4);
+  }
+  ctx.stroke();
+  ctx.fillStyle="#2b3c5c";
+  for(var i=0;i<ledges.length;i++){
+    var le=ledges[i];
+    var ly=yOf(le.d);
+    if(ly<-30||ly>H+30)continue;
+    if(le.side==="L")ctx.fillRect(leftAt(le.d),ly-8,le.len,16);
+    else ctx.fillRect(rightAt(le.d)-le.len,ly-8,le.len,16);
+  }
+}
+function drawJellies(){
+  for(var i=0;i<jellies.length;i++){
+    var je=jellies[i];
+    var jy=yOf(je.d);
+    if(jy<-30||jy>H+30)continue;
+    var sway=Math.sin(tG*3+je.ph)*4;
+    ctx.fillStyle="rgba(255,143,171,0.85)";
+    ctx.beginPath();ctx.arc(je.x+sway*0.3,jy,10,Math.PI,0);ctx.fill();
+    ctx.strokeStyle="rgba(255,143,171,0.6)";ctx.lineWidth=1.5;
+    for(var t2=-1;t2<=1;t2++){
+      ctx.beginPath();
+      ctx.moveTo(je.x+t2*6+sway*0.3,jy);
+      ctx.quadraticCurveTo(je.x+t2*6-sway,jy+8,je.x+t2*6+sway,jy+16);
+      ctx.stroke();
+    }
+  }
+}
+function drawShip(){
+  ctx.save();ctx.translate(px,150);
+  ctx.fillStyle="rgba(143,211,255,0.5)";
+  ctx.beginPath();ctx.moveTo(-6,12);ctx.lineTo(0,20);ctx.lineTo(6,12);ctx.fill();
+  var g=ctx.createLinearGradient(0,-9,0,9);
+  g.addColorStop(0,"#dff3ff");g.addColorStop(1,"#4aa3d8");
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(0,-12);ctx.lineTo(8,0);ctx.lineTo(4,10);ctx.lineTo(-4,10);ctx.lineTo(-8,0);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle="#ffd166";
+  ctx.beginPath();ctx.arc(0,0,3,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="rgba(143,211,255,0.8)";
+  ctx.font="bold 12px system-ui,sans-serif";
+  ctx.textAlign="left";
+  ctx.fillText("深度 "+score+" m",10,H-12);
+}
+function drawDark(){
+  var a=Math.min(0.62,scrollD*0.00003);
+  if(a<=0.01)return;
+  var g=ctx.createRadialGradient(px,150,90,px,150,240);
+  g.addColorStop(0,"rgba(4,5,12,0)");
+  g.addColorStop(1,"rgba(4,5,12,"+a+")");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+}
+function draw(){
+  drawBg();
+  drawWalls();
+  drawJellies();
+  drawShip();
+  drawDark();
+}
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

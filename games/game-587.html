@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拼写纠错官</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#hud .hp{color:#ff6b8a}
+.card{background:#151a30;border-radius:14px;padding:18px;text-align:center}
+#mode{font-size:13px;color:#8ecae6;margin-bottom:12px;min-height:18px}
+#letters{display:flex;justify-content:center;gap:6px;min-height:66px;margin-bottom:16px;flex-wrap:wrap}
+.chip{width:50px;height:60px;border-radius:10px;background:#232a4d;color:#fff;font-size:30px;font-weight:bold;font-family:Consolas,monospace;display:flex;align-items:center;justify-content:center}
+.chip.pick{cursor:pointer}
+.chip.pick:active{transform:scale(.94)}
+.chip.bad{background:#ff6b8a;color:#1a1d33}
+.chip.good{background:#2ec27e;color:#08131c}
+.btns{display:flex;gap:12px;justify-content:center}
+.btns button{padding:10px 26px;font-size:15px;border:none;border-radius:999px;cursor:pointer;font-family:inherit;font-weight:bold}
+#right{background:#2ec27e;color:#08131c}
+#wrong{background:#ff6b8a;color:#1a1d33}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>拼写纠错官</h1>
+<p id="tip">屏幕上出现一个英文单词,可能被偷换了一个字母 · 先判断有没有错,若有错还要点出那个错字 · 共 20 题,判错 3 次失败</p>
+<div id="wrap">
+<div id="hud"><span>题号 <b id="prog">1</b>/20</span><span>得分 <b id="score">0</b></span><span class="hp" id="hp">♥♥♥</span></div>
+<div class="card">
+<div id="mode">这个单词拼写正确吗?</div>
+<div id="letters"></div>
+<div class="btns">
+<button id="right">拼写正确</button>
+<button id="wrong">有拼写错误</button>
+</div>
+</div>
+<div id="ov"><h2 id="ovT">拼写纠错官</h2><p id="ovP">一半的单词被偷偷换掉了一个字母
+先判断对错 再点出错误的字母
+判对 +10 抓出错字再 +15</p><button id="ovB">开始纠错</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  ["apple","苹果"],["bread","面包"],["chair","椅子"],["cloud","云"],["dance","跳舞"],
+  ["dream","梦想"],["eagle","老鹰"],["field","田野"],["grape","葡萄"],["heart","心脏"],
+  ["juice","果汁"],["light","光"],["money","钱"],["night","夜晚"],["ocean","海洋"],
+  ["piano","钢琴"],["queen","女王"],["river","河流"],["snake","蛇"],["sugar","糖"],
+  ["table","桌子"],["voice","声音"],["whale","鲸鱼"],["zebra","斑马"],["beach","海滩"],
+  ["clock","时钟"],["lemon","柠檬"],["mouse","老鼠"],["plant","植物"],["storm","风暴"],
+  ["tiger","老虎"],["water","水"],["smile","微笑"],["bread","面包"],["house","房子"]
+];
+var TOTALQ = 20;
+var progEl = document.getElementById("prog");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var modeEl = document.getElementById("mode");
+var lettersEl = document.getElementById("letters");
+var rightBtn = document.getElementById("right");
+var wrongBtn = document.getElementById("wrong");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var qNum = 0, score = 0, hp = 3, playing = false;
+var cur = null;
+
+function makeQ() {
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  var w = pick[0];
+  var broken = Math.random() < 0.55;
+  var shown = w.split("");
+  var badIdx = -1;
+  if (broken) {
+    var bag = "abcdefghijklmnoprstuvwyz";
+    var pos = Math.floor(Math.random() * w.length);
+    var ch = w[pos];
+    while (ch === w[pos]) ch = bag[Math.floor(Math.random() * bag.length)];
+    shown[pos] = ch;
+    badIdx = pos;
+  }
+  cur = { word: w, zh: pick[1], broken: broken, badIdx: badIdx, shown: shown, phase: "judge" };
+  modeEl.textContent = "这个单词拼写正确吗?";
+  render();
+}
+
+function render() {
+  lettersEl.innerHTML = "";
+  for (var i = 0; i < cur.shown.length; i++) {
+    (function (idx) {
+      var d = document.createElement("div");
+      d.className = "chip";
+      if (cur.phase === "find") d.classList.add("pick");
+      d.textContent = cur.shown[idx].toUpperCase();
+      d.onclick = function () { tapChip(idx, d); };
+      lettersEl.appendChild(d);
+    })(i);
+  }
+}
+
+function tapChip(idx, el) {
+  if (!playing || cur.phase !== "find") return;
+  if (idx === cur.badIdx) {
+    el.classList.add("good");
+    score += 15;
+    scoreEl.textContent = score;
+    modeEl.textContent = "抓到了!正确拼法:" + cur.word.toUpperCase();
+    cur.phase = "wait";
+    setTimeout(next, 1100);
+  } else {
+    el.classList.add("bad");
+    loseHp("点错字母了");
+  }
+}
+
+function loseHp(msg) {
+  hp--;
+  hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+  if (hp <= 0) {
+    playing = false;
+    ovT.textContent = "纠错失败";
+    ovP.textContent = "进行到第 " + (qNum + 1) + " 题\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  modeEl.textContent = msg + " -1 心";
+}
+
+function judge(said) {
+  if (!playing || cur.phase !== "judge") return;
+  if (said === cur.broken) {
+    if (cur.broken) {
+      cur.phase = "find";
+      modeEl.textContent = "眼光不错!点击拼错的那个字母";
+      render();
+    } else {
+      score += 10;
+      scoreEl.textContent = score;
+      modeEl.textContent = "正确!这个词没有错";
+      cur.phase = "wait";
+      setTimeout(next, 700);
+    }
+  } else {
+    loseHp(said ? "其实没错" : "其实有错");
+    if (playing) {
+      modeEl.textContent += " · 正确拼法:" + cur.word.toUpperCase();
+      cur.phase = "wait";
+      setTimeout(next, 1400);
+    }
+  }
+}
+
+function next() {
+  qNum++;
+  if (qNum >= TOTALQ) {
+    playing = false;
+    ovT.textContent = "纠错完成!";
+    ovP.textContent = "20 题全部完成\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  progEl.textContent = qNum + 1;
+  makeQ();
+}
+
+function start() {
+  qNum = 0; score = 0; hp = 3;
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  progEl.textContent = "1";
+  playing = true;
+  ov.classList.add("hide");
+  makeQ();
+}
+
+rightBtn.onclick = function () { judge(false); };
+wrongBtn.onclick = function () { judge(true); };
+ovB.onclick = start;
+</script>
+</body>
+</html>

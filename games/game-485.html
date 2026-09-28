@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>头顶苹果</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ef5350;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ef5350;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ef5350}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ef5350;color:#3d0a0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>头顶苹果</h1>
+  <p class="hint">只许射苹果 · 射到人扣一条命 · 三条命内冲 120 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>生命 <b id="lv">3</b></span>
+    <span>目标 <b>120</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">头顶苹果</h2>
+      <p id="ovD">三位志愿者顶着苹果站成一排,箭要贴着他们的头皮飞过去。射中苹果得分,苹果越小分越高;手一抖射到人,就扣一条命,三条命用完立即收弓。稳、准、更要克制。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">开始表演</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elLv=$("lv"),elMsg=$("msg");
+const OX=240,OY=545,GROUND=470,GOAL=120;
+let state="menu",score=0,lives=3,tp=0,flashT=0;
+let mouse={x:240,y:300},flies=[],pops=[],men=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function makeMen(){
+  men=[];
+  const xs=[120,240,360];
+  for(let i=0;i<3;i++)men.push({x:xs[i],r:16,dizzy:0,respT:0,ph:Math.random()*6.28});
+}
+function appleY(m){return 375;}
+function fire(){
+  if(state!=="play")return;
+  flies.push({x0:OX,y0:OY,x1:mouse.x,y1:mouse.y,t:0,dur:0.18});
+}
+function burst(x,y,col){
+  for(let i=0;i<12;i++){
+    const a=Math.random()*6.28,s=60+Math.random()*150;
+    pops.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.55,c:col});
+  }
+}
+function resolve(f){
+  const lx=f.x1,ly=f.y1;
+  let done=false;
+  for(let i=0;i<3;i++){
+    const m=men[i];
+    if(m.respT<=0&&Math.hypot(lx-m.x,ly-appleY(m))<m.r+4){
+      const gain=15+Math.floor((16-m.r)*1.5);
+      score+=gain;
+      elMsg.textContent="好箭法!苹果 +"+gain;
+      burst(m.x,appleY(m),"#ef5350");
+      m.dizzy=1.2;m.respT=1.0;
+      m.r=Math.max(9,m.r*0.88);
+      done=true;
+      break;
+    }
+  }
+  if(!done){
+    for(let i=0;i<3;i++){
+      const m=men[i];
+      const inHead=Math.hypot(lx-m.x,ly-400)<16;
+      const inBody=lx>m.x-14&&lx<m.x+14&&ly>410&&ly<468;
+      if(inHead||inBody){
+        lives--;flashT=0.5;
+        elMsg.textContent="射到人了!扣除一条命";
+        burst(m.x,410,"#ffcdd2");
+        elLv.textContent=Math.max(0,lives);
+        done=true;
+        if(lives<=0)finish();
+        break;
+      }
+    }
+  }
+  if(!done){
+    elMsg.textContent="箭钉在了地上";
+    burst(lx,Math.min(ly,GROUND),"#a1887f");
+  }
+  elSc.textContent=score;
+}
+function startGame(){
+  score=0;lives=3;tp=0;flashT=0;
+  flies=[];pops=[];makeMen();
+  elMsg.textContent="";elSc.textContent="0";elLv.textContent="3";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"百发百中!":"表演收场";
+  ovT.style.color=win?"#ef5350":"#ef9a9a";
+  ovD.textContent=win?"苹果一个个应声而落,人却毫发无伤,满场喝彩。":"这一场惊险有余、准头不足。记住:苹果在头顶,箭道要更高。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    if(flashT>0)flashT-=dt;
+    for(let i=0;i<3;i++){
+      const m=men[i];
+      if(m.dizzy>0)m.dizzy-=dt;
+      if(m.respT>0){
+        m.respT-=dt;
+        if(m.respT<=0)m.dizzy=0;
+      }
+    }
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];f.t+=dt/f.dur;
+      if(f.t>=1){resolve(f);flies.splice(i,1);}
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=280*dt;
+    }
+  }
+  draw();
+}
+function drawMan(m){
+  const wob=m.dizzy>0?Math.sin(tp*14)*3:0;
+  const bx=m.x+wob;
+  ctx.fillStyle="#37474f";
+  ctx.fillRect(m.x-26,GROUND-4,52,8);
+  ctx.fillStyle="#546e7a";
+  ctx.fillRect(bx-11,413,22,52);
+  ctx.fillStyle="#ffcc80";
+  ctx.beginPath();ctx.arc(bx,400,13,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#455a64";
+  ctx.beginPath();ctx.arc(bx,395,13,Math.PI,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#263238";
+  ctx.fillRect(bx-2,413,4,18);
+  ctx.fillRect(bx-8,431,6,34);
+  ctx.fillRect(bx+2,431,6,34);
+  if(m.dizzy>0){
+    ctx.fillStyle="#ffee58";
+    for(let k=0;k<3;k++){
+      const a=tp*6+k*2.1;
+      ctx.beginPath();ctx.arc(bx+Math.cos(a)*20,380+Math.sin(a)*8,2.5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  if(m.respT<=0){
+    const ay=appleY(m);
+    ctx.fillStyle="#c62828";
+    ctx.beginPath();ctx.arc(m.x,ay,m.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.35)";
+    ctx.beginPath();ctx.arc(m.x-m.r*0.3,ay-m.r*0.3,m.r*0.28,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#33691e";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(m.x,ay-m.r);ctx.quadraticCurveTo(m.x+5,ay-m.r-7,m.x+9,ay-m.r-5);ctx.stroke();
+  }else{
+    ctx.fillStyle="#8b90b0";ctx.font="12px system-ui";ctx.textAlign="center";
+    ctx.fillText("苹果准备中…",m.x,370);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2a2038");g.addColorStop(1,"#171326");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#2e4a2f";ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#3a5c3b";ctx.fillRect(0,GROUND,W,5);
+  for(let i=0;i<3;i++)drawMan(men[i]);
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.55);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(OX,OY+6,14,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i],e=Math.min(1,f.t);
+    const px=f.x0+(f.x1-f.x0)*e,py=f.y0+(f.y1-f.y0)*e;
+    const ang=Math.atan2(f.y1-f.y0,f.x1-f.x0);
+    ctx.save();ctx.translate(px,py);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.restore();
+  }
+  if(flashT>0){
+    ctx.fillStyle="rgba(239,83,80,"+(flashT*0.7)+")";
+    ctx.fillRect(0,0,W,H);
+  }
+  if(state==="play"){
+    ctx.strokeStyle="#ef5350";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+}
+makeMen();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

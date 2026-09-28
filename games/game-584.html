@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词海寻踪</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,480px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#main{display:flex;gap:10px}
+#grid{display:grid;grid-template-columns:repeat(10,1fr);gap:2px;background:#151a30;border-radius:12px;padding:8px;flex:1}
+.cell{aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:bold;font-family:Consolas,monospace;background:#1a2040;border-radius:5px;cursor:pointer;color:#c3c9e8;user-select:none}
+.cell.sel{background:#4cc9f0;color:#08131c}
+.cell.f0{background:#2ec27e;color:#08131c}
+.cell.f1{background:#ffd166;color:#1a1d33}
+.cell.f2{background:#b388ff;color:#1a1d33}
+.cell.f3{background:#ff9f43;color:#1a1d33}
+.cell.f4{background:#f06292;color:#1a1d33}
+.cell.f5{background:#4dd0e1;color:#08131c}
+.cell.f6{background:#aed581;color:#1a1d33}
+.cell.f7{background:#ff8a65;color:#1a1d33}
+#list{width:104px;background:#151a30;border-radius:12px;padding:10px 8px;font-size:12px;font-family:Consolas,monospace}
+#list div{padding:3px 2px;color:#c3c9e8}
+#list div.done{color:#5a6189;text-decoration:line-through}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>词海寻踪</h1>
+<p id="tip">在字母网格里找出右侧隐藏的 8 个单词 · 点击起点和终点(横 竖 斜均可) · 找齐全部即胜,限时 180 秒</p>
+<div id="wrap">
+<div id="hud"><span>已找到 <b id="cnt">0</b>/<b id="tot">8</b></span><span>剩余 <b id="time">180</b> 秒</span></div>
+<div id="main">
+<div id="grid"></div>
+<div id="list"></div>
+</div>
+<div id="ov"><h2 id="ovT">词海寻踪</h2><p id="ovP">字母海里藏着 8 个单词
+先点起点再点终点选中一条直线
+横 竖 斜 都可以 找齐即胜</p><button id="ovB">开始寻词</button></div>
+</div>
+<script>
+"use strict";
+var POOL = ["APPLE", "TIGER", "OCEAN", "BREAD", "CLOUD", "HEART", "LEMON", "PIANO", "STORM", "WHALE", "ZEBRA", "SUGAR"];
+var N = 10, TOTAL = 180;
+var DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+var gridEl = document.getElementById("grid");
+var listEl = document.getElementById("list");
+var cntEl = document.getElementById("cnt");
+var timeEl = document.getElementById("time");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var letters = [], placed = [], foundCount = 0;
+var selStart = null, playing = false, timeLeft = TOTAL, lastTs = 0, rafId = 0;
+
+function rndLetter() {
+  return "EEEEAAAARRIIOOTNSLCUDPMHGBF"[Math.floor(Math.random() * 28)];
+}
+
+function build() {
+  letters = [];
+  var words = POOL.slice();
+  placed = [];
+  var tries = 0;
+  while (placed.length < 8 && words.length > 0 && tries < 200) {
+    tries++;
+    var wi = Math.floor(Math.random() * words.length);
+    var w = words[wi];
+    var d = DIRS[Math.floor(Math.random() * 4)];
+    var r0 = Math.floor(Math.random() * N);
+    var c0 = Math.floor(Math.random() * N);
+    var r1 = r0 + d[0] * (w.length - 1);
+    var c1 = c0 + d[1] * (w.length - 1);
+    if (r1 < 0 || r1 >= N || c1 < 0 || c1 >= N) continue;
+    var ok = true;
+    for (var k = 0; k < w.length; k++) {
+      var lr = r0 + d[0] * k, lc = c0 + d[1] * k;
+      if (letters[lr] && letters[lr][lc] && letters[lr][lc] !== w[k]) { ok = false; break; }
+    }
+    if (!ok) continue;
+    for (var k2 = 0; k2 < w.length; k2++) {
+      var lr2 = r0 + d[0] * k2, lc2 = c0 + d[1] * k2;
+      if (!letters[lr2]) letters[lr2] = [];
+      letters[lr2][lc2] = w[k2];
+    }
+    placed.push({ w: w, r0: r0, c0: c0, d: d });
+    words.splice(wi, 1);
+  }
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      if (!letters[r][c]) letters[r][c] = rndLetter();
+    }
+  }
+}
+
+function render() {
+  gridEl.innerHTML = "";
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      (function (rr, cc) {
+        var d = document.createElement("div");
+        d.className = "cell";
+        d.textContent = letters[rr][cc];
+        d.onclick = function () { tap(rr, cc, d); };
+        gridEl.appendChild(d);
+      })(r, c);
+    }
+  }
+  listEl.innerHTML = "";
+  for (var i = 0; i < placed.length; i++) {
+    var li = document.createElement("div");
+    li.textContent = placed[i].w;
+    if (placed[i].done) li.className = "done";
+    listEl.appendChild(li);
+  }
+}
+
+function cellsOnLine(r0, c0, r1, c1) {
+  var dr = r1 - r0, dc = c1 - c0;
+  if (dr === 0 && dc === 0) return [r0 * N + c0];
+  if (dr !== 0 && dc !== 0 && Math.abs(dr) !== Math.abs(dc)) return null;
+  var len = Math.max(Math.abs(dr), Math.abs(dc));
+  var sr = dr / len, sc = dc / len;
+  var out = [];
+  for (var k = 0; k <= len; k++) out.push((r0 + sr * k) * N + (c0 + sc * k));
+  return out;
+}
+
+function tap(r, c, el) {
+  if (!playing) return;
+  if (!selStart) {
+    selStart = { r: r, c: c, el: el };
+    el.classList.add("sel");
+    return;
+  }
+  if (selStart.r === r && selStart.c === c) {
+    selStart.el.classList.remove("sel");
+    selStart = null;
+    return;
+  }
+  var idxs = cellsOnLine(selStart.r, selStart.c, r, c);
+  selStart.el.classList.remove("sel");
+  selStart = null;
+  if (!idxs) return;
+  var s = "";
+  for (var i = 0; i < idxs.length; i++) {
+    s += letters[Math.floor(idxs[i] / N)][idxs[i] % N];
+  }
+  var rev = s.split("").reverse().join("");
+  for (var p = 0; p < placed.length; p++) {
+    if (!placed[p].done && (placed[p].w === s || placed[p].w === rev)) {
+      placed[p].done = true;
+      foundCount++;
+      for (var j = 0; j < idxs.length; j++) {
+        gridEl.children[idxs[j]].className = "cell f" + (p % 8);
+      }
+      cntEl.textContent = foundCount;
+      render();
+      if (foundCount === placed.length) {
+        playing = false;
+        cancelAnimationFrame(rafId);
+        ovT.textContent = "全部找到!";
+        ovP.textContent = "用时 " + Math.round(TOTAL - timeLeft) + " 秒\n眼力惊人";
+        ovB.textContent = "再来一局";
+        ov.classList.remove("hide");
+      }
+      return;
+    }
+  }
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    playing = false;
+    ovT.textContent = "时间到";
+    ovP.textContent = "找到 " + foundCount + " / " + placed.length + " 个单词";
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  rafId = requestAnimationFrame(loop);
+}
+
+function start() {
+  foundCount = 0; selStart = null; timeLeft = TOTAL; lastTs = 0;
+  cntEl.textContent = "0";
+  build();
+  document.getElementById("tot").textContent = placed.length;
+  render();
+  playing = true;
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+ovB.onclick = start;
+</script>
+</body>
+</html>

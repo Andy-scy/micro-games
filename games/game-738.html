@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>匀速巡游</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#fbbf24;font-size:16px}
+.gbtn{background:#3d3417;color:#fde68a;border:1px solid #fbbf24;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit;user-select:none}
+.gbtn:active{background:#fbbf24;color:#3a2503}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>匀速巡游</h1>
+  <p class="hint">← → 变道 · ↑↓ 控制车速(别超 180!)· 触屏点左右半屏 · 空格开始</p>
+  <div class="hud">
+    <span>速度 <b id="spd">0</b> km/h</span>
+    <span>罚单 <b id="fines">○○○</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+    <button class="gbtn" id="btnUp">油门(按住)</button>
+    <button class="gbtn" id="btnDown">刹车(按住)</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="440" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">匀速巡游</h2>
+      <p id="ovDesc">这次不比快,比稳!沿途测速摄像头专拍超速:超过 180 km/h 被拍吃罚单,三张吊销执照;守规矩每秒还能攒安全分。躲开车流,平稳巡游 1200 米!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">出发巡游</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elSpd=$("spd"),elFines=$("fines"),elScore=$("score"),elBest=$("best");
+var btnUp=$("btnUp"),btnDown=$("btnDown");
+var LANES=[88,220,352],CARY=H-130,LIMIT=360;
+var COLORS=["#e05252","#5297e0","#7ed957","#c07ee0","#e0a052"];
+var state="menu",best=0;
+try{best=parseInt(localStorage.getItem("mg_738")||"0",10)||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg_738",String(best));}catch(e){}}
+var lane,px,cars,cams,dist,v,score,fines,safeT,nextCamW,spawnT,keys,touchBtn,floats,flashRed;
+function reset(){
+  lane=1;px=LANES[1];cars=[];cams=[];dist=0;v=300;score=0;fines=0;safeT=0;
+  nextCamW=1100;spawnT=1;keys={};touchBtn=0;floats=[];flashRed=0;
+  elSpd.textContent="0";elFines.textContent="○○○";elScore.textContent="0";elBest.textContent=best;
+}
+function addFloat(txt,c){floats.push({x:px,y:CARY-90,txt:txt,c:c,t:1.3});}
+function endGame(title,win){
+  state="over";
+  if(score>best){best=score;saveBest();elBest.textContent=best;}
+  ovTitle.textContent=title;
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=win?"平稳驾驶,旅途愉快!":"看到限速牌就提前收油,别到摄像头跟前才踩刹车。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 距离 "+Math.floor(dist/30)+" m · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");ovTitle.style.color="#fbbf24";}
+function update(dt){
+  var i,tv;
+  tv=300;
+  if(keys.up||touchBtn===1)tv=560;
+  else if(keys.down||touchBtn===-1)tv=140;
+  v+=(tv-v)*Math.min(1,dt*(keys.up||keys.down||touchBtn!==0?2:0.8));
+  px+=(LANES[lane]-px)*Math.min(1,dt*10);
+  dist+=v*dt;
+  if(v<=LIMIT+6)safeT+=dt;
+  score=Math.floor(dist/30)+Math.floor(safeT*10);
+  elSpd.textContent=Math.round(v*0.5);
+  elScore.textContent=score;
+  while(nextCamW<dist+900){
+    cams.push({w:nextCamW,done:false});
+    nextCamW+=1300;
+  }
+  for(i=cams.length-1;i>=0;i--){
+    var cam=cams[i];
+    if(cam.w<dist-200){cams.splice(i,1);continue;}
+    if(!cam.done&&cam.w<=dist){
+      cam.done=true;
+      if(v>LIMIT+6){
+        fines++;
+        elFines.textContent=fines===1?"●○○":(fines===2?"●●○":"●●●");
+        addFloat("超速被拍!罚单 +1","#f87171");
+        flashRed=0.8;
+        if(fines>=3){endGame("罚单满天飞,吊销执照!",false);return;}
+      }else{
+        addFloat("测速通过","#4ade80");
+      }
+    }
+  }
+  spawnT-=dt;
+  if(spawnT<=0){
+    spawnT=0.85+Math.random()*0.6;
+    var ln=(Math.random()*3)|0;
+    cars.push({lane:ln,x:LANES[ln],y:-90,color:COLORS[(Math.random()*COLORS.length)|0]});
+  }
+  for(i=cars.length-1;i>=0;i--){
+    var c=cars[i];
+    c.x=LANES[c.lane];
+    c.y+=v*0.55*dt;
+    if(c.y>H+140){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<38&&Math.abs(c.y-CARY)<66){endGame("追尾了!巡游结束",false);return;}
+  }
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].t-=dt;floats[i].y-=dt*44;
+    if(floats[i].t<=0)floats.splice(i,1);
+  }
+  flashRed=Math.max(0,flashRed-dt);
+  if(dist>=36000){endGame("巡游完成!",true);return;}
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawCar(x,y,body){
+  rr(x-21,y-35,42,70,8);ctx.fillStyle=body;ctx.fill();
+  rr(x-13,y-24,26,22,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(10,12,22,0.9)";
+  ctx.fillRect(x-25,y-28,5,14);ctx.fillRect(x+20,y-28,5,14);
+  ctx.fillRect(x-25,y+14,5,14);ctx.fillRect(x+20,y+14,5,14);
+}
+function draw(){
+  var i,sy;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#12182a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#232742";ctx.fillRect(20,0,400,H);
+  var dash=(dist*1.4)%64;
+  ctx.fillStyle="#f6d35c";
+  for(i=-1;i<H/64+2;i++){ctx.fillRect(151,i*64+dash-64,5,34);ctx.fillRect(284,i*64+dash-64,5,34);}
+  for(i=0;i<cams.length;i++){
+    var cam=cams[i];
+    sy=CARY-(cam.w-dist);
+    var sgx=404;
+    var sysg=CARY-(cam.w-400-dist);
+    if(sysg>-40&&sysg<H+40){
+      ctx.fillStyle="#e8eaf6";ctx.beginPath();ctx.arc(sgx,sysg,17,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle="#f87171";ctx.lineWidth=5;
+      ctx.beginPath();ctx.arc(sgx,sysg,13,0,Math.PI*2);ctx.stroke();ctx.lineWidth=1;
+      ctx.fillStyle="#20243e";ctx.font="bold 11px system-ui";ctx.textAlign="center";
+      ctx.fillText("180",sgx,sysg+4);
+    }
+    if(sy>-40&&sy<H+40){
+      ctx.fillStyle="#565f82";ctx.fillRect(sgx-3,sy-40,6,52);
+      ctx.fillStyle="#20243e";rr(sgx-13,sy-58,26,20,4);ctx.fill();
+      ctx.fillStyle=flashRed>0.4?"#f87171":"#22d3ee";ctx.beginPath();ctx.arc(sgx,sy-48,5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#c7cbe8";ctx.fillRect(sgx-16,sy+10,32,5);
+    }
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].color);
+  drawCar(px,CARY,"#fbbf24");
+  ctx.fillStyle="rgba(11,14,26,0.85)";rr(112,10,216,26,8);ctx.fill();
+  ctx.strokeStyle="#3a3f5c";ctx.strokeRect(112,10,216,26);
+  var fw=Math.min(1,v/640)*210;
+  ctx.fillStyle=v>LIMIT+6?"#f87171":"#4ade80";ctx.fillRect(115,13,fw,20);
+  ctx.fillStyle="#e8eaf6";
+  ctx.fillRect(115+LIMIT/640*210,8,3,30);
+  ctx.font="bold 12px system-ui";ctx.textAlign="center";
+  ctx.fillText(Math.round(v*0.5)+" km/h",220,28);
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].t);
+    ctx.fillStyle=floats[i].c;ctx.font="bold 16px system-ui";ctx.textAlign="center";
+    ctx.fillText(floats[i].txt,floats[i].x,floats[i].y);
+  }
+  ctx.globalAlpha=1;
+  if(flashRed>0){
+    ctx.strokeStyle="rgba(248,113,113,"+flashRed+")";ctx.lineWidth=6;
+    ctx.strokeRect(3,3,W-6,H-6);ctx.lineWidth=1;
+  }
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();if(lane>0)lane--;}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();if(lane<2)lane++;}
+  else if(e.key==="ArrowUp"||e.key==="w"||e.key==="W"){e.preventDefault();keys.up=true;}
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S"){e.preventDefault();keys.down=true;}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowUp"||e.key==="w"||e.key==="W")keys.up=false;
+  if(e.key==="ArrowDown"||e.key==="s"||e.key==="S")keys.down=false;
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var t=e.changedTouches[0],rc=cv.getBoundingClientRect();
+  if(t.clientX-rc.left<rc.width/2){if(lane>0)lane--;}else{if(lane<2)lane++;}
+  e.preventDefault();
+},{passive:false});
+function holdUp(ev){touchBtn=1;if(ev)ev.preventDefault();}
+function holdDown(ev){touchBtn=-1;if(ev)ev.preventDefault();}
+function holdOff(ev){touchBtn=0;if(ev)ev.preventDefault();}
+btnUp.addEventListener("touchstart",holdUp,{passive:false});
+btnUp.addEventListener("touchend",holdOff,{passive:false});
+btnUp.addEventListener("mousedown",holdUp);
+btnUp.addEventListener("mouseup",holdOff);
+btnUp.addEventListener("mouseleave",holdOff);
+btnDown.addEventListener("touchstart",holdDown,{passive:false});
+btnDown.addEventListener("touchend",holdOff,{passive:false});
+btnDown.addEventListener("mousedown",holdDown);
+btnDown.addEventListener("mouseup",holdOff);
+btnDown.addEventListener("mouseleave",holdOff);
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

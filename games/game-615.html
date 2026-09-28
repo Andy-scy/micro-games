@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>和差九宫</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:440px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#60a5fa;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:12px}
+.hud b{color:#60a5fa;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.timebar i{display:block;height:100%;background:#60a5fa;width:100%}
+.big{display:grid;grid-template-columns:repeat(4,64px);grid-auto-rows:56px;gap:6px;justify-content:center}
+.big .cell{background:#0b0e1a;border:2px solid #2a3054;border-radius:10px;font-size:24px;font-weight:800;color:#e8eaf6;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.big .cell.sel{border-color:#60a5fa;color:#60a5fa}
+.big .cell.bad{border-color:#f87171;color:#f87171}
+.big .tgt{background:#1c2138;border-radius:10px;color:#fbbf24;font-size:17px;display:flex;align-items:center;justify-content:center;cursor:default}
+.big .tgt.okv{color:#4ade80}
+.big .corner{background:transparent}
+.pool{display:flex;justify-content:center;gap:8px;margin:14px 0 6px;flex-wrap:wrap}
+.pool button{width:44px;height:44px;background:#232949;color:#e8eaf6;border:none;border-radius:10px;font-size:19px;font-weight:800;cursor:pointer;font-family:inherit}
+.pool button.used{opacity:.18;pointer-events:none}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:6px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.93);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0b1e33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>和差九宫</h1>
+  <p class="hint">把 1~9 各用一次填入九宫格,让每行每列的和等于黄色目标数 · 点击格子再点数字 · 共 3 题</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/3 题</span>
+    <span>时间 <b id="time">90</b>s</span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="big" id="big"></div>
+    <div class="pool" id="pool"></div>
+    <div class="msg" id="msg">先点一个格子,再点下方数字放入</div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">和差九宫</h2>
+      <p id="ovD">九宫格右侧与下方写着目标和。用 1~9 各一次(不能重复),使三行之和、三列之和全部命中目标。实时行和/列和变绿就说明那一条已达标,三行三列全绿即过关!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始解题</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elTime=$("time"),elScore=$("score"),elTbar=$("tbar");
+var big=$("big"),pool=$("pool"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var PUZZLE_MS=90000;
+var state,score,no,timeLeft,grid,used,sel,cellEls,tgtRowEls,tgtColEls,tRow,tCol,locked,lastT;
+
+function shuffle(a){
+  var i,j,t;
+  for(i=a.length-1;i>0;i--){j=(Math.random()*(i+1))|0;t=a[i];a[i]=a[j];a[j]=t;}
+  return a;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function buildUI(){
+  big.innerHTML="";
+  cellEls=[];tgtRowEls=[];tgtColEls=[];
+  var r,c;
+  for(r=0;r<4;r++){
+    for(c=0;c<4;c++){
+      var d=document.createElement("div");
+      if(r<3&&c<3){
+        d.className="cell";
+        d.setAttribute("data-i",r*3+c);
+        d.addEventListener("click",function(ev){
+          cellTap(parseInt(ev.currentTarget.getAttribute("data-i"),10));
+        });
+        cellEls.push(d);
+      }else if(r<3&&c===3){
+        d.className="tgt";
+        tgtRowEls.push(d);
+      }else if(r===3&&c<3){
+        d.className="tgt";
+        tgtColEls.push(d);
+      }else{
+        d.className="corner";
+      }
+      big.appendChild(d);
+    }
+  }
+  pool.innerHTML="";
+  var v;
+  for(v=1;v<=9;v++){
+    var b=document.createElement("button");
+    b.textContent=v;
+    b.setAttribute("data-v",v);
+    b.addEventListener("click",function(ev){
+      numTap(parseInt(ev.currentTarget.getAttribute("data-v"),10));
+    });
+    pool.appendChild(b);
+  }
+}
+function rowSum(r){return grid[r*3]+grid[r*3+1]+grid[r*3+2];}
+function colSum(c){return grid[c]+grid[c+3]+grid[c+6];}
+function newPuzzle(){
+  var sol=shuffle([1,2,3,4,5,6,7,8,9]);
+  tRow=[sol[0]+sol[1]+sol[2],sol[3]+sol[4]+sol[5],sol[6]+sol[7]+sol[8]];
+  tCol=[sol[0]+sol[3]+sol[6],sol[1]+sol[4]+sol[7],sol[2]+sol[5]+sol[8]];
+  grid=[0,0,0,0,0,0,0,0,0];
+  used={};
+  sel=-1;locked=false;
+  timeLeft=PUZZLE_MS;
+  setMsg("先点一个格子,再点下方数字放入","");
+  render();
+}
+function render(){
+  var i,r,c,filled;
+  for(i=0;i<9;i++){
+    cellEls[i].textContent=grid[i]===0?"":grid[i];
+    cellEls[i].className="cell"+(sel===i?" sel":"");
+  }
+  for(r=0;r<3;r++){
+    filled=grid[r*3]>0&&grid[r*3+1]>0&&grid[r*3+2]>0;
+    tgtRowEls[r].textContent=tRow[r]+(filled?" ("+rowSum(r)+")":"");
+    tgtRowEls[r].className="tgt"+(filled&&rowSum(r)===tRow[r]?" okv":"");
+  }
+  for(c=0;c<3;c++){
+    filled=grid[c]>0&&grid[c+3]>0&&grid[c+6]>0;
+    tgtColEls[c].textContent=tCol[c]+(filled?" ("+colSum(c)+")":"");
+    tgtColEls[c].className="tgt"+(filled&&colSum(c)===tCol[c]?" okv":"");
+  }
+  var bs=pool.getElementsByTagName("button");
+  for(i=0;i<bs.length;i++){
+    var v=parseInt(bs[i].getAttribute("data-v"),10);
+    bs[i].className=(used[v]||0)>0?"used":"";
+  }
+}
+function freeCell(i){
+  if(grid[i]>0){
+    used[grid[i]]--;
+    if(used[grid[i]]<=0)delete used[grid[i]];
+    grid[i]=0;
+  }
+}
+function cellTap(i){
+  if(state!=="playing"||locked)return;
+  if(sel===i){
+    freeCell(i);
+    sel=-1;
+    render();
+    return;
+  }
+  sel=i;
+  setMsg("已选格子,点下方数字放入(再点一次取出)","");
+  render();
+}
+function numTap(v){
+  if(state!=="playing"||locked)return;
+  if(sel<0){setMsg("先点一个格子","badc");return;}
+  freeCell(sel);
+  grid[sel]=v;
+  used[v]=(used[v]||0)+1;
+  sel=-1;
+  render();
+  var i,full=true;
+  for(i=0;i<9;i++)if(grid[i]===0)full=false;
+  if(full)checkWin();
+}
+function checkWin(){
+  var r,c;
+  for(r=0;r<3;r++)if(rowSum(r)!==tRow[r])return failAttempt();
+  for(c=0;c<3;c++)if(colSum(c)!==tCol[c])return failAttempt();
+  locked=true;
+  var gain=50+Math.ceil(timeLeft/1000);
+  score+=gain;
+  setMsg("九宫达成!+ "+gain+" 分","good");
+  elScore.textContent=score;
+  no++;
+  if(no>3)setTimeout(gameOverWin,1000);
+  else setTimeout(function(){if(state==="playing")newPuzzle();},1100);
+}
+function failAttempt(){
+  var i;
+  for(i=0;i<9;i++)cellEls[i].classList.add("bad");
+  setMsg("有行/列没达标,再调整一下","badc");
+  setTimeout(function(){
+    var j;
+    for(j=0;j<9;j++)cellEls[j].classList.remove("bad");
+  },600);
+}
+function gameOverWin(){
+  state="over";
+  ovT.textContent="九宫大师!";
+  ovD.textContent="三道和差谜题全部攻克,约束满足能力满分!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function timeout(){
+  state="over";
+  ovT.textContent="时间耗尽…";
+  ovD.textContent="第 "+no+" 题没能完成。小提示:先看哪个目标数最小,用小数字去凑它!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;no=1;lastT=0;
+  ovS.style.display="none";
+  elScore.textContent="0";
+  newPuzzle();
+  ov.classList.add("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key>="1"&&e.key<="9"){numTap(parseInt(e.key,10));e.preventDefault();}
+  else if(e.key==="Escape"&&sel>=0){cellTap(sel);e.preventDefault();}
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;timeout();}
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elTbar.style.width=(timeLeft/PUZZLE_MS*100)+"%";
+  }
+}
+buildUI();
+tRow=[15,15,15];
+tCol=[15,15,15];
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

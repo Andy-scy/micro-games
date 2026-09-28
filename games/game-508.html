@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无人智能工厂</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:600px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#belt{height:16px;background:repeating-linear-gradient(90deg,#1e2440 0 18px,#232a4c 18px 36px);border-radius:8px;border:1px solid #2e3554;animation:move 1.2s linear infinite;margin-bottom:8px}
+@keyframes move{from{background-position:0 0}to{background-position:36px 0}}
+.machines{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.mc{background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:7px 8px;text-align:center;cursor:pointer;user-select:none}
+.mc .nm{font-size:12.5px;font-weight:600}
+.mc .st{font-size:11px;color:#8b90b0;margin-top:2px}
+.mc.idle{opacity:.55}
+.mc.work{border-color:#2f6f4f}
+.mc.jam{border-color:#ef4444;animation:blink .5s step-end infinite}
+@keyframes blink{50%{background:#4a1f2a}}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>无人智能工厂</h1>
+  <p class="hint">买机器上产线自动造零件,机器卡壳会亮红灯 · 手快点它修复,不然整段产能白等 · 累计产出 <b>6000</b> 件获胜</p>
+  <div class="hud">
+    <span>资金 <b id="hMoney">80</b></span>
+    <span>累计产出 <b id="hProd">0</b>/6000</span>
+    <span>每秒 <b id="hRate">0</b> 件</span>
+    <span>卡壳 <b id="hJam">0</b> 台</span>
+  </div>
+  <div id="msg"></div>
+  <div id="belt"></div>
+  <div class="machines" id="mcs"></div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">无人智能工厂</h2>
+    <p id="ovDesc">从一台裁切机开始,沿传送带逐位添置冲压、焊接、喷涂、组装、质检六道工序。机器每秒自动产出零件换成资金,但会随机卡壳红灯闪烁,不点它就一直停产;维修机器人升级后能自动抢修。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开工!</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elProd=$("hProd"),elRate=$("hRate"),elJam=$("hJam"),elMsg=$("msg");
+var mcsEl=$("mcs"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=6000;
+var machines=[
+ {nm:"裁切机",cost:60,rate:3},{nm:"冲压机",cost:240,rate:4},{nm:"焊接机",cost:900,rate:5},
+ {nm:"喷涂机",cost:3000,rate:7},{nm:"组装机",cost:9000,rate:9},{nm:"质检机",cost:25000,rate:12}
+];
+var ups=[
+ {nm:"流水线优化",ds:"全体机器效率 +35%",base:400,mult:2.5,max:4},
+ {nm:"维修机器人",ds:"卡壳后自动抢修(更快)",base:200,mult:3,max:2}
+];
+var money,produced,owned,jamState,jamT,upLv,state,msgT,mcEls=[],rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function rateOf(i){return machines[i].rate*(1+0.35*upLv[0]);}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildUI(){
+  var i;
+  mcsEl.innerHTML="";mcEls=[];
+  for(i=0;i<machines.length;i++){
+    var m=document.createElement("div");
+    m.className="mc idle";
+    m.innerHTML='<div class="nm">'+machines[i].nm+'</div><div class="st">点击购买 '+fmt(machines[i].cost)+'</div>';
+    (function(idx){m.addEventListener("click",function(){tapMc(idx);});})(i);
+    mcsEl.appendChild(m);mcEls.push(m);
+  }
+  shopEl.innerHTML="";rows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function tapMc(i){
+  if(state!=="play")return;
+  if(!owned[i]){
+    if(i>0&&!owned[i-1]){say("先安装上一道工序的机器!");return;}
+    if(money<machines[i].cost){say("资金不够!");return;}
+    money-=machines[i].cost;owned[i]=true;jamT[i]=22+Math.random()*28;
+    say(machines[i].nm+" 安装完毕,开始生产!");
+  }else if(jamState[i]){
+    jamState[i]=false;jamT[i]=22+Math.random()*28;
+    say(machines[i].nm+" 修好了!");
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("资金不够!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function startGame(){
+  money=80;produced=0;upLv=[0,0];msgT=0;
+  owned=[];jamState=[];jamT=[];
+  var i;
+  for(i=0;i<machines.length;i++){owned.push(false);jamState.push(false);jamT.push(0);}
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var i,jamN=0,total=0;
+  for(i=0;i<machines.length;i++){
+    var el=mcEls[i],st=el.querySelector(".st");
+    if(!owned[i]){
+      el.className="mc idle";
+      st.textContent=(i>0&&!owned[i-1])?"需先装前序":"点击购买 "+fmt(machines[i].cost);
+    }else if(jamState[i]){
+      el.className="mc jam";jamN++;
+      st.textContent="卡壳!点我修复!";
+    }else{
+      el.className="mc work";
+      st.textContent="运转中 "+rateOf(i).toFixed(1)+"/秒";
+      total+=rateOf(i);
+    }
+  }
+  elMoney.textContent=fmt(money);elProd.textContent=fmt(produced);
+  elRate.textContent=total.toFixed(1);elJam.textContent=jamN;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,i,gain=0;
+  for(i=0;i<machines.length;i++){
+    if(!owned[i])continue;
+    if(jamState[i]){
+      if(upLv[1]>0){
+        jamT[i]-=ds;
+        if(jamT[i]<=-(6-2*upLv[1])){jamState[i]=false;jamT[i]=22+Math.random()*28;}
+      }
+      continue;
+    }
+    gain+=rateOf(i);
+    jamT[i]-=ds;
+    if(jamT[i]<=0){jamState[i]=true;say(machines[i].nm+" 卡壳了!快点击修复!");}
+  }
+  money+=gain*ds;produced+=gain*ds;
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(produced>=WIN){
+    state="over";
+    showOv("年度最佳工厂!","六道工序全速运转,6000 件精品零件整装发车!","累计产出 "+fmt(produced)+" 件 · 资金 "+fmt(money));
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+money=80;produced=0;upLv=[0,0];state="menu";msgT=0;
+owned=[];jamState=[];jamT=[];
+var _i;
+for(_i=0;_i<machines.length;_i++){owned.push(false);jamState.push(false);jamT.push(0);}
+buildUI();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

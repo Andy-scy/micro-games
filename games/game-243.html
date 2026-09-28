@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>短句冲刺</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:10px}
+#stage{position:relative;width:100%;max-width:760px;background:#151a30;border-radius:14px;padding:26px 18px 60px}
+#sent{font-family:ui-monospace,Consolas,monospace;font-size:22px;line-height:2;text-align:center;word-break:break-word}
+.ch{color:#5a6284}
+.ch.ok{color:#6ee7a0}
+.ch.bad{color:#ff6b6b;text-decoration:underline}
+.ch.cur{color:#e8eaf6;border-bottom:2px solid #ffd76a}
+#shakeBox.err{animation:shk .18s}
+@keyframes shk{0%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}100%{transform:translateX(0)}}
+#track{position:absolute;left:18px;right:18px;bottom:20px;height:10px;background:#232a4a;border-radius:5px}
+#runner{position:absolute;top:-7px;left:0;width:14px;height:14px;border-radius:50%;background:#ffd76a;box-shadow:0 0 10px #ffd76a;transition:left .12s linear}
+#flag{position:absolute;right:-4px;top:-14px;font-size:12px;color:#ffd76a}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;z-index:2}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#ffd76a}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>短句冲刺</h1>
+<div id="tip">逐字打出屏幕上的英文短句，跑者会随进度向前冲刺；完成一句加 3 秒奖励时间</div>
+<div id="hud"></div>
+<div id="stage">
+<div id="shakeBox"><div id="sent"></div></div>
+<div id="track"><div id="runner"></div><div id="flag">终点</div></div>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var SENTS=["keep calm and type on","the rain falls soft tonight","code is poetry in motion","a fast mind needs fast hands","stars burn brightest in the dark","practice makes perfect typing","the wind sings an old song","small steps lead far away","run the race with a smile","lights fade slowly into dawn","brave hearts always type faster","magic lives inside old books"];
+var TOTAL=8,GAME_TIME=75;
+var sentEl=document.getElementById('sent'),hud=document.getElementById('hud');
+var runner=document.getElementById('runner'),shakeBox=document.getElementById('shakeBox');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var order,sIdx,cIdx,spans,score,timeLeft,elapsed,okChars,errChars,running,raf,tPrev,done;
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function hudUpd(){hud.textContent='剩余 '+Math.ceil(timeLeft)+' 秒　得分 '+score+'　第 '+(sIdx+1)+'/'+TOTAL+' 句　错误 '+errChars;}
+function reset(){order=shuffle(SENTS.slice()).slice(0,TOTAL);sIdx=0;cIdx=0;score=0;timeLeft=GAME_TIME;elapsed=0;okChars=0;errChars=0;done=false;loadSent();hudUpd();}
+function loadSent(){
+  var s=order[sIdx];spans=[];cIdx=0;sentEl.innerHTML='';
+  for(var i=0;i<s.length;i++){
+    var sp=document.createElement('span');
+    var c=s.charAt(i);
+    sp.textContent=(c===' ')?'\u00a0':c;
+    sp.className='ch'+(i===0?' cur':'');
+    sentEl.appendChild(sp);spans.push(sp);
+  }
+}
+function handleChar(ch){
+  if(!running||done)return;
+  if(ch==='\b')return;
+  var s=order[sIdx];
+  if(!/^[ -~]$/.test(ch))return;
+  if(ch===s.charAt(cIdx)){
+    spans[cIdx].className='ch ok';
+    okChars++;score+=5;cIdx++;
+    if(cIdx<s.length)spans[cIdx].className='ch cur';
+    else finishSent();
+  }else{
+    errChars++;score=Math.max(0,score-2);
+    spans[cIdx].className='ch bad';
+    shakeBox.classList.remove('err');
+    void shakeBox.offsetWidth;
+    shakeBox.classList.add('err');
+    if(cIdx+1<s.length){spans[cIdx+1].className='ch cur';}
+  }
+  hudUpd();
+}
+function finishSent(){
+  score+=50;timeLeft+=3;sIdx++;
+  if(sIdx>=TOTAL){win(true);return;}
+  loadSent();hudUpd();
+}
+function update(dt){
+  elapsed+=dt;timeLeft-=dt;
+  var prog=(sIdx+(order[sIdx]?cIdx/order[sIdx].length:0))/TOTAL;
+  runner.style.left='calc('+(prog*100)+'% - 0px)';
+  if(prog>=0.995)runner.style.left='calc(100% - 14px)';
+  if(timeLeft<=0){timeLeft=0;win(false);return;}
+  hudUpd();
+}
+function win(ok){
+  if(done)return;done=true;running=false;
+  var wpm=Math.round((okChars/5)/(elapsed/60));
+  ovT.textContent=ok?'冲刺成功':'时间耗尽';
+  ovX.textContent='得分 '+score+'\n速度 '+wpm+' WPM　正确 '+okChars+' 字　错误 '+errChars+' 字\n完成短句 '+sIdx+'/'+TOTAL;
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);
+  raf=requestAnimationFrame(loop);
+}
+function start(){
+  reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  document.getElementById('stage').addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+reset();
+ovT.textContent='短句冲刺';
+ovX.textContent='屏幕上会出现一条英文短句，逐字打对即可。\n打错不后退但计错误，完成整句 +50 分并奖励 3 秒。\n限时 '+GAME_TIME+' 秒完成 '+TOTAL+' 句即可通关。';
+btn.textContent='开始游戏';
+runner.style.left='0px';
+})();
+</script>
+</body>
+</html>

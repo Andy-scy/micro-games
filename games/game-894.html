@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>回声声呐</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+#wrap{max-width:680px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:8px 0 2px;color:#9fb4ff;letter-spacing:1px}
+p.tip{margin:4px 0 10px;font-size:13px;color:#aab0d0;line-height:1.7}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#cfd3ee;margin:0 2px 8px}
+#hud b{color:#9fb4ff}
+#stage{position:relative;border-radius:14px;overflow:hidden;border:1px solid #2c3154;background:#0f1220}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(10,12,26,.84);text-align:center;padding:16px}
+.hidden{display:none}
+.ovBig{font-size:26px;font-weight:bold;color:#9fb4ff}
+#ovTitle{font-size:26px;font-weight:bold;color:#ff5d73}
+#ovInfo{font-size:14px;color:#aab0d0}
+button{background:#9fb4ff;color:#141628;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:bold;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>回声声呐</h1>
+<p class="tip">按住 鼠标 / 触屏 / 空格 上升,松开下坠。洞窟漆黑一片,声呐每 1.5 秒自动发出一圈回波——只有波纹掠过之处岩壁才短暂显形,随后重归黑暗。在脑中记住壁的形状再飞!</p>
+<div id="hud"><span>距离:<b id="score">0</b> m</span><span>回波:<b id="pn">0</b> 次</span><span>最佳:<b id="best">0</b> m</span></div>
+<div id="stage">
+<canvas id="cv" width="640" height="420"></canvas>
+<div id="ovStart" class="overlay"><div class="ovBig">全黑洞穴</div><div style="font-size:13px;color:#aab0d0">声呐自动扫描 · 凭回声记忆飞行</div><button id="btnStart">开始游戏</button></div>
+<div id="ovOver" class="overlay hidden"><div id="ovTitle">黑暗吞噬了你!</div><div id="ovInfo"></div><button id="btnRe">再来一局</button></div>
+</div>
+</div>
+<script>
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var COL=8;
+var state="ready",holding=false,tG=0;
+var scrollX,speed,dist,py,vy,cols,genX,score;
+var pings,pingT,pingCount;
+var best=0;
+function loadBest(k){try{var v=localStorage.getItem(k);return v?(parseInt(v,10)||0):0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+best=loadBest("mg894best");
+$("best").textContent=best;
+
+function reset(){
+  scrollX=0;speed=145;dist=0;score=0;
+  py=H/2;vy=0;cols=[];genX=-48;
+  pings=[];pingT=0.2;pingCount=0;
+  while(genX<W+96){pushCol();}
+  updHud();
+}
+function terrainC(x){
+  return H/2+Math.sin(x*0.0042)*58+Math.sin(x*0.0117+1.3)*32+Math.sin(x*0.031+4.1)*11;
+}
+function gapAt(x){return 175+Math.sin(x*0.006+2.0)*20;}
+function pushCol(){
+  var g=gapAt(genX),c=terrainC(genX);
+  var m=g/2+26;
+  c=Math.max(m,Math.min(H-m,c));
+  cols.push({x:genX,t:c-g/2,b:c+g/2});
+  genX+=COL;
+}
+function colAt(x){
+  if(!cols.length)return{t:0,b:H};
+  var i=Math.floor((x-cols[0].x)/COL);
+  if(i<0)i=0;if(i>cols.length-2)i=cols.length-2;
+  return cols[i];
+}
+function pX(){return scrollX+150;}
+function updHud(){$("score").textContent=score;$("pn").textContent=pingCount;}
+function vis(sx,sy){
+  var v=0;
+  var i;
+  for(i=0;i<pings.length;i++){
+    var p=pings[i];
+    var px2=p.x-scrollX;
+    var dx=sx-px2,dy=sy-p.y;
+    var d=Math.sqrt(dx*dx+dy*dy);
+    var w=Math.abs(d-p.t*300);
+    if(w<32){
+      var a=(1-p.t/1.6)*(1-w/32);
+      if(a>v)v=a;
+    }
+  }
+  var dx2=sx-150,dy2=sy-py;
+  var d2=Math.sqrt(dx2*dx2+dy2*dy2);
+  if(d2<44){
+    var a2=(1-d2/44)*0.85;
+    if(a2>v)v=a2;
+  }
+  return v;
+}
+function update(dt){
+  speed=Math.min(270,145+dist*0.009);
+  scrollX+=speed*dt;
+  dist+=speed*dt;
+  score=Math.floor(dist/10);
+  while(genX<scrollX+W+96)pushCol();
+  while(cols.length>2&&cols[0].x+COL<scrollX-64)cols.shift();
+  pingT-=dt;
+  if(pingT<=0){
+    pingT=1.5;
+    pingCount++;
+    pings.push({x:scrollX+150,y:py,t:0});
+  }
+  var i;
+  for(i=pings.length-1;i>=0;i--){
+    pings[i].t+=dt;
+    if(pings[i].t>1.6)pings.splice(i,1);
+  }
+  vy+=(holding?-600:540)*dt;
+  vy=Math.max(-280,Math.min(320,vy));
+  py+=vy*dt;
+  if(py<8){py=8;vy=Math.max(vy,0);}
+  if(py>H-8){py=H-8;vy=Math.min(vy,0);}
+  var c=colAt(pX());
+  if(py-11<c.t||py+11>c.b){die();return;}
+  updHud();
+}
+function die(){
+  if(state!=="play")return;
+  state="over";
+  if(score>best){best=score;saveBest("mg894best",best);$("best").textContent=best;}
+  $("ovInfo").textContent="借回声飞行了 "+score+" m(发出 "+pingCount+" 次回波),最佳 "+best+" m";
+  $("ovOver").classList.remove("hidden");
+}
+function start(){reset();state="play";$("ovStart").classList.add("hidden");$("ovOver").classList.add("hidden");holding=false;}
+function onHold(b){
+  if(state==="ready"&&b){start();}
+  if(state==="over")return;
+  holding=b;
+}
+function draw(){
+  ctx.fillStyle="#05060e";
+  ctx.fillRect(0,0,W,H);
+  var i;
+  ctx.fillStyle="#8fa0ff";
+  for(i=0;i<cols.length;i++){
+    var c=cols[i];
+    var sx=c.x-scrollX;
+    if(sx<-COL||sx>W+COL)continue;
+    var aT=vis(sx,c.t);
+    if(aT>0.02){
+      ctx.globalAlpha=Math.min(1,aT);
+      ctx.fillRect(sx-COL/2,0,COL+1,c.t);
+    }
+    var aB=vis(sx,c.b);
+    if(aB>0.02){
+      ctx.globalAlpha=Math.min(1,aB);
+      ctx.fillRect(sx-COL/2,c.b,COL+1,H-c.b);
+    }
+  }
+  ctx.globalAlpha=1;
+  for(i=0;i<pings.length;i++){
+    var p=pings[i];
+    ctx.globalAlpha=(1-p.t/1.6)*0.5;
+    ctx.strokeStyle="#9fb4ff";
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(p.x-scrollX,p.y,p.t*300,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  var g=ctx.createRadialGradient(150,py,2,150,py,40);
+  g.addColorStop(0,"rgba(255,209,102,0.6)");
+  g.addColorStop(1,"rgba(255,209,102,0)");
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(150,py,40,0,Math.PI*2);ctx.fill();
+  ctx.save();ctx.translate(150,py);
+  ctx.rotate(Math.max(-0.5,Math.min(0.5,vy*0.0016)));
+  ctx.fillStyle="#ffd166";
+  ctx.beginPath();ctx.moveTo(13,0);ctx.lineTo(-8,-7);ctx.lineTo(-5,0);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();
+  ctx.restore();
+}
+$("btnStart").addEventListener("click",function(){start();});
+$("btnRe").addEventListener("click",function(){start();});
+cv.addEventListener("mousedown",function(e){e.preventDefault();onHold(true);});
+window.addEventListener("mouseup",function(){onHold(false);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();onHold(true);},{passive:false});
+window.addEventListener("touchend",function(){onHold(false);});
+window.addEventListener("touchcancel",function(){onHold(false);});
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW"){e.preventDefault();if(!e.repeat)onHold(true);}
+});
+window.addEventListener("keyup",function(e){
+  if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW")onHold(false);
+});
+window.addEventListener("blur",function(){holding=false;});
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  var dt=Math.min(0.033,((t-lastT)/1000)||0);lastT=t;
+  tG+=dt;
+  if(state==="play")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

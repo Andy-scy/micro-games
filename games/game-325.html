@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>限步熄灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb923c;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb923c;font-size:16px}
+.gbtn{background:#43240f;color:#fb923c;border:1px solid #fb923c;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#fb923c;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:360px;margin:0 auto;touch-action:manipulation}
+.cell{aspect-ratio:1/1;border-radius:11px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .18s,box-shadow .18s,transform .08s}
+.cell.on{background:linear-gradient(145deg,#fdba74,#f97316);border-color:#ffedd5;box-shadow:0 0 14px rgba(251,146,60,.55)}
+.cell.low{background:linear-gradient(145deg,#fda4af,#e11d48);border-color:#ffe4e6;box-shadow:0 0 14px rgba(225,29,72,.6)}
+.cell.cur{outline:2px solid rgba(251,146,60,.75);outline-offset:2px}
+.cell:active{transform:scale(.92)}
+.bar{height:8px;background:#111527;border-radius:4px;margin:0 auto 10px;max-width:360px;overflow:hidden}
+.bar i{display:block;height:100%;background:#fb923c;border-radius:4px;transition:width .2s}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#fb923c;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#fb923c;color:#43240f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>限步熄灯</h1>
+  <p class="hint">每局的步数配额非常苛刻:点击翻转十字,在步数耗尽前把 4×4 棋盘全部熄灭。步数条见底仍未完成,即告失败。谜面由目标状态打乱而来,必定可解。</p>
+  <div class="hud">
+    <span>剩余步数 <b id="left">0</b></span>
+    <span>已用 <b id="moves">0</b></span>
+    <span>亮灯 <b id="lit">0</b>/16</span>
+    <button class="gbtn" id="btnNew">换一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="bar"><i id="bar" style="width:100%"></i></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">限步熄灯</h2>
+    <p id="ovDesc">点灯史上最抠门的出题人:配额只比最优步数宽裕一点点。每一步都要有明确的理由,乱点两下就再无回头路。祝手起灯落,一步不多。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">接受挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=4,CNT=16,BUDGET=6,DEPTH=5;
+var gridEl=$("grid"),elLeft=$("left"),elMoves=$("moves"),elLit=$("lit"),elMsg=$("msg"),btnNew=$("btnNew"),elBar=$("bar");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cells=[],board=[],moves=0,state="menu";
+
+function setMsg(s){elMsg.textContent=s;clearTimeout(setMsg.t);setMsg.t=setTimeout(function(){elMsg.textContent="";},2200);}
+function build(){
+  gridEl.innerHTML="";cells=[];
+  for(var i=0;i<CNT;i++){
+    var d=document.createElement("div");
+    d.className="cell";d.dataset.i=i;
+    gridEl.appendChild(d);cells.push(d);
+  }
+}
+function paint(i){
+  var cls="cell";
+  if(board[i])cls+=" on";
+  if(cur===i)cls+=" cur";
+  cells[i].className=cls;
+}
+function paintAll(){for(var i=0;i<CNT;i++)paint(i);}
+function crossList(r,c){
+  var list=[r*N+c];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function press(r,c,silent){
+  var list=crossList(r,c),i;
+  for(i=0;i<list.length;i++)board[list[i]]^=1;
+  if(!silent){
+    moves++;
+    for(i=0;i<list.length;i++)paint(list[i]);
+  }
+}
+function litCount(){var n=0,i;for(i=0;i<CNT;i++)if(board[i])n++;return n;}
+function pickCells(k){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function updateHud(){
+  elMoves.textContent=moves;
+  elLeft.textContent=BUDGET-moves;
+  elLit.textContent=litCount();
+  var pct=Math.max(0,(BUDGET-moves)*100/BUDGET);
+  elBar.style.width=pct+"%";
+  elBar.className=moves>=BUDGET-1?"low":"";
+}
+function newGame(){
+  board=[];for(var i=0;i<CNT;i++)board.push(0);
+  moves=0;state="playing";
+  var ps=pickCells(DEPTH),j;
+  for(j=0;j<ps.length;j++)press((ps[j]/N)|0,ps[j]%N,true);
+  paintAll();updateHud();
+}
+function doPress(i){
+  if(state!=="playing")return;
+  press((i/N)|0,i%N,false);
+  updateHud();
+  if(litCount()===0){win();return;}
+  if(moves>=BUDGET)lose();
+  else if(BUDGET-moves===1)setMsg("只剩最后一步!");
+}
+function win(){
+  state="over";
+  ovTitle.textContent="分毫不差!";
+  ovDesc.textContent="在配额之内熄灭了全部灯火,还剩余 "+(BUDGET-moves)+" 步的从容。";
+  ovScore.style.display="block";
+  ovScore.textContent="用步 "+moves+"/"+BUDGET;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function lose(){
+  state="over";
+  ovTitle.textContent="步数耗尽";
+  ovDesc.textContent="还差一点火候:场上仍亮着 "+litCount()+" 盏灯。再开一局,这次把每步都算清楚。";
+  ovScore.style.display="none";
+  btnGo.textContent="再试一局";
+  ov.classList.remove("hide");
+}
+function start(){newGame();ov.classList.add("hide");}
+var cur=-1;
+function setCur(i){
+  var old=cur;cur=i;
+  if(old>=0)paint(old);
+  if(cur>=0)paint(cur);
+}
+gridEl.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.classList&&t.classList.contains("cell"))doPress(parseInt(t.dataset.i,10));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}
+    return;
+  }
+  if(cur<0)setCur(5);
+  var r=(cur/N)|0,c=cur%N,k=e.key;
+  if(k==="ArrowUp"){r=(r+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowDown"){r=(r+1)%N;e.preventDefault();}
+  else if(k==="ArrowLeft"){c=(c+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowRight"){c=(c+1)%N;e.preventDefault();}
+  else if(k==="Enter"||k===" "){e.preventDefault();doPress(cur);return;}
+  else return;
+  setCur(r*N+c);
+});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();setMsg("新谜面已生成");
+});
+build();
+board=[];for(var z=0;z<CNT;z++)board.push(0);
+var ps0=pickCells(DEPTH),z2;
+for(z2=0;z2<ps0.length;z2++)press((ps0[z2]/N)|0,ps0[z2]%N,true);
+paintAll();updateHud();
+})();
+</script>
+</body>
+</html>

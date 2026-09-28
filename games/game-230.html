@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真假目标</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>真假目标</h1>
+  <p class="hint">实心圆是真目标,空心带叉是陷阱 · 看清再下手!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="streak">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">真假目标</h2>
+      <p id="ovDesc">屏幕上会不断冒出短命的目标:实心绿色圆是真目标,空心红色带叉的是陷阱!点真目标得分,连对越多单次得分越高;点到陷阱扣一次机会。目标越冒越快,手快更要眼准!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,KEY="mg_s230";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elStreak=$("streak"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,streak=0,lives=3,targets=[],spawnAt=0,startAt=0;
+var flashUntil=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elScore.textContent=score;
+  elStreak.textContent=streak;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="误触了陷阱,挑战终止!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.18)";
+    ctx.fillRect(0,0,W,H);
+  }
+  var i;
+  for(i=0;i<targets.length;i++){
+    var g=targets[i];
+    if(g.real){
+      ctx.fillStyle="#4ade80";
+      ctx.shadowColor="#4ade80";ctx.shadowBlur=16;
+      ctx.beginPath();ctx.arc(g.x,g.y,g.r,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="#05230f";
+      ctx.beginPath();ctx.arc(g.x,g.y,g.r*0.32,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.strokeStyle="#f87171";ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(g.x,g.y,g.r,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(g.x-g.r*0.5,g.y-g.r*0.5);
+      ctx.lineTo(g.x+g.r*0.5,g.y+g.r*0.5);
+      ctx.moveTo(g.x+g.r*0.5,g.y-g.r*0.5);
+      ctx.lineTo(g.x-g.r*0.5,g.y+g.r*0.5);
+      ctx.stroke();ctx.lineWidth=1;
+    }
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state==="playing"){
+    var sec=(t-startAt)/1000;
+    if(t>=spawnAt&&targets.length<4){
+      targets.push({
+        x:45+Math.random()*(W-90),
+        y:45+Math.random()*(H-90),
+        r:20,
+        real:Math.random()<0.65,
+        born:t,
+        life:Math.max(850,1550-sec*22)
+      });
+      spawnAt=t+Math.max(480,820-sec*10);
+    }
+    var i;
+    for(i=targets.length-1;i>=0;i--){
+      if(t-targets[i].born>targets[i].life){
+        if(targets[i].real)streak=0;
+        targets.splice(i,1);
+      }
+    }
+  }
+  draw(t);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function onTap(e){
+  if(state!=="playing")return;
+  var p=pos(e),i,hit=-1,bd=1e9;
+  for(i=0;i<targets.length;i++){
+    var d=Math.hypot(p.x-targets[i].x,p.y-targets[i].y);
+    if(d<targets[i].r+8&&d<bd){bd=d;hit=i;}
+  }
+  if(hit<0)return;
+  var g=targets[hit];
+  targets.splice(hit,1);
+  if(g.real){
+    score+=10+Math.min(20,streak*2);
+    streak++;
+  }else{
+    lives--;
+    streak=0;
+    flashUntil=performance.now()+300;
+    if(lives<=0){endGame();return;}
+  }
+  updateHud();
+}
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onTap(e);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+function startGame(){
+  score=0;streak=0;lives=3;targets=[];
+  state="playing";
+  startAt=performance.now();
+  spawnAt=startAt+300;
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

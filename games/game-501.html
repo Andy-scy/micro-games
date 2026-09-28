@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>饼干工坊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:600px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#ffd76a;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+.cols{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+#cookieArea{position:relative;flex:1;min-width:220px;display:flex;align-items:center;justify-content:center;min-height:250px;background:#131728;border-radius:12px;overflow:hidden}
+#cookieArea.frenzy{box-shadow:inset 0 0 30px rgba(255,215,106,.55)}
+#bigCookie{width:160px;height:160px;border-radius:50%;border:6px solid #8a5a2b;background:radial-gradient(circle at 35% 30%,#e8a24b,#b46a22 60%,#8a4a14);cursor:pointer;font-size:15px;color:#4a2a08;font-weight:700;font-family:inherit;box-shadow:0 8px 24px rgba(0,0,0,.5);transition:transform .06s}
+#bigCookie:active{transform:scale(.94)}
+#cookieArea .sub{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11.5px;color:#6f7598}
+.pop{position:absolute;font-size:14px;font-weight:700;color:#ffd76a;pointer-events:none;animation:rise .7s ease-out forwards;z-index:2}
+@keyframes rise{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-46px)}}
+#golden{position:absolute;width:44px;height:44px;border-radius:50%;border:3px solid #fff2b0;background:radial-gradient(circle at 35% 30%,#ffe680,#e6a817);cursor:pointer;display:none;z-index:3;box-shadow:0 0 18px rgba(255,214,90,.8);animation:glow 1s ease-in-out infinite alternate}
+@keyframes glow{from{transform:scale(1)}to{transform:scale(1.12)}}
+.shop{flex:1.1;min-width:230px;display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap;text-align:right}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>饼干工坊</h1>
+  <p class="hint">点击大饼干出炉 · 用饼干买助手实现自动烘焙 · 金色饼干限时降临点中有惊喜 · 累计烘焙 <b>10 万</b> 块获胜</p>
+  <div class="hud">
+    <span>库存 <b id="hBank">0</b></span>
+    <span>每秒 <b id="hCps">0</b></span>
+    <span>累计 <b id="hTotal">0</b></span>
+    <span>点击 <b id="hClick">+1</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="cols">
+    <div id="cookieArea">
+      <button id="bigCookie">烘焙!</button>
+      <div class="sub">点饼干 · 抓金块 · 买助手</div>
+      <button id="golden" title="金色饼干"></button>
+    </div>
+    <div class="shop" id="shop"></div>
+  </div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">饼干工坊</h2>
+    <p id="ovDesc">疯狂点击大饼干产出第一炉饼干,攒钱雇佣小助手、奶奶与工厂实现自动化。金色饼干会随机降临,点中可得暴富饼干或触发产量 x7 狂热!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开始游戏</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elBank=$("hBank"),elCps=$("hCps"),elTotal=$("hTotal"),elClick=$("hClick"),elMsg=$("msg");
+var shopEl=$("shop"),area=$("cookieArea"),golden=$("golden"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo"),bigC=$("bigCookie");
+var WIN=100000;
+var buildings=[
+ {nm:"饼干小助手",cost:15,rate:0.6,ds:"每秒自动烘焙 0.6 块"},
+ {nm:"饼干奶奶",cost:110,rate:3,ds:"每秒自动烘焙 3 块"},
+ {nm:"饼干农场",cost:750,rate:12,ds:"每秒自动烘焙 12 块"},
+ {nm:"流水线工厂",cost:4500,rate:50,ds:"每秒自动烘焙 50 块"},
+ {nm:"饼干神殿",cost:26000,rate:220,ds:"每秒自动烘焙 220 块"}
+];
+var bank,total,counts,frostLv,frenzy,gTimer,gLife,state,msgT;
+var rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function cost(i){return Math.floor(buildings[i].cost*Math.pow(1.18,counts[i]));}
+function frostCost(){return Math.floor(60*Math.pow(2.2,frostLv));}
+function clickVal(){return 1+2*frostLv;}
+function cpsV(){var s=0,i;for(i=0;i<buildings.length;i++)s+=counts[i]*buildings[i].rate;return s*(frenzy>0?7:1);}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<buildings.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+buildings[i].nm+' <span class="own"></span></div><div class="ds">'+buildings[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buy(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+  var f=document.createElement("div");
+  f.className="item";
+  f.innerHTML='<div><div class="nm">强化糖霜 <span class="own"></span></div><div class="ds">每次点击产饼干 +2</div></div><div class="pr"></div>';
+  f.addEventListener("click",buyFrost);
+  shopEl.appendChild(f);
+  rows.push({el:f,own:f.querySelector(".own"),pr:f.querySelector(".pr")});
+}
+function buy(i){
+  if(state!=="play")return;
+  var c=cost(i);
+  if(bank<c){say("饼干不够,继续点!");return;}
+  bank-=c;counts[i]++;say("雇了 "+buildings[i].nm+"!");
+}
+function buyFrost(){
+  if(state!=="play")return;
+  var c=frostCost();
+  if(bank<c){say("饼干不够,继续点!");return;}
+  bank-=c;frostLv++;say("糖霜强化!点击产量 +2");
+}
+function renderShop(){
+  var i;
+  for(i=0;i<buildings.length;i++){
+    rows[i].pr.textContent=fmt(cost(i));
+    rows[i].own.textContent="x"+counts[i];
+    rows[i].el.classList.toggle("off",bank<cost(i));
+  }
+  rows[buildings.length].pr.textContent=fmt(frostCost());
+  rows[buildings.length].own.textContent="Lv"+frostLv;
+  rows[buildings.length].el.classList.toggle("off",bank<frostCost());
+}
+bigC.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var v=clickVal();
+  bank+=v;total+=v;
+  var r=area.getBoundingClientRect();
+  var p=document.createElement("div");
+  p.className="pop";p.textContent="+"+v;
+  p.style.left=(e.clientX-r.left-16)+"px";
+  p.style.top=(e.clientY-r.top-30)+"px";
+  area.appendChild(p);
+  setTimeout(function(){if(p.parentNode)p.parentNode.removeChild(p);},750);
+});
+function spawnGolden(){
+  golden.style.display="block";
+  golden.style.left=(6+Math.random()*70)+"%";
+  golden.style.top=(6+Math.random()*68)+"%";
+  gLife=8;
+}
+golden.addEventListener("click",function(){
+  if(state!=="play"||gLife<=0)return;
+  golden.style.display="none";gLife=0;gTimer=14+Math.random()*14;
+  if(Math.random()<0.55){
+    var g=Math.floor(100+bank*0.12);bank+=g;total+=g;
+    say("金色饼干!袋里多了 "+fmt(g)+" 块饼干!");
+  }else{frenzy=10;say("烘焙狂热!10 秒内自动产量 x7!");}
+});
+function showOv(t,d,s,bt){
+  ovT.textContent=t;ovD.textContent=d;ovS.textContent=s;ovS.style.display=s?"block":"none";
+  btn.textContent=bt;ov.classList.remove("hide");
+}
+function startGame(){
+  bank=0;total=0;counts=[0,0,0,0,0];frostLv=0;frenzy=0;msgT=0;
+  gTimer=10;gLife=0;golden.style.display="none";
+  elMsg.textContent="";area.classList.remove("frenzy");
+  state="play";ov.classList.add("hide");renderShop();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  var c=cpsV();
+  bank+=c*ds;total+=c*ds;
+  if(frenzy>0){frenzy-=ds;if(frenzy<=0)say("狂热结束,回归平静烘焙。");}
+  area.classList.toggle("frenzy",frenzy>0);
+  if(gLife>0){
+    gLife-=ds;
+    if(gLife<=0){golden.style.display="none";gTimer=14+Math.random()*14;say("金色饼干消失了…");}
+  }else{
+    gTimer-=ds;
+    if(gTimer<=0)spawnGolden();
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  elBank.textContent=fmt(bank);elCps.textContent=fmt(cpsV());elTotal.textContent=fmt(total);
+  elClick.textContent="+"+clickVal();
+  renderShop();
+  if(total>=WIN){
+    state="over";
+    showOv("烘焙大师达成!","你的饼干帝国源源不断,累计烘焙突破十万大关!","累计烘焙 "+fmt(total)+" 块 · 自动产量 "+fmt(cpsV())+"/秒","再来一局");
+  }
+}
+counts=[0,0,0,0,0];bank=0;total=0;frostLv=0;frenzy=0;gTimer=10;gLife=0;state="menu";msgT=0;
+buildShop();renderShop();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

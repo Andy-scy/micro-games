@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双塔竞高</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#ffd8a8}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#ffd8a8;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#ffd8a8;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>双塔竞高</h1>
+<p class="hint">左右两座塔轮流接块 · 发光箭头指示当前塔,点击或空格放置,两塔齐高有奖励</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">双塔竞高</h2><p id="ovM">一座移动方块要轮流喂给左右两座塔,箭头指向谁就归谁。<br>两塔高度相同的一瞬间奖励 30 分;任何一塔接空都全盘皆输!</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=560,BH=22;
+var towers,active,cur,fx,pops,score,state='ready',cam=0;
+
+function layerC(i,g){return 'hsl('+((i*14+(g===0?40:210))%360)+',60%,58%)';}
+function topA(){var t=towers[active];return t[t.length-1];}
+function reset(){
+  towers=[[{x:115,w:120}],[{x:305,w:120}]];active=0;score=0;fx=[];pops=[];cam=0;
+  spawn();
+}
+function spawn(){
+  var t=topA(),left=Math.random()<0.5;
+  var tot=towers[0].length+towers[1].length-2;
+  cur={x:left?36:W-36,dir:left?1:-1,w:t.w,spd:Math.min(2.1+tot*0.05,5.4)};
+}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#ffd8a8',life:1});}
+function place(){
+  var t=topA(),g=active;
+  var delta=cur.x-t.x,ad=Math.abs(delta),ovw=t.w-ad;
+  var n=towers[g].length;
+  var byY=GROUND-(n+1)*BH+BH/2;
+  if(ovw<=0){
+    fx.push({x:cur.x,y:byY,w:cur.w,vx:cur.dir*80,vy:-60,rot:0,vr:cur.dir*2.4,life:1.5,c:layerC(n,g)});
+    cur=null;finish();return;
+  }
+  var nx,nw;
+  if(ad<=6){
+    var pts=10+Math.min(30,towers[0].length+towers[1].length);score+=pts;
+    pop('完美 +'+pts,t.x,byY-14,'#7ee0a3');
+    nx=t.x;nw=t.w;
+  }else{
+    score+=10;
+    var cl=cur.x-cur.w/2,cr=cur.x+cur.w/2,tl=t.x-t.w/2,tr=t.x+t.w/2;
+    var ol=Math.max(cl,tl),orr=Math.min(cr,tr);
+    nx=(ol+orr)/2;nw=orr-ol;
+    var pw,px;
+    if(delta>0){pw=cr-tr;px=(tr+cr)/2;}else{pw=tl-cl;px=(cl+tl)/2;}
+    if(pw>1)fx.push({x:px,y:byY,w:pw,vx:delta>0?150:-150,vy:-40,rot:0,vr:delta>0?2.6:-2.6,life:1.5,c:layerC(n,g)});
+  }
+  towers[g].push({x:nx,w:nw});
+  if(towers[0].length===towers[1].length&&towers[0].length>1){
+    score+=30;pop('双塔齐高 +30',210,byY-34,'#ffd8a8');
+  }
+  active=1-active;
+  spawn();
+}
+function finish(){
+  state='over';
+  var h=towers[0].length+towers[1].length-2;
+  window.setTimeout(function(){
+    ovT.textContent='双塔憾倒!';
+    ovS.textContent='两塔合计 '+h+' 层 · 得分 '+score;
+    ovM.textContent='左右开弓,雨露均沾,别偏心一座塔';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },650);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  if(state==='play'&&cur){
+    cur.x+=cur.spd*cur.dir*dt*60;
+    var m=cur.w/2+6;
+    if(cur.x<m){cur.x=m;cur.dir=1;}
+    if(cur.x>W-m){cur.x=W-m;cur.dir=-1;}
+  }
+  var i;
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+  var c1=Math.max(0,300-(GROUND-towers[0].length*BH));
+  var c2=Math.max(0,300-(GROUND-towers[1].length*BH));
+  cam=Math.max(c1,c2);
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#2a2033');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var gy=GROUND-cam;
+  ctx.fillStyle='#1d2447';ctx.fillRect(0,gy,W,H-gy);
+  ctx.fillStyle='#2e3660';ctx.fillRect(0,gy,W,5);
+  var i,k,b,y;
+  for(k=0;k<2;k++){
+    var arr=towers[k],n=arr.length;
+    var tTop=arr[n-1],tY=GROUND-n*BH-cam;
+    if(k===active&&cur&&state==='play'){
+      ctx.strokeStyle='rgba(126,224,163,.8)';ctx.lineWidth=2;rr(tTop.x-tTop.w/2,tY+2,tTop.w,BH-4,5);ctx.stroke();
+      ctx.fillStyle='#7ee0a3';
+      ctx.beginPath();ctx.moveTo(tTop.x,tY-14);ctx.lineTo(tTop.x-7,tY-26);ctx.lineTo(tTop.x+7,tY-26);ctx.closePath();ctx.fill();
+    }
+    for(i=0;i<n;i++){
+      b=arr[i];y=GROUND-(n-i)*BH-cam;
+      if(y<-BH||y>H)continue;
+      ctx.fillStyle=layerC(i,k);rr(b.x-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(b.x-b.w/2+4,y+5,Math.max(0,b.w-8),4);
+    }
+  }
+  if(cur&&state==='play'){
+    y=GROUND-(towers[active].length+1)*BH-cam;
+    ctx.fillStyle=layerC(towers[active].length,active);rr(cur.x-cur.w/2,y+2,cur.w,BH-4,5);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;rr(cur.x-cur.w/2,y+2,cur.w,BH-4,5);ctx.stroke();
+  }
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cam);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  ctx.textAlign='right';ctx.fillText('左 '+(towers[0].length-1)+' 层',140,32);
+  ctx.fillText('右 '+(towers[1].length-1)+' 层',W-14,32);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cam);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+function tap(){if(state==='play'&&cur)place();}
+if(window.PointerEvent){cv.addEventListener('pointerdown',function(e){e.preventDefault();tap();});}
+else{cv.addEventListener('mousedown',function(){tap();});cv.addEventListener('touchstart',function(e){e.preventDefault();tap();});}
+window.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowDown'||e.key===' '){e.preventDefault();tap();}});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

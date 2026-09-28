@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>危险双骰大冒险</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:25px;text-align:center;color:#f4a261;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.35;cursor:default}
+#path{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.cell{width:52px;height:52px;border-radius:9px;background:#232a48;border:1px solid #333c63;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:15px;font-weight:800}
+.cell small{font-size:10px;color:#9aa3c0;font-weight:400}
+.cell.trap{background:#3d1f2b;border-color:#a14a5e}
+.cell.jump{background:#1f3d2b;border-color:#4a9e6b}
+.cell.jail{background:#3d351f;border-color:#a1864a}
+.cell.goal{background:#232a63;border-color:#4a6bff}
+.cell.me{box-shadow:0 0 0 3px #ffd166;background:#3a3520}
+.cell.me small{color:#ffd166}
+.die{position:relative;width:46px;height:46px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#f4a261}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#f4a261;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>危险双骰大冒险</h1>
+  <p class="tips">25 回合内从起点走到第 13 格终点!掷双骰按点数和前进,但小心:<b>陷</b>阱退 2 格,<b>跃</b>迁进 2 格,踩中 <b>狱</b> 格会被关押——之后每回合掷骰,掷出对子才能获释,连续 3 回合没掷出对子将被罚退 2 格。</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">位置</div><div class="big" id="ptx">起点</div></div>
+    <div class="card stat"><div class="mut">剩余回合</div><div class="big" id="tt">25</div></div>
+  </div>
+  <div class="card"><div id="path"></div></div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="go">掷骰前进</button></div>
+  </div>
+  <div class="card log" id="log">点「掷骰前进」开启冒险!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var EV={3:'陷',5:'跃',7:'狱',10:'陷',11:'跃'};
+var pos=0,turns=25,jail=false,jailTries=0,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function buildPath(){
+  var P=$('path');P.innerHTML='';
+  for(var i=0;i<=13;i++){
+    var d=document.createElement('div');
+    var cls='cell';
+    if(EV[i]==='陷')cls+=' trap';
+    if(EV[i]==='跃')cls+=' jump';
+    if(EV[i]==='狱')cls+=' jail';
+    if(i===13)cls+=' goal';
+    if(i===pos)cls+=' me';
+    d.className=cls;
+    var name=i===0?'始':(i===13?'终':String(i));
+    d.innerHTML='<span>'+name+'</span><small>'+(EV[i]?'·'+EV[i]+'·':(i===13?'终点':''))+'</small>';
+    P.appendChild(d);
+  }
+  $('ptx').textContent=pos===0?'起点':(jail?pos+' 格(狱中)':pos+' 格');
+  $('tt').textContent=turns;
+}
+function say(m){$('log').textContent=m}
+function anim(cb){
+  $('go').disabled=true;
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<600){
+      if(t-last>80){last=t;setDie($('d1'),rnd());setDie($('d2'),rnd())}
+      requestAnimationFrame(step);
+    }else{
+      var a=rnd(),b=rnd();
+      setDie($('d1'),a);setDie($('d2'),b);
+      cb(a,b);
+    }
+  }
+  requestAnimationFrame(step);
+}
+function nextTurn(msg){
+  turns--;
+  buildPath();
+  if(pos>=13){finish(true);return}
+  if(turns<=0){finish(false);return}
+  $('go').disabled=false;
+  say(msg+'(剩 '+turns+' 回合)');
+}
+$('go').onclick=function(){
+  if(over||$('go').disabled)return;
+  anim(function(a,b){
+    if(jail){
+      if(a===b){
+        jail=false;jailTries=0;
+        nextTurn('掷出对子 '+a+'!狱门洞开,重获自由!');
+      }else{
+        jailTries++;
+        if(jailTries>=3){
+          jail=false;jailTries=0;pos=Math.max(0,pos-2);
+          nextTurn('三回合没掷出对子,被罚退 2 格赶出大牢。');
+        }else{
+          nextTurn('掷出 '+a+'+'+b+',不是对子,还在狱中(第 '+jailTries+'/3 次尝试)。');
+        }
+      }
+      return;
+    }
+    var s=a+b;
+    pos+=s;
+    if(pos>=13){nextTurn('掷出 '+a+'+'+b+'='+s+',冲过终点!');return}
+    var ev=EV[pos];
+    if(ev==='陷'){
+      pos=Math.max(0,pos-2);
+      nextTurn('前进 '+s+' 格却踩中陷阱,倒退 2 格到 '+pos+'!');
+    }else if(ev==='跃'){
+      pos=Math.min(13,pos+2);
+      if(pos>=13){nextTurn('前进 '+s+' 格触发跃迁,直接弹到终点!');return}
+      nextTurn('前进 '+s+' 格触发跃迁,再进 2 格到 '+pos+'!');
+    }else if(ev==='狱'){
+      jail=true;jailTries=0;
+      nextTurn('前进 '+s+' 格,糟糕,踩中监狱格被关押!掷出对子才能出狱。');
+    }else{
+      nextTurn('掷出 '+a+'+'+b+'='+s+',安稳前进到 '+pos+' 格。');
+    }
+  });
+};
+function finish(good){
+  over=true;$('go').disabled=true;buildPath();
+  $('ovt').textContent=good?'抵达终点!':'回合耗尽';
+  $('ovp').innerHTML=good?'历经 '+(25-turns)+' 回合,双骰冒险大成功!':'还停在 '+(pos<=0?'起点附近':pos+' 格')+',下次躲着陷阱走。';
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  pos=0;turns=25;jail=false;jailTries=0;over=false;
+  $('overlay').classList.remove('show');
+  setDie($('d1'),1);setDie($('d2'),2);
+  buildPath();$('go').disabled=false;
+  say('新的冒险地图,点「掷骰前进」!');
+};
+setDie($('d1'),1);setDie($('d2'),2);
+buildPath();
+</script>
+</body>
+</html>

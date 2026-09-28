@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>稳手描线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #14532d;background:#0c1420;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,14,10,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#052e16;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>稳手描线</h1>
+  <p class="hint">按住鼠标/手指,沿着发光通道从左画到右。<br>越稳越加分,<b style="color:#f87171">脱轨会掉稳定值</b>,归零即失败;通道只有一条,中途不许跳车!</p>
+  <div class="hud"><span>进度 <b id="prog">0%</b></span><span>稳定 <b id="stab">100</b></span><span>关卡 <b id="lv">1/3</b></span><span>得分 <b id="score">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="420"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">稳手描线</h2>
+      <p id="ovP">三条越来越颠簸的曲线通道。按住并保持在线内前进,稳定值会缓慢回升;出界掉得飞快。松手可以喘口气,但重按只能从当前位置出发。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始描线</button>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elProg=$("prog"),elStab=$("stab"),elLv=$("lv"),elScore=$("score"),elMsg=$("msg");
+var FNS=[
+ function(x){return 240+70*Math.sin(x*0.012)+26*Math.sin(x*0.033+1.7);},
+ function(x){return 240+92*Math.sin(x*0.017+0.6)+34*Math.sin(x*0.045);},
+ function(x){return 240+112*Math.sin(x*0.021)+40*Math.sin(x*0.055+2.2);}
+];
+var W=17;
+var state="menu",lv=0,stab=100,prog=20,score=0,isDown=false,px=0,py=0,inside=true,lastT=0;
+function resetLevel(){
+  stab=100;prog=20;isDown=false;inside=true;
+  elLv.textContent=(lv+1)+"/3";hud();
+}
+function hud(){
+  elProg.textContent=Math.round(Math.max(0,(prog-20))/444*100)+"%";
+  elStab.textContent=Math.max(0,Math.round(stab));
+  elScore.textContent=score;
+}
+function showMsg(t){elMsg.textContent=t;setTimeout(function(){if(elMsg.textContent===t)elMsg.textContent="";},1400);}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){
+  if(state!=="playing")return;
+  var p=pos(e);isDown=true;px=p.x;py=p.y;
+  prog=Math.min(prog,Math.max(20,p.x+2));
+}
+function moveP(e){
+  if(!isDown||state!=="playing")return;
+  var p=pos(e);px=p.x;py=p.y;
+}
+function endP(){isDown=false;}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+function levelClear(){
+  var gain=Math.round(stab)+30;
+  score+=gain;hud();
+  lv++;
+  if(lv>=3){finish();return;}
+  showMsg("通过!稳定性奖励 +"+gain);
+  resetLevel();
+}
+function failLevel(){
+  state="over";
+  ovT.textContent="手抖了……";
+  ovP.textContent="稳定值归零,这条线断在了第 "+(lv+1)+" 关。\n深呼吸,慢一点,笔尖贴着中线走。";
+  ovS.style.display="block";ovS.textContent="当前得分 "+score;
+  btnGo.textContent="重整旗鼓";
+  ov.classList.remove("hide");
+}
+function finish(){
+  state="over";
+  ovT.textContent="全程稳如老狗!";
+  ovP.textContent="三条曲线通道全部走完,手是真稳。";
+  ovS.style.display="block";ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function draw(){
+  var fn=FNS[lv],x,y;
+  ctx.fillStyle="#0c1420";ctx.fillRect(0,0,480,420);
+  ctx.beginPath();
+  for(x=0;x<=480;x+=8){
+    y=fn(x);
+    if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle="rgba(74,222,128,0.12)";ctx.lineWidth=W*2;ctx.lineJoin="round";ctx.stroke();
+  ctx.beginPath();
+  for(x=0;x<=480;x+=8){
+    y=fn(x);
+    if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle="rgba(74,222,128,0.4)";ctx.lineWidth=2;ctx.setLineDash([8,8]);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle="#fde047";
+  ctx.beginPath();ctx.arc(20,fn(20),6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f87171";
+  ctx.beginPath();ctx.arc(462,fn(462),6,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="rgba(253,224,71,0.5)";ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(prog,0);ctx.lineTo(prog,420);ctx.stroke();
+  if(isDown){
+    ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);
+    ctx.fillStyle=inside?"#4ade80":"#f87171";ctx.fill();
+    if(!inside){
+      ctx.strokeStyle="rgba(248,113,113,0.8)";ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(px,py,13,0,Math.PI*2);ctx.stroke();
+    }
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT)/1000;lastT=t;
+  if(state!=="playing")return;
+  if(isDown){
+    inside=Math.abs(py-FNS[lv](px))<W;
+    if(inside){
+      stab=Math.min(100,stab+8*dt);
+      if(px>prog)prog=px;
+    }else{
+      stab-=26*dt;
+    }
+    if(stab<=0){stab=0;hud();failLevel();return;}
+    if(prog>462){levelClear();return;}
+  }
+  hud();
+  draw();
+}
+btnGo.addEventListener("click",function(){
+  lv=0;score=0;state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  resetLevel();
+});
+resetLevel();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

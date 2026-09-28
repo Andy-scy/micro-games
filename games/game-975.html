@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天平配重</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;--card:#1b2138;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;cursor:pointer;}
+#card{background:var(--card);border-radius:16px;padding:14px;margin-top:10px;}
+#turn{text-align:center;font-weight:700;font-size:15px;margin-bottom:10px;min-height:22px;}
+.rows{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+.row{display:flex;gap:8px;align-items:center;background:#10152b;border-radius:10px;padding:8px 12px;}
+.row .lab{font-size:13px;font-weight:700;}
+.row.off{opacity:.35;}
+.wchip{width:38px;height:38px;border-radius:9px;border:2px solid #2a3354;color:#0f1220;font-weight:900;font-size:16px;cursor:pointer;font-family:inherit;}
+.wchip.c1{background:#4fd1c5;}
+.wchip.c2{background:#f6ad55;}
+.wchip.sel{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,.6);}
+#msg{text-align:center;color:#f6c945;font-weight:700;min-height:22px;margin-top:10px;}
+#again{display:none;margin:6px auto 0;background:#4fd1c5;border:none;color:#06222b;font-size:15px;font-weight:700;padding:9px 32px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>天平配重</h1>
+<div id="tip">力矩对决:砝码越重、离支点越远,力矩越大(重量×格数)· 双方轮流把 5 个砝码放上己方横梁,全部放完后力矩大的一边下沉获胜 · 对手的落子全程可见,见招拆招!· 先胜 2 回合者夺冠</div>
+<div class="cvwrap"><canvas id="cv" width="720" height="330"></canvas></div>
+<div id="card">
+ <div id="turn"></div>
+ <div class="rows">
+  <div class="row" id="row0"><span class="lab" style="color:#4fd1c5">玩家1 砝码</span><span id="chips0"></span></div>
+  <div class="row" id="row1"><span class="lab" style="color:#f6ad55">玩家2 砝码</span><span id="chips1"></span></div>
+ </div>
+ <div id="msg"></div>
+ <button id="again">再来一局</button>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var chipsEls=[document.getElementById("chips0"),document.getElementById("chips1")];
+var rows=[document.getElementById("row0"),document.getElementById("row1")];
+var turnEl=document.getElementById("turn"),msgEl=document.getElementById("msg"),again=document.getElementById("again");
+var st;
+function torque(p){
+ var t=0,k;
+ for(k=0;k<5;k++)if(st.placed[p][k]!==null)t+=st.placed[p][k]*(k+1);
+ return t;
+}
+function diff(){return torque(1)-torque(0);}
+function reset(){
+ st={score:[0,0],round:1,turn:0,inv:[[],[]],placed:[[null,null,null,null,null],[null,null,null,null,null]],sel:null,ph:"place",bannerT:0,msg:""};
+ again.style.display="none";
+ newRound();
+}
+function newRound(){
+ var p,k;
+ for(p=0;p<2;p++){
+  st.inv[p]=[];
+  for(k=0;k<5;k++)st.inv[p].push(1+Math.floor(Math.random()*5));
+  st.placed[p]=[null,null,null,null,null];
+ }
+ st.sel=null;st.ph="place";
+ st.turn=(st.round-1)%2;
+ msgEl.textContent="";
+ renderChips();
+}
+function start(){reset();}
+function renderChips(){
+ var p,i;
+ for(p=0;p<2;p++){
+  var box=chipsEls[p];
+  box.innerHTML="";
+  var counts={};
+  for(i=0;i<st.inv[p].length;i++)counts[st.inv[p][i]]=(counts[st.inv[p][i]]||0)+1;
+  var vals=[1,2,3,4,5];
+  for(i=0;i<vals.length;i++){
+   var v=vals[i];
+   if(!counts[v])continue;
+   var b=document.createElement("button");
+   b.className="wchip c"+(p+1);
+   b.textContent=String(v);
+   if(st.sel!==null&&st.turn===p&&st.sel===v&&st.inv[p].indexOf(v)>=0&&st.turn===p)b.classList.add("sel");
+   (function(vv,pp){
+    b.addEventListener("click",function(){
+     if(st.ph!=="place"||st.turn!==pp)return;
+     st.sel=st.sel===vv?null:vv;
+     renderChips();
+     msgEl.textContent=st.sel===null?"已取消选择":(st.turn===0?"玩家1":"玩家2")+"已选中 "+vv+" 号砝码,点击己方横梁空格放置";
+    });
+   })(v,p);
+   box.appendChild(b);
+  }
+  rows[p].classList.toggle("off",st.turn!==p||st.ph!=="place");
+ }
+ turnEl.textContent=st.ph==="place"
+  ?("第 "+st.round+" 回合 · 轮到 玩家"+(st.turn+1)+" 放置砝码(比分 "+st.score[0]+":"+st.score[1]+")")
+  :("第 "+st.round+" 回合 · 比分 "+st.score[0]+":"+st.score[1]);
+}
+function slotPos(side,d){
+ var ang=Math.max(-0.22,Math.min(0.22,diff()/16*0.22));
+ var off=side===0?-56*d:56*d;
+ return{x:360+Math.cos(ang)*off,y:250+Math.sin(ang)*off,ang:ang};
+}
+function tryPlace(mx,my){
+ if(st.ph!=="place")return;
+ if(st.sel===null){msgEl.textContent="先在下方点击一枚砝码!";return;}
+ var side=st.turn,d;
+ for(d=1;d<=5;d++){
+  if(st.placed[side][d-1]!==null)continue;
+  var sp=slotPos(side,d);
+  if(Math.hypot(mx-sp.x,my-sp.y)<30){
+   st.placed[side][d-1]=st.sel;
+   var k=st.inv[side].indexOf(st.sel);
+   st.inv[side].splice(k,1);
+   st.sel=null;
+   if(st.inv[0].length===0&&st.inv[1].length===0)finish();
+   else{
+    st.turn=1-st.turn;
+    msgEl.textContent="轮到 玩家"+(st.turn+1);
+   }
+   renderChips();
+   return;
+  }
+ }
+ msgEl.textContent="请点击己方横梁上的空格子";
+}
+function finish(){
+ var df=diff();
+ st.ph="done";st.bannerT=120;
+ if(df===0){
+  st.msg="天平完全平衡!本回合重赛";
+ }else{
+  var w=df>0?1:0;
+  st.score[w]++;
+  st.msg="力矩 "+torque(0)+" : "+torque(1)+","+(w===0?"蓝方":"橙方")+"一侧下沉,拿下本回合!";
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph==="done"&&st.bannerT>0){
+  st.bannerT-=dt;
+  if(st.bannerT<=0){
+   if(st.score[0]>=2||st.score[1]>=2){
+    st.ph="over";
+    var w=st.score[0]>=2?0:1;
+    msgEl.textContent=(w===0?"玩家1":"玩家2")+" 以 "+st.score[0]+" : "+st.score[1]+" 夺冠!";
+    again.style.display="block";
+   }else{
+    st.round++;
+    newRound();
+   }
+  }
+ }
+ draw();
+ requestAnimationFrame(loop);
+}
+function draw(){
+ ctx.clearRect(0,0,720,330);
+ var ang=Math.max(-0.22,Math.min(0.22,diff()/16*0.22));
+ ctx.fillStyle="#2a3354";
+ ctx.beginPath();ctx.moveTo(360,290);ctx.lineTo(335,250);ctx.lineTo(385,250);ctx.closePath();ctx.fill();
+ ctx.fillRect(320,290,80,8);
+ ctx.save();ctx.translate(360,250);ctx.rotate(ang);
+ ctx.fillStyle="#3d4a78";
+ ctx.fillRect(-280,-5,560,10);
+ var d,side;
+ for(side=0;side<2;side++){
+  for(d=1;d<=5;d++){
+   var x=side===0?-56*d:56*d;
+   ctx.beginPath();ctx.arc(x,0,7,0,6.2832);
+   ctx.fillStyle=st.placed[side][d-1]===null?"#171d36":"#10152b";
+   ctx.fill();
+   ctx.strokeStyle=side===0?"rgba(79,209,197,.7)":"rgba(246,173,85,.7)";
+   ctx.lineWidth=2;ctx.stroke();
+  }
+ }
+ for(side=0;side<2;side++){
+  for(d=1;d<=5;d++){
+   var w=st.placed[side][d-1];
+   if(w===null)continue;
+   var x2=side===0?-56*d:56*d;
+   ctx.fillStyle=side===0?"#4fd1c5":"#f6ad55";
+   ctx.fillRect(x2-13,-34,26,26);
+   ctx.fillStyle="#0f1220";ctx.font="bold 15px system-ui";
+   ctx.textAlign="center";ctx.textBaseline="middle";
+   ctx.fillText(String(w),x2,-21);
+  }
+ }
+ ctx.restore();
+ ctx.font="bold 15px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";
+ ctx.fillText("蓝方力矩 "+torque(0),30,16);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";
+ ctx.fillText("橙方力矩 "+torque(1),690,16);
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";ctx.font="bold 13px system-ui";
+ ctx.fillText("第 "+st.round+" 回合 · 先胜 2 回合",360,16);
+ if(st.ph==="done"){
+  ctx.fillStyle="#f6c945";ctx.font="bold 24px system-ui";
+  ctx.fillText(st.msg,360,300);
+ }
+}
+cv.addEventListener("click",function(e){
+ var r=cv.getBoundingClientRect();
+ var mx=(e.clientX-r.left)/r.width*720;
+ var my=(e.clientY-r.top)/r.height*330;
+ tryPlace(mx,my);
+});
+again.addEventListener("click",function(){start();again.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

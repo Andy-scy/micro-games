@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>贴身超车</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>贴身超车</h1>
+  <p class="tips">四车道车流里疯狂穿插:每超过一台车得分,贴着旁边车道「擦身而过」分数翻倍,3 秒内连续超车还能叠连击!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="cb">x1</div></div>
+    <div class="stat"><div class="mut">超车数</div><div class="big" id="ov2">0</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tm">75 s</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">贴身超车</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 变道(触屏点画面左右)<br>· ↑ 加速、↓ 刹车控制自己的车速<br>· 每超过一台慢车 +50<br>· 超车瞬间与它在<b>相邻车道</b>,擦身而过 +100<br>· 3 秒内连续超车,连击倍率最高 x8<br>· 75 秒结束后结算;撞车立刻出局</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=420,H=560,LANES=4,RM=22,LW=(W-RM*2)/LANES;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var cars=[],running=false;
+var playerLane,playerX,speed,dist,score,combo,comboT,overtakes,timeLeft,spawnT,stripe;
+var floats=[];
+var keys={};
+var PY=H-110;
+function $i(id){return document.getElementById(id)}
+function laneCx(l){return RM+LW*l+LW/2}
+function reset(){
+  cars.length=0;floats.length=0;
+  playerLane=1;playerX=laneCx(1);speed=340;dist=0;score=0;combo=0;comboT=0;
+  overtakes=0;timeLeft=75;spawnT=0.4;stripe=0;
+  upd();
+}
+function upd(){
+  $i('sc').textContent=score;
+  $i('cb').textContent='x'+Math.max(1,combo);
+  $i('ov2').textContent=overtakes;
+  $i('tm').textContent=Math.ceil(timeLeft)+' s';
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function blockedMask(){
+  var m=0,i;
+  for(i=0;i<cars.length;i++){if(cars[i].y<200&&cars[i].y>-70)m|=(1<<cars[i].lane);}
+  return m;
+}
+function spawn(){
+  var m=blockedMask(),cand=[],l,i,ok;
+  for(l=0;l<LANES;l++){if(!(m&(1<<l)))cand.push(l);}
+  if(cand.length<=1)return;
+  l=cand[Math.floor(Math.random()*cand.length)];
+  ok=true;
+  for(i=0;i<cars.length;i++){if(cars[i].lane===l&&cars[i].y<150)ok=false;}
+  if(!ok)return;
+  cars.push({lane:l,x:laneCx(l),y:-90,passed:false,
+    spd:160+Math.random()*80,
+    c:['#4da3ff','#51d88a','#b07cff','#ff9f43'][Math.floor(Math.random()*4)]});
+}
+function addFloat(txt,x,y){
+  floats.push({txt:txt,x:x,y:y,life:1});
+}
+function update(dt){
+  timeLeft-=dt;
+  if(timeLeft<=0){
+    endRun('完赛!','最终得分 <b>'+score+'</b><br>超车 '+overtakes+' 台<br>擦身而过的艺术,你已经掌握了!');
+    return;
+  }
+  if(keys.ArrowUp||keys.w||keys.W)speed+=280*dt;
+  if(keys.ArrowDown||keys.s||keys.S)speed-=420*dt;
+  speed=Math.max(240,Math.min(560,speed));
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%80;
+  playerX+=(laneCx(playerLane)-playerX)*Math.min(1,dt*11);
+  spawnT-=dt;
+  if(spawnT<=0){spawn();spawnT=Math.max(0.4,1.0-speed*0.0008);}
+  if(comboT>0){comboT-=dt;if(comboT<=0)combo=0;}
+  var i,c,close;
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    c.y+=(speed-c.spd)*dt;
+    if(!c.passed&&c.y>PY+44){
+      c.passed=true;overtakes++;
+      close=Math.abs(c.lane-playerLane)===1;
+      if(comboT>0)combo=Math.min(8,combo+1);
+      else combo=1;
+      comboT=3;
+      var gain=(close?100:50)*combo;
+      score+=gain;
+      addFloat((close?'贴身 +':'+')+gain,c.x,PY-10);
+    }
+    if(c.y>H+100){cars.splice(i,1);continue;}
+    if(c.lane===playerLane&&Math.abs(c.y-PY)<62){
+      endRun('撞车了!','得分 '+score+'<br>超车 '+overtakes+' 台,坚持 '+Math.round(75-timeLeft)+' 秒<br>贴身要胆量,变道要看后视镜!');
+      return;
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].y-=50*dt;floats[i].life-=dt;
+    if(floats[i].life<=0)floats.splice(i,1);
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-20,y-34,40,68,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-15,y-19,30,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-15,y+6,30,17,5);ctx.fill();
+  ctx.fillStyle='#ffe08a';ctx.fillRect(x-17,y+28,9,5);ctx.fillRect(x+8,y+28,9,5);
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(RM,0,W-RM*2,H);
+  ctx.strokeStyle='rgba(255,255,255,.75)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(RM+2,0);ctx.lineTo(RM+2,H);ctx.moveTo(W-RM-2,0);ctx.lineTo(W-RM-2,H);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.28)';ctx.lineWidth=3;
+  ctx.setLineDash([24,32]);ctx.lineDashOffset=-stripe;
+  var l;
+  for(l=1;l<LANES;l++){
+    ctx.beginPath();ctx.moveTo(RM+LW*l,0);ctx.lineTo(RM+LW*l,H);ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for(l=0;l<cars.length;l++)drawCar(cars[l].x,cars[l].y,cars[l].c);
+  drawCar(playerX,PY,'#ff5c5c');
+  ctx.fillStyle='#ff3b3b';ctx.fillRect(playerX-17,PY+28,10,5);ctx.fillRect(playerX+7,PY+28,10,5);
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(l=0;l<floats.length;l++){
+    ctx.globalAlpha=Math.min(1,floats[l].life);
+    ctx.fillStyle='#ffd166';
+    ctx.fillText(floats[l].txt,floats[l].x,floats[l].y);
+    ctx.globalAlpha=1;
+  }
+  if(comboT>0&&combo>1){
+    ctx.font='bold 20px system-ui';
+    ctx.fillStyle='rgba(255,209,102,'+Math.min(1,comboT)+')';
+    ctx.fillText('连击 x'+combo,W/2,80);
+  }
+}
+window.addEventListener('keydown',function(e){
+  if(running){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){if(playerLane>0)playerLane--;}
+    else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D'){if(playerLane<LANES-1)playerLane++;}
+  }
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var rect=cv.getBoundingClientRect();
+  var x=(e.clientX-rect.left)*W/rect.width;
+  if(x<W*0.4&&playerLane>0)playerLane--;
+  else if(x>W*0.6&&playerLane<LANES-1)playerLane++;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

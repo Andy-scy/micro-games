@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子赛马</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.lane{display:flex;align-items:center;gap:8px;margin:8px 0}
+.tag{width:52px;height:40px;border:1px solid #333c63;border-radius:9px;background:#232a48;color:#ffd166;font-weight:800;font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.tag.me{box-shadow:inset 0 0 0 2px #ffd166;background:#3a3520}
+.track{flex:1;height:22px;background:#101426;border-radius:11px;overflow:hidden;border:1px solid #333c63}
+.horse{height:100%;width:0;background:linear-gradient(90deg,#4cc9f0,#7bd88f);border-radius:11px;transition:width .45s}
+.die{position:relative;width:44px;height:44px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子赛马</h1>
+  <p class="tips">六匹赛马对应六个点数,赛道 20 格,共 5 局。每局先点马押注(10 筹码,押中 +25),然后每回合掷两颗骰子,对应编号的马前进;掷出<b>对子</b>时该马一跃 2 格!开局 50 筹码,5 局后 ≥60 即胜利,中途不足 10 筹码则破产。</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">筹码</div><div class="big" id="chips">50</div></div>
+    <div class="card stat"><div class="mut">局数</div><div class="big" id="leg">1/5</div></div>
+  </div>
+  <div class="card" id="lanes"></div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="next" disabled>开局</button></div>
+  </div>
+  <div class="card log" id="log">点击左侧号码牌,押一匹马开赛!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var pos=[0,0,0,0,0,0],GOAL=20,LEG=5;
+var leg=1,chips=50,bet=-1,phase='pick',over=false,timer=null;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function buildLanes(){
+  var box=$('lanes');box.innerHTML='';
+  for(var i=0;i<6;i++){
+    var lane=document.createElement('div');lane.className='lane';
+    var tag=document.createElement('div');tag.className='tag'+(bet===i?' me':'');
+    tag.textContent=(i+1);
+    tag.onclick=(function(k){return function(){
+      if(over||phase!=='pick')return;
+      bet=k;buildLanes();
+      $('next').disabled=false;
+      $('log').textContent='你押注 '+(k+1)+' 号马!点「开赛」掷骰起跑。';
+    }})(i);
+    var track=document.createElement('div');track.className='track';
+    var h=document.createElement('div');h.className='horse';
+    h.style.width=(pos[i]/GOAL*100)+'%';
+    track.appendChild(h);
+    lane.appendChild(tag);lane.appendChild(track);
+    box.appendChild(lane);
+  }
+}
+function draw(){
+  $('chips').textContent=chips;
+  $('leg').textContent=Math.min(leg,LEG)+'/'+LEG;
+}
+function say(m){$('log').textContent=m}
+function raceStep(){
+  if(over)return;
+  var a=rnd(),b=rnd();
+  setDie($('d1'),a);setDie($('d2'),b);
+  if(a===b){pos[a-1]+=2;say('对子 '+a+'!'+a+' 号马一跃 2 格!')} 
+  else{pos[a-1]++;pos[b-1]++;say(a+' 号与 '+b+' 号马各进一步。')}
+  buildLanes();
+  var winner=-1,i;
+  for(i=0;i<6;i++)if(pos[i]>=GOAL){winner=i;break}
+  if(winner<0){timer=setTimeout(raceStep,560);return}
+  endLeg(winner);
+}
+function endLeg(w){
+  clearTimeout(timer);
+  var txt=(w+1)+' 号马率先冲线!';
+  if(bet===w){chips+=25;txt+='押中!+25 筹码。'}
+  else{chips-=10;txt+='押错,-10 筹码。'}
+  draw();
+  if(chips<10){finish(false,'筹码不足 10,你被请出了赛马场。');return}
+  leg++;
+  if(leg>LEG){finish(chips>=60,'五局终了,你手握 '+chips+' 筹码。');return}
+  phase='pick';bet=-1;pos=[0,0,0,0,0,0];
+  buildLanes();draw();
+  $('next').disabled=true;
+  say(txt+' 第 '+leg+' 局,重新押马!');
+}
+$('next').onclick=function(){
+  if(over||phase!=='pick'||bet<0)return;
+  phase='race';$('next').disabled=true;
+  say('比赛开始!骰声如雷……');
+  raceStep();
+};
+function finish(good,extra){
+  over=true;clearTimeout(timer);
+  $('ovt').textContent=good?'满载而归!':'赛马折戟';
+  $('ovp').innerHTML='最终筹码 <b>'+chips+'</b><br>'+extra;
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  pos=[0,0,0,0,0,0];leg=1;chips=50;bet=-1;phase='pick';over=false;
+  if(timer)clearTimeout(timer);
+  $('overlay').classList.remove('show');
+  setDie($('d1'),1);setDie($('d2'),2);
+  buildLanes();draw();$('next').disabled=true;
+  say('新一轮赛事,点击号码牌押马!');
+};
+setDie($('d1'),1);setDie($('d2'),2);
+buildLanes();draw();
+</script>
+</body>
+</html>

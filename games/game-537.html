@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>液位危机</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#38b000;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#38b000;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#38b000}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#38b000;color:#0c2e00;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>液位危机</h1>
+  <p class="hint">◀ ▶ 选列投放方块 · 点击连通 3 个以上同级块合一排水<br>液体不断上涨,泡太久会溶化,合并一次排一格水!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>液面 <b id="liq">1.0</b>/8</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="316" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">液位危机</h2>
+      <p id="ovP">水涨船高,合成就是你的排水泵\n让方块们手拉手(3 连以上)才能活下去!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button id="pL">◀</button>
+    <button id="pD">投 放</button>
+    <button id="pR">▶</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=7,ROWS=8,CELL=40,BX=18,BY=24;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#ffd166'];
+var grid=[],col=3,liq=0.5,score=0,best=0,state='ready';
+var flashes=[],sayMsg='',sayT=0,tG=0,solv={};
+function val(e){return Math.pow(2,e);}
+function randE(){return Math.random()<0.75?1:2;}
+function newGrid(){var g=[],r,c;for(r=0;r<ROWS;r++){g.push([]);for(c=0;c<COLS;c++)g[r].push(0);}return g;}
+function addScore(n){score=Math.max(0,score+n);if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function lowest(c){var r;for(r=ROWS-1;r>=0;r--)if(grid[r][c]===0)return r;return -1;}
+function compact(){
+  var c,r,stack,i;
+  for(c=0;c<COLS;c++){
+    stack=[];
+    for(r=ROWS-1;r>=0;r--)if(grid[r][c]>0)stack.push(grid[r][c]);
+    for(r=ROWS-1,i=0;r>=0;r--,i++)grid[r][c]=(i<stack.length)?stack[i]:0;
+  }
+}
+function say(s){sayMsg=s;sayT=1.4;}
+function groupOf(r,c){
+  var e=grid[r][c],seen={},list=[[r,c]],qi=0;
+  seen[r+','+c]=true;
+  var dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  while(qi<list.length){
+    var cur=list[qi];qi++;
+    for(var i=0;i<4;i++){
+      var rr=cur[0]+dirs[i][0],cc=cur[1]+dirs[i][1];
+      var k=rr+','+cc;
+      if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS&&!seen[k]&&grid[rr][cc]===e){
+        seen[k]=true;list.push([rr,cc]);
+      }
+    }
+  }
+  return list;
+}
+function tryMerge(r,c){
+  var e=grid[r][c];
+  if(e===0)return;
+  var g=groupOf(r,c);
+  if(g.length<3){say('至少 3 个同级块连成一片');return;}
+  var i;
+  for(i=0;i<g.length;i++){grid[g[i][0]][g[i][1]]=0;flashes.push({r:g[i][0],c:g[i][1],t:0});}
+  grid[r][c]=Math.min(9,e+1);
+  flashes.push({r:r,c:c,t:0});
+  addScore(g.length*e*8);
+  liq=Math.max(0,liq-1);
+  compact();
+}
+function doDrop(){
+  if(state!=='play')return;
+  var r=lowest(col);
+  if(r<0){say('这一列已经满了');return;}
+  grid[r][col]=randE();
+  flashes.push({r:r,c:col,t:0});
+}
+function fail(){
+  state='over';
+  $('ovT').textContent='水位没顶!';
+  $('ovP').textContent='液体吞没了整个方舱';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  grid=newGrid();col=3;liq=0.5;score=0;flashes=[];sayT=0;solv={};
+  var i;
+  for(i=0;i<6;i++){
+    var cc=Math.floor(Math.random()*COLS),rr=ROWS-1-Math.floor(Math.random()*2);
+    if(grid[rr][cc]===0)grid[rr][cc]=randE();
+  }
+  compact();
+  $('score').textContent='0';$('liq').textContent='0.5';$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function clickAt(x,y){
+  if(state!=='play')return;
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(c<0||c>=COLS||r<0||r>=ROWS)return;
+  col=c;
+  if(grid[r][c]>0)tryMerge(r,c);
+  else doDrop();
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*316/rc.width,(e.clientY-rc.top)*360/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*316/rc.width,(t.clientY-rc.top)*360/rc.height);
+  e.preventDefault();
+},{passive:false});
+window.addEventListener('keydown',function(e){
+  if(state!=='play')return;
+  if(e.keyCode===37){col=(col+COLS-1)%COLS;e.preventDefault();}
+  else if(e.keyCode===39){col=(col+1)%COLS;e.preventDefault();}
+  else if(e.keyCode===32||e.keyCode===40){doDrop();e.preventDefault();}
+});
+$('pL').addEventListener('click',function(){if(state==='play')col=(col+COLS-1)%COLS;});
+$('pR').addEventListener('click',function(){if(state==='play')col=(col+1)%COLS;});
+$('pD').addEventListener('click',doDrop);
+function update(dt){
+  var r,c,i;
+  tG+=dt;
+  liq+=dt*0.09;
+  $('liq').textContent=liq.toFixed(1);
+  if(liq>=ROWS){fail();return;}
+  if(sayT>0)sayT-=dt;
+  var drowned=[];
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(grid[r][c]>0&&r>=ROWS-liq){
+      var k=r+','+c;
+      solv[k]=(solv[k]||0)+dt;
+      if(solv[k]>=4){
+        grid[r][c]=0;
+        delete solv[k];
+        addScore(-30);
+        flashes.push({r:r,c:c,t:0,dis:true});
+        drowned.push(1);
+      }
+    }
+  }
+  if(drowned.length>0)compact();
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.4)k.push(flashes[i]);
+  flashes=k;
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,316,360);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,316,360);
+  var r,c,i;
+  ctx.strokeStyle='rgba(255,255,255,.05)';
+  for(i=0;i<=COLS;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+ROWS*CELL);ctx.stroke();}
+  for(i=0;i<=ROWS;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+COLS*CELL,BY+i*CELL);ctx.stroke();}
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    var e=grid.length?grid[r][c]:0;
+    if(e>0){
+      ctx.fillStyle=CCOL[Math.min(e,8)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,8);ctx.fill();
+      if(r>=ROWS-liq){
+        var sk=solv[r+','+c]||0;
+        ctx.save();ctx.globalAlpha=0.35+0.25*Math.sin(Date.now()/120);
+        ctx.fillStyle='#5ad0ff';
+        roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,8);ctx.fill();
+        ctx.restore();
+        ctx.fillStyle='rgba(10,30,60,.9)';
+        ctx.fillRect(BX+c*CELL+6,BY+r*CELL+CELL-9,(CELL-12)*(1-sk/4),3);
+      }
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      ctx.font='700 '+Math.min(19,11+e)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(val(e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  var lv=liq*CELL;
+  var topY=BY+ROWS*CELL-lv;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(BX,topY+Math.sin(tG*3)*3);
+  for(i=0;i<=COLS*2;i++){
+    var wx=BX+i*(COLS*CELL/(COLS*2));
+    ctx.lineTo(wx,topY+Math.sin(tG*3+i*0.9)*3);
+  }
+  ctx.lineTo(BX+COLS*CELL,BY+ROWS*CELL);ctx.lineTo(BX,BY+ROWS*CELL);ctx.closePath();
+  ctx.fillStyle='rgba(56,176,0,.30)';
+  ctx.fill();
+  ctx.strokeStyle='rgba(120,240,80,.8)';ctx.lineWidth=2;ctx.stroke();
+  ctx.restore();
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.4;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle=f.dis?'#5ad0ff':'#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+2-pr*5,BY+f.r*CELL+2-pr*5,CELL-4+pr*10,CELL-4+pr*10,8);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'){
+    ctx.fillStyle='rgba(255,255,255,.2)';
+    ctx.fillRect(BX+col*CELL+2,BY+ROWS*CELL-2,CELL-4,6);
+    if(sayT>0){
+      ctx.fillStyle='rgba(255,150,150,'+Math.min(1,sayT*2)+')';
+      ctx.font='12px system-ui';ctx.textAlign='center';
+      ctx.fillText(sayMsg,158,16);
+    }
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

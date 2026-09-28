@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色块快照</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:460px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#ffd166;border-radius:6px}
+#msg{text-align:center;font-size:15px;color:#cdd6f4;min-height:22px;margin:8px 0}
+#grid{display:grid;gap:6px;justify-content:center}
+.cell{border-radius:9px;border:2px solid rgba(255,255,255,.1);background:#232a48;cursor:pointer}
+#pals{display:flex;gap:9px;justify-content:center;margin-top:12px}
+.pal{width:46px;height:46px;border-radius:11px;border:3px solid rgba(255,255,255,.15);cursor:pointer}
+.pal.on{border-color:#ffd166;box-shadow:0 0 12px rgba(255,209,102,.5)}
+#done{margin-top:12px}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.4;cursor:default}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色块快照</h1>
+  <p class="tips">一张彩色格子图只展示几秒——用眼睛拍下它!随后格子熄灭,从色盘选色把整张图复现出来,点「完成」评分:准确率 ≥80% 过关得分,不足则 -1 生命(共 3 条)并重拍。5 关网格逐关变大,全部通过即通关!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/5</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="msg"></div>
+    <div id="grid"></div>
+    <div id="pals"></div>
+    <div id="done"><button class="btn" id="fin" disabled>完成复现</button></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色块快照</h2><p id="ovp">玩法:空间色彩记忆。<br>· 记忆阶段:整张彩格图短暂展示,倒计时结束熄灭<br>· 复现阶段:色盘选色后点击格子逐格涂色,可反复修改<br>· 点「完成复现」评分:准确率 ≥80% 过关,<br>　得分 = 准确率×100×关卡数<br>· 不足 80% -1 生命并换新图重试;3 条生命用完判负<br>· 5 关网格从 3×3 逐关加大到 5×5</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PAL=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var NS=[3,3,4,4,5],TS=[4.2,3.6,3.4,3,2.8];
+var level=1,lives=3,score=0,phase='idle',n=3;
+var pattern=[],paintA=[],active=0,showT=0,showLen=0,S=0;
+var playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function startLevel(){
+  n=NS[level-1];
+  showLen=TS[level-1];
+  showT=showLen;
+  phase='show';
+  pattern=[];paintA=[];
+  for(var i=0;i<n*n;i++){
+    pattern.push(Math.floor(Math.random()*5));
+    paintA.push(-1);
+  }
+  $('fin').disabled=true;
+  buildGrid();buildPals();
+  $('msg').textContent='记忆阶段:拍下这张色块图!';
+  $('lv').textContent=level+'/5';
+}
+function buildGrid(){
+  var g=$('grid');
+  g.innerHTML='';
+  g.style.gridTemplateColumns='repeat('+n+',72px)';
+  for(var i=0;i<n*n;i++){
+    var d=document.createElement('button');
+    d.className='cell';
+    d.style.width='72px';
+    d.style.height='72px';
+    (function(idx){d.addEventListener('click',function(){paintCell(idx)})})(i);
+    g.appendChild(d);
+  }
+  renderGrid();
+}
+function renderGrid(){
+  var g=$('grid');
+  for(var i=0;i<n*n;i++){
+    var el=g.children[i];
+    if(phase==='show'){
+      el.style.background=PAL[pattern[i]][1];
+      el.style.opacity='1';
+    }else{
+      el.style.background=paintA[i]>=0?PAL[paintA[i]][1]:'#232a48';
+      el.style.opacity='1';
+    }
+  }
+}
+function buildPals(){
+  var box=$('pals');box.innerHTML='';
+  for(var i=0;i<5;i++){
+    var b=document.createElement('button');
+    b.className='pal'+(i===active?' on':'');
+    b.style.background=PAL[i][1];
+    (function(idx){b.addEventListener('click',function(){setActive(idx)})})(i);
+    box.appendChild(b);
+  }
+}
+function setActive(i){
+  active=i;buildPals();
+}
+function paintCell(idx){
+  if(!playing||over||phase!=='paint')return;
+  paintA[idx]=active;
+  renderGrid();
+  $('fin').disabled=false;
+}
+function submit(){
+  if(!playing||over||phase!=='paint')return;
+  var ok=0;
+  for(var i=0;i<n*n;i++)if(paintA[i]===pattern[i])ok++;
+  var acc=ok/(n*n);
+  phase='wait';
+  if(acc>=0.8){
+    score+=Math.round(acc*100)*level;
+    level++;
+    $('sc').textContent=score;
+    if(level>5){finish(true);return;}
+    $('msg').textContent='准确率 '+Math.round(acc*100)+'%,过关!下一张图……';
+  }else{
+    lives--;
+    $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    if(lives<=0){finish(false);return;}
+    $('msg').textContent='准确率仅 '+Math.round(acc*100)+'%(需 80%),换图重拍!';
+  }
+  var tk=++S;
+  setTimeout(function(){if(tk===S&&playing&&!over)startLevel()},1300);
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'过目不忘的调色眼!':'记忆褪色了…';
+  $('ovp').innerHTML=(win?'5 关色块快照全部复现!':'止步第 '+level+' 关。')+'<br>总分 <b>'+score+'</b><br>按区域成片记忆,别一格一格背,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('fin').addEventListener('click',submit);
+function startGame(){
+  S++;level=1;lives=3;score=0;active=0;
+  playing=true;over=false;
+  $('sc').textContent='0';
+  $('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  startLevel();
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&phase==='show'){
+    showT-=dt;
+    $('tbar').style.width=(Math.max(0,showT)/showLen*100)+'%';
+    if(showT<=0){
+      phase='paint';
+      renderGrid();
+      $('msg').textContent='复现阶段:色盘选色,点格子涂色!';
+    }
+  }else if(playing&&!over&&phase==='paint'){
+    $('tbar').style.width='0%';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

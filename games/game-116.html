@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹幕首领</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹幕首领</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏拖动 · 撑过 10 波攻击即胜利!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>波次 <b id="wave">-</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹幕首领</h2>
+      <p id="ovDesc">巨型弹幕首领镇守顶部,将发动 10 波攻势,每波 11 秒:环爆、三连狙击、螺旋、留缝弹墙、暴雨轮番上阵,一波比一波狠!撑过全部 10 波即胜利,每波结束 +100 分。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),elWave=$("wave");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var KEY="mg_s116";
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest(KEY);
+var state="menu",score=0,timeMs=0,lastT=0;
+var player={x:W/2,y:H-70};
+var bullets=[],parts=[];
+var boss={x:W/2,y:76,dirn:1};
+var wave=0,waveT=0,phase="break",breakT=0,fireT=0,spiralA=0,banner=0,bannerTxt="";
+var keys={};
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function d2f(ax,ay,bx,by){var dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;}
+function rand(a,b){return a+Math.random()*(b-a);}
+function updHud(){
+  elScore.textContent=Math.floor(score);
+  elBest.textContent=best;
+  elWave.textContent=wave<=0?"-":(wave+"/10");
+}
+function reset(){
+  score=0;timeMs=0;bullets=[];parts=[];keys={};
+  player.x=W/2;player.y=H-70;
+  boss={x:W/2,y:76,dirn:1};
+  wave=0;waveT=0;phase="break";breakT=2.2;fireT=0;spiralA=0;banner=0;bannerTxt="";
+  updHud();
+}
+function burst(x,y,c,n){
+  var i;
+  for(i=0;i<n;i++){parts.push({x:x,y:y,vx:rand(-140,140),vy:rand(-140,140),t:0.55,c:c});}
+}
+function startWave(){
+  wave++;
+  if(wave>10){win();return;}
+  phase="fight";waveT=11;fireT=0.5;
+  banner=2;bannerTxt="第 "+wave+" 波";
+  updHud();
+}
+function pattern(){return (wave-1)%5;}
+function fire(){
+  var sp,i,j,a;
+  if(pattern()===0){
+    fireT=Math.max(0.7,1.4-wave*0.06);
+    var n=10+wave;
+    var base=rand(0,Math.PI*2);
+    sp=110+wave*7;
+    for(i=0;i<n;i++){
+      a=base+i*Math.PI*2/n;
+      bullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:5});
+    }
+  }else if(pattern()===1){
+    fireT=Math.max(0.5,0.95-wave*0.04);
+    base=Math.atan2(player.y-boss.y,player.x-boss.x);
+    sp=150+wave*10;
+    for(j=-1;j<=1;j++){
+      a=base+j*0.22;
+      bullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:4.5});
+    }
+  }else if(pattern()===2){
+    fireT=0.1;
+    spiralA+=0.38;
+    sp=95+wave*6;
+    for(j=0;j<2;j++){
+      a=spiralA+j*Math.PI;
+      bullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:4.5});
+    }
+  }else if(pattern()===3){
+    fireT=Math.max(1.2,2.3-wave*0.08);
+    var gx=rand(50,W-50);
+    for(i=16;i<W;i+=34){
+      if(Math.abs(i-gx)>55)bullets.push({x:i,y:60,vx:0,vy:105+wave*7,r:5});
+    }
+  }else{
+    fireT=0.11;
+    bullets.push({x:rand(10,W-10),y:58,vx:rand(-20,20),vy:130+wave*8,r:4});
+  }
+}
+function moveInput(){
+  var mx=0,my=0;
+  if(keys.ArrowLeft||keys.a)mx-=1;
+  if(keys.ArrowRight||keys.d)mx+=1;
+  if(keys.ArrowUp||keys.w)my-=1;
+  if(keys.ArrowDown||keys.s)my+=1;
+  var l=Math.sqrt(mx*mx+my*my);
+  if(l>0){mx/=l;my/=l;}
+  return {x:mx,y:my};
+}
+function update(dt){
+  var s=dt/1000,i,b;
+  timeMs+=dt;score+=s*10;
+  if(banner>0)banner-=s;
+  var mv=moveInput();
+  player.x=clamp(player.x+mv.x*200*s,10,W-10);
+  player.y=clamp(player.y+mv.y*200*s,10,H-10);
+  if(phase==="break"){
+    breakT-=s;
+    if(breakT<=0)startWave();
+  }else{
+    boss.x+=boss.dirn*(36+wave*3)*s;
+    if(boss.x<80){boss.x=80;boss.dirn=1;}
+    if(boss.x>W-80){boss.x=W-80;boss.dirn=-1;}
+    waveT-=s;
+    fireT-=s;
+    if(fireT<=0)fire();
+    if(waveT<=0){
+      score+=100;
+      bullets.length=0;
+      phase="break";breakT=2.6;
+      banner=2;bannerTxt="波次通过 +100";
+    }
+  }
+  for(i=bullets.length-1;i>=0;i--){
+    b=bullets[i];
+    b.x+=b.vx*s;b.y+=b.vy*s;
+    if(b.x<-30||b.x>W+30||b.y<-30||b.y>H+30){bullets.splice(i,1);continue;}
+    if(d2f(b.x,b.y,player.x,player.y)<(b.r+8)*(b.r+8)){die("在第 "+wave+" 波被击倒了!");return;}
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];p.t-=s;p.x+=p.vx*s;p.y+=p.vy*s;
+    if(p.t<=0)parts.splice(i,1);
+  }
+  updHud();
+}
+function endOverlay(title,msg){
+  state="over";
+  if(Math.floor(score)>best){best=Math.floor(score);saveBest(KEY,best);}
+  ovTitle.textContent=title;
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+Math.floor(score)+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updHud();
+}
+function die(msg){
+  burst(player.x,player.y,"#22d3ee",26);
+  endOverlay("游戏结束",msg);
+}
+function win(){
+  burst(boss.x,boss.y,"#fbbf24",40);
+  endOverlay("挑战成功!","你躲过了弹幕首领全部 10 波攻势!");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function drawGrid(){
+  var x,y;
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<W;x+=40)for(y=0;y<H;y+=40)ctx.fillRect(x+1,y+1,38,38);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawGrid();
+  var i;
+  ctx.save();
+  ctx.translate(boss.x,boss.y);
+  var pulse=1+0.05*Math.sin(timeMs*0.006);
+  ctx.scale(pulse,pulse);
+  ctx.fillStyle="#be185d";
+  ctx.shadowColor="#f472b6";ctx.shadowBlur=22;
+  ctx.beginPath();ctx.arc(0,0,26,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#fecdd3";
+  ctx.beginPath();ctx.arc(0,0,11,0,Math.PI*2);ctx.fill();
+  var ea=Math.atan2(player.y-boss.y,player.x-boss.x);
+  ctx.fillStyle="#881337";
+  ctx.beginPath();ctx.arc(Math.cos(ea)*4,Math.sin(ea)*4,5,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#f472b6";
+  ctx.shadowColor="#f472b6";ctx.shadowBlur=8;
+  for(i=0;i<bullets.length;i++){
+    var b=bullets[i];
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+  for(i=0;i<parts.length;i++){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.t*2);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#22d3ee";
+  ctx.shadowColor="#22d3ee";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(player.x,player.y,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(phase==="fight"&&waveT>0){
+    ctx.strokeStyle="rgba(251,191,36,0.7)";
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(boss.x,boss.y,32,-Math.PI/2,-Math.PI/2+Math.PI*2*(waveT/11));ctx.stroke();
+    ctx.lineWidth=1;
+  }
+  if(banner>0){
+    ctx.globalAlpha=Math.min(1,banner);
+    ctx.fillStyle="#fbbf24";
+    ctx.font="bold 26px system-ui";
+    ctx.textAlign="center";
+    ctx.fillText(bannerTxt,W/2,H/2-40);
+    ctx.globalAlpha=1;
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function kn(e){var k=e.key;return k.length===1?k.toLowerCase():k;}
+document.addEventListener("keydown",function(e){
+  var k=kn(e);
+  if(k==="ArrowUp"||k==="ArrowDown"||k==="ArrowLeft"||k==="ArrowRight"||k===" ")e.preventDefault();
+  if(state!=="playing"){
+    if(k===" "||k==="Enter")startGame();
+    return;
+  }
+  keys[k]=true;
+});
+document.addEventListener("keyup",function(e){keys[kn(e)]=false;});
+var tId=null,lx=0,ly=0;
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];tId=t.identifier;
+  var r=cv.getBoundingClientRect();
+  lx=(t.clientX-r.left)*(W/r.width);ly=(t.clientY-r.top)*(H/r.height);
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect(),i,t;
+  for(i=0;i<e.changedTouches.length;i++){
+    t=e.changedTouches[i];
+    if(t.identifier===tId){
+      var x=(t.clientX-r.left)*(W/r.width),y=(t.clientY-r.top)*(H/r.height);
+      player.x=clamp(player.x+(x-lx),10,W-10);
+      player.y=clamp(player.y+(y-ly),10,H-10);
+      lx=x;ly=y;
+    }
+  }
+},{passive:false});
+function tEnd(e){
+  var i;
+  for(i=0;i<e.changedTouches.length;i++){if(e.changedTouches[i].identifier===tId)tId=null;}
+}
+cv.addEventListener("touchend",tEnd,{passive:false});
+cv.addEventListener("touchcancel",tEnd,{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

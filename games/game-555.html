@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字接龙 七王摆牌</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:720px;margin-bottom:8px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:8px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:12px;width:100%;max-width:760px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.brow{display:flex;gap:2px;align-items:center}
+.bsuit{width:18px;font-size:14px;text-align:center}
+.slot{width:26px;height:36px;border-radius:5px;background:rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;font-size:11px;color:#51607a}
+.slot.fill{background:#fdfdfa;color:#1c2030;font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.slot.fill.red{color:#d62839}
+.slot.seven{outline:2px solid #ffd166}
+#hand{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;min-height:64px}
+.hcard{width:40px;height:56px;border-radius:6px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.45);user-select:none;cursor:pointer}
+.hcard.red{color:#d62839}
+.hcard .r{font-size:12px;font-weight:800}
+.hcard .s{font-size:18px;line-height:1}
+.hcard.dim{opacity:.35;cursor:default}
+.hcard.play{outline:2px solid #4cc9f0}
+#msg{min-height:20px;font-size:14px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>数字接龙 · 七王摆牌</h1>
+<p id="how">四个花色的 7 先上桌，之后按大小向两边接龙（6、8、5、9……）。轮到你时点一张可接的牌；接不上就点「过」。谁先出完手牌直接获胜，否则双方同时卡住时手上点数小者胜。</p>
+<div id="bar"><span>你的手牌 <b id="pn">26</b> 张</span><span>AI 手牌 <b id="an">26</b> 张</span><span>剩牌点数 你 <b id="pv">0</b> : AI <b id="av">0</b></span></div>
+<div id="table">
+  <div id="board"></div>
+  <div class="lab" style="margin-top:6px">你的手牌（亮框可出）</div>
+  <div id="hand"></div>
+  <div id="msg"></div>
+  <div id="btns"><button id="pass" class="acc">过</button><button id="rst">重开</button></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var hands=[[],[]],min={},max={},placed={},turn=0,phase='play',passStreak=0,aiTimer=null;
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+1;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function playable(c){
+  var s=c.s,v=vi(c.r);
+  if(placed[s][7]===undefined)return v===7;
+  return v===min[s]-1||v===max[s]+1;
+}
+function handValue(who){
+  var s=0;
+  for(var i=0;i<hands[who].length;i++)s+=vi(hands[who][i].r);
+  return s;
+}
+function render(){
+  $('pn').textContent=hands[0].length;$('an').textContent=hands[1].length;
+  $('pv').textContent=handValue(0);$('av').textContent=handValue(1);
+  var b=$('board');b.innerHTML='';
+  for(var i=0;i<4;i++){
+    var s=SUITS[i];
+    var row=document.createElement('div');row.className='brow';
+    var lab=document.createElement('div');lab.className='bsuit';lab.textContent=s;
+    if(s==='♥'||s==='♦')lab.style.color='#ff8a8a';
+    row.appendChild(lab);
+    for(var v=1;v<=13;v++){
+      var d=document.createElement('div');
+      var on=placed[s][v]!==undefined;
+      d.className='slot'+(on?' fill'+((s==='♥'||s==='♦')?' red':''):'')+(v===7&&!on?' seven':'');
+      d.textContent=on?RANKS[v-1]:RANKS[v-1];
+      row.appendChild(d);
+    }
+    b.appendChild(row);
+  }
+  var h=$('hand');h.innerHTML='';
+  for(var k=0;k<hands[0].length;k++){
+    var c=hands[0][k];
+    var red=(c.s==='♥'||c.s==='♦')?' red':'';
+    var ok=playable(c)&&turn===0&&phase==='play';
+    var cls='hcard'+red+(ok?' play':(turn===0&&phase==='play'?' dim':''));
+    h.innerHTML+='<div class="'+cls+'" data-i="'+k+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+  }
+  var any=false;
+  for(var m=0;m<hands[0].length;m++)if(playable(hands[0][m])){any=true;break;}
+  $('pass').disabled=!(turn===0&&phase==='play'&&!any);
+}
+function msg(s){$('msg').textContent=s;}
+function place(who,c){
+  var s=c.s,v=vi(c.r);
+  if(placed[s][7]===undefined){min[s]=7;max[s]=7;}
+  else{
+    if(v<min[s])min[s]=v;
+    if(v>max[s])max[s]=v;
+  }
+  placed[s][v]=1;
+  var h=hands[who];
+  h.splice(h.indexOf(c),1);
+  passStreak=0;
+}
+function endByStuck(){
+  var p=handValue(0),a=handValue(1);
+  if(p<a)end(true,'双方卡住：你剩 '+p+' 点，AI 剩 '+a+' 点，点少者胜');
+  else if(a<p)end(false,'双方卡住：你剩 '+p+' 点，AI 剩 '+a+' 点，点多者败');
+  else end(false,'双方卡住且同为 '+p+' 点，平局');
+}
+function end(win,info){
+  phase='done';if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info;
+  $('over').classList.remove('hide');
+}
+function aiTurn(){
+  if(phase!=='play'||turn!==1)return;
+  var h=hands[1],best=null;
+  for(var i=0;i<h.length;i++){
+    var c=h[i];
+    if(playable(c)&&(!best||vi(c.r)>vi(best.r)))best=c;
+  }
+  if(best){
+    place(1,best);
+    msg('AI 打出 '+best.r+best.s);
+    render();
+    if(hands[1].length===0){end(false,'AI 出完全部手牌');return;}
+    turn=0;render();
+  }else{
+    passStreak++;
+    msg('AI 无牌可接，过');
+    if(passStreak>=2){endByStuck();return;}
+    turn=0;render();
+  }
+}
+$('hand').addEventListener('click',function(e){
+  if(turn!==0||phase!=='play')return;
+  var t=e.target;
+  while(t&&!t.classList.contains('hcard'))t=t.parentElement;
+  if(!t)return;
+  var i=parseInt(t.getAttribute('data-i'),10);
+  var c=hands[0][i];
+  if(!playable(c)){msg('这张接不上：要 7 或已摆牌的相邻数');return;}
+  place(0,c);
+  msg('你打出 '+c.r+c.s);
+  render();
+  if(hands[0].length===0){end(true,'你出完全部手牌，大获全胜！');return;}
+  turn=1;
+  aiTimer=setTimeout(aiTurn,750);
+  render();
+});
+$('pass').onclick=function(){
+  if(turn!==0||phase!=='play')return;
+  passStreak++;
+  msg('你无牌可接，过');
+  if(passStreak>=2){endByStuck();return;}
+  turn=1;
+  aiTimer=setTimeout(aiTurn,750);
+  render();
+};
+$('rst').onclick=newGame;
+$('again').onclick=newGame;
+function newGame(){
+  if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});
+  shuffle(d);
+  hands=[d.slice(0,26),d.slice(26)];
+  min={};max={};placed={};
+  for(var k=0;k<4;k++){placed[SUITS[k]]={};min[SUITS[k]]=7;max[SUITS[k]]=7;}
+  turn=0;phase='play';passStreak=0;
+  $('over').classList.add('hide');msg('四个 7 是龙骨，先接上它们！');render();
+}
+newGame();
+})();
+</script>
+</body>
+</html>

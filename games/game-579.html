@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子钓鱼</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#4cc9f0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:14px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+#pond{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.fish{background:#12304a;border:1px solid #1f5a86;border-radius:12px;padding:10px 10px 6px;text-align:center}
+.fish .tag{font-size:11px;color:#7fb8dd;margin-top:4px}
+.fish.bite{box-shadow:0 0 0 3px #ffd166;border-color:#ffd166}
+.fish.bite .tag{color:#ffd166}
+.die{position:relative;width:48px;height:48px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#4cc9f0}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#4cc9f0;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子钓鱼</h1>
+  <p class="tips">12 回合钓 大鱼!池塘里游着 5 条点数各异的骰鱼,抛竿掷出 1 骰:命中同点鱼即可「收竿」(得分 = 点数×2),钓走后补进新鱼;<b>放生</b>可留着鱼池博更大的鱼。没命中?有 3 份诱饵可免费重掷。终局 ≥45 分丰收!</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">回合</div><div class="big" id="rd">1/12</div></div>
+    <div class="card stat"><div class="mut">渔获分</div><div class="big" id="sc">0</div></div>
+    <div class="card stat"><div class="mut">诱饵</div><div class="big" id="bt">3</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div id="pond"></div>
+    <div class="row" style="margin-top:12px"><div class="die" id="die"></div></div>
+    <div class="row" style="margin-top:10px" id="acts"></div>
+  </div>
+  <div class="card log" id="log">点「抛竿」开始垂钓!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var fish=[],round=1,score=0,bait=3,cur=0,phase='idle',over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function newFish(){
+  var f=[],tries=0;
+  while(f.length<5&&tries<60){
+    var v=rnd();
+    if(f.indexOf(v)<0)f.push(v);
+    tries++;
+  }
+  return f;
+}
+function addFish(){
+  var tries=0,v=rnd();
+  while(fish.indexOf(v)>=0&&tries<40){v=rnd();tries++}
+  fish.push(v);
+}
+function drawPond(){
+  var P=$('pond');P.innerHTML='';
+  for(var i=0;i<fish.length;i++){
+    var f=document.createElement('div');
+    f.className='fish'+(phase==='bite'&&fish[i]===cur?' bite':'');
+    var d=document.createElement('div');d.className='die';setDie(d,fish[i]);
+    f.appendChild(d);
+    var t=document.createElement('div');t.className='tag';t.textContent=fish[i]+' 点鱼';
+    f.appendChild(t);
+    P.appendChild(f);
+  }
+}
+function drawActs(){
+  var A=$('acts');A.innerHTML='';
+  function mk(txt,cls,fn,dis){
+    var b=document.createElement('button');
+    b.className='btn'+(cls?' '+cls:'');
+    b.textContent=txt;b.disabled=!!dis||over;
+    b.onclick=fn;
+    A.appendChild(b);
+  }
+  if(phase==='idle')mk('抛竿','',cast);
+  else if(phase==='bite'){
+    mk('收竿(+'+(cur*2)+'分)','',keepFish);
+    mk('放生','sec',release);
+  }else{
+    mk('用诱饵重掷('+bait+')','',useBait,bait<=0);
+    mk('空竿跳过','sec',pass);
+  }
+}
+function drawTop(){
+  $('rd').textContent=Math.min(round,12)+'/12';
+  $('sc').textContent=score;
+  $('bt').textContent=bait;
+}
+function say(m){$('log').textContent=m}
+function cast(){
+  if(over||phase!=='idle')return;
+  cur=rnd();
+  setDie($('die'),cur);
+  if(fish.indexOf(cur)>=0){
+    phase='bite';
+    say('竿尖一沉!'+cur+' 点鱼咬钩了,收竿还是放生?');
+  }else{
+    phase='miss';
+    say('掷出 '+cur+' 点,池塘里没有这条鱼…用诱饵再试一次?');
+  }
+  drawPond();drawActs();
+}
+function keepFish(){
+  if(over||phase!=='bite')return;
+  score+=cur*2;
+  fish.splice(fish.indexOf(cur),1);
+  addFish();
+  next('收进 '+cur+' 点鱼,得 '+(cur*2)+' 分!渔获分 '+score+'。');
+}
+function release(){
+  if(over||phase!=='bite')return;
+  next('你放生了 '+cur+' 点鱼,把鱼池留给更大的猎物。');
+}
+function useBait(){
+  if(over||phase!=='miss'||bait<=0)return;
+  bait--;drawTop();
+  phase='idle';
+  say('诱饵下水('+bait+' 份剩余),再抛一竿!');
+  drawActs();
+}
+function pass(){
+  if(over||phase!=='miss')return;
+  next('空竿而归,消耗一个回合。');
+}
+function next(msg){
+  round++;
+  cur=0;phase='idle';
+  drawPond();drawTop();drawActs();
+  setDie($('die'),0);
+  if(round>12){finish();return}
+  say(msg+' 第 '+round+' 回合。');
+}
+function finish(){
+  over=true;drawActs();
+  var good=score>=45;
+  $('ovt').textContent=good?'满载而归!':'空军收场';
+  $('ovp').innerHTML='12 回合渔获分 <b>'+score+'</b> / 目标 45<br>'+(good?'今晚全村喝鱼汤!':'钓鱼讲究耐心与取舍,再来一竿?');
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  fish=newFish();round=1;score=0;bait=3;cur=0;phase='idle';over=false;
+  $('overlay').classList.remove('show');
+  setDie($('die'),0);
+  drawPond();drawTop();drawActs();
+  say('新的一天,鱼群又回来了。点「抛竿」!');
+};
+fish=newFish();
+setDie($('die'),0);
+drawPond();drawTop();drawActs();
+</script>
+</body>
+</html>

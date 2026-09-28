@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>晶簇培养皿</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#7fe3b0;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.dex{display:flex;justify-content:center;gap:8px;font-size:12px;margin-bottom:8px}
+.dex span{color:#4b5372;border:1px solid #2b3154;border-radius:8px;padding:2px 10px}
+.dex span.on{color:#7fe3b0;border-color:#2f6b52}
+.ctl{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 12px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{background:#7fe3b0;color:#052e1b;border-color:#7fe3b0;font-weight:700}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#7fe3b0}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#7fe3b0;color:#052e1b;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>晶簇培养皿</h1>
+  <p class="hint">选一种营养液点入皿中 · 晶枝自行生长,长满即成晶 · 四种晶各成一枚即圆满</p>
+  <div class="hud">
+    <span>晶簇 <b id="hCry">0</b></span>
+    <span>饱和 <b id="hSat">0%</b></span>
+  </div>
+  <div class="dex">
+    <span id="d0">铜辉</span><span id="d1">翠晶</span><span id="d2">蓝盐</span><span id="d3">紫霞</span>
+  </div>
+  <div class="ctl" id="chips">
+    <button data-t="0" class="sel">铜辉</button><button data-t="1">翠晶</button><button data-t="2">蓝盐</button><button data-t="3">紫霞</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">晶簇培养皿</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开始培养</button>
+      <button id="btnMore" style="display:none">继续培育</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hCry=$("hCry"),hSat=$("hSat");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,CX=235,CY=160,R=135,TAU=Math.PI*2;
+var TYPES=[
+ {n:"铜辉",c:"#f0a35e",wob:0.5,split:0.30,len:7,budget:52},
+ {n:"翠晶",c:"#7fe3b0",wob:0.34,split:0.26,len:6,budget:52},
+ {n:"蓝盐",c:"#7fb6f0",wob:0.16,split:0.20,len:8,budget:48},
+ {n:"紫霞",c:"#c39bf0",wob:0.62,split:0.42,len:5,budget:60}];
+var crystals=[],curT=0,dex=[false,false,false,false],fx=[];
+var state="menu",goalDone=false,time=0;
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function totalSegs(){
+  var s=0,i;
+  for(i=0;i<crystals.length;i++)s+=crystals[i].segs.length;
+  return s;
+}
+function dexUpd(){
+  var i;
+  for(i=0;i<4;i++){
+    var el=$("d"+i);
+    el.className=dex[i]?"on":"";
+    if(dex[i])el.style.borderColor=TYPES[i].c;
+  }
+}
+function matureCheck(cr){
+  cr.mature=true;
+  addFx(cr.x,cr.y,"「"+TYPES[cr.type].n+"」成晶!",TYPES[cr.type].c);
+  dex[cr.type]=true;dexUpd();
+  var all=true,i;
+  for(i=0;i<4;i++)if(!dex[i])all=false;
+  if(all&&!goalDone){
+    goalDone=true;state="zen";
+    ovT.textContent="晶谱圆满";
+    ovD.textContent="铜辉、翠晶、蓝盐、紫霞,四晶皆成。\n皿中光枝错落,如星成林。\n旧晶渐融,新晶可续。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function step(dt){
+  var i,j;
+  for(i=0;i<crystals.length;i++){var cr=crystals[i];
+    if(cr.fade>0){
+      cr.fade-=dt*0.8;
+      if(cr.fade<=0){crystals.splice(i,1);i--;hCry.textContent=crystals.length;}
+      continue;
+    }
+    if(cr.mature)continue;
+    var T=TYPES[cr.type];
+    cr.timer+=dt;
+    while(cr.timer>0.045&&!cr.mature){
+      cr.timer-=0.045;
+      for(j=0;j<cr.tips.length;j++){var tip=cr.tips[j];
+        tip.a+=(Math.random()-0.5)*T.wob;
+        var nx=tip.x+Math.cos(tip.a)*T.len,ny=tip.y+Math.sin(tip.a)*T.len;
+        var dx=nx-CX,dy=ny-CY;
+        if(dx*dx+dy*dy>(R-9)*(R-9)){
+          tip.a=Math.atan2(CY-tip.y,CX-tip.x)+(Math.random()-0.5)*0.5;
+          nx=tip.x+Math.cos(tip.a)*T.len;ny=tip.y+Math.sin(tip.a)*T.len;
+        }
+        cr.segs.push({x1:tip.x,y1:tip.y,x2:nx,y2:ny});
+        tip.x=nx;tip.y=ny;
+        if(Math.random()<T.split&&cr.tips.length<7&&cr.budget>4)
+          cr.tips.push({x:nx,y:ny,a:tip.a+(Math.random()<0.5?1:-1)*(0.5+Math.random()*0.5)});
+      }
+      cr.budget--;
+      if(cr.budget<=0)matureCheck(cr);
+    }
+  }
+  if(totalSegs()>430){
+    var fadingAny=false;
+    for(i=0;i<crystals.length;i++)if(crystals[i].fade>0)fadingAny=true;
+    if(!fadingAny&&crystals.length>0){
+      crystals[0].fade=0.01;
+      addFx(CX,CY-100,"皿已饱和 · 旧晶渐融","#94a3b8");
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  hSat.textContent=Math.min(100,Math.round(totalSegs()/430*100))+"%";
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#141a30";
+  ctx.beginPath();ctx.arc(CX,CY,R+10,0,TAU);ctx.fill();
+  ctx.fillStyle="#0d1226";
+  ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.fill();
+  ctx.strokeStyle="rgba(127,227,176,.35)";ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.stroke();
+  ctx.strokeStyle="rgba(127,227,176,.14)";ctx.lineWidth=1;
+  ctx.beginPath();ctx.ellipse(CX,CY+R*0.72,R*0.8,14,0,0,TAU);ctx.stroke();
+  var i,j;
+  for(i=0;i<crystals.length;i++){var cr=crystals[i];
+    var T=TYPES[cr.type];
+    ctx.globalAlpha=cr.fade>0?Math.max(0,cr.fade):1;
+    ctx.strokeStyle=T.c;ctx.lineWidth=2;
+    ctx.beginPath();
+    for(j=0;j<cr.segs.length;j++){var s=cr.segs[j];
+      ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);}
+    ctx.stroke();
+    if(!cr.mature){
+      ctx.fillStyle="#ffffff";
+      for(j=0;j<cr.tips.length;j++){
+        ctx.beginPath();ctx.arc(cr.tips[j].x,cr.tips[j].y,1.8,0,TAU);ctx.fill();}
+    }
+    ctx.globalAlpha=1;
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var rc=cv.getBoundingClientRect();
+  var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+  var dx=x-CX,dy=y-CY;
+  if(dx*dx+dy*dy>(R-10)*(R-10)){addFx(x,y,"要点在皿内","#94a3b8");return;}
+  if(crystals.length>=6){crystals[0].fade=0.01;}
+  crystals.push({x:x,y:y,type:curT,tips:[{x:x,y:y,a:Math.random()*TAU}],segs:[],budget:TYPES[curT].budget,timer:0,mature:false,fade:0});
+  hCry.textContent=crystals.length;
+});
+var cbs=document.querySelectorAll("[data-t]");
+for(i=0;i<cbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    curT=parseInt(b.getAttribute("data-t"),10);
+    for(var k=0;k<cbs.length;k++)cbs[k].className="";
+    b.className="sel";
+  });
+})(cbs[i]);}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="晶簇培养皿";
+  ovD.textContent="四种营养液,四种晶性:铜辉枝散、翠晶匀亭、\n蓝盐笔直、紫霞繁密。点入皿中,晶枝自行分叉生长,\n长满一株即为「成晶」入谱。\n四谱集齐即圆满;皿饱和时旧晶会渐渐融化。";
+  btnGo.textContent="开始培养";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+dexUpd();
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

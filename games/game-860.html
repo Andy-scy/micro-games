@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>开关与灯泡</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:440px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:10px}
+.ptitle{font-size:12px;color:#8f97c0;margin-bottom:8px;text-align:center}
+.swrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.sw{width:56px;height:74px;border-radius:10px;border:2px solid #3a4470;background:#232946;color:#8f97c0;cursor:pointer;font-family:inherit;font-weight:700;font-size:13px}
+.sw.on{background:#4a3f1e;border-color:#ffd668;color:#ffd668}
+.bulb{width:56px;height:74px;border-radius:10px;border:2px solid #3a4470;background:#232946;color:#56608f;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:12px;gap:4px}
+.bulb .dot{width:22px;height:22px;border-radius:50%;background:#333a5e}
+.bulb.lit{border-color:#ffd668;color:#ffd668}
+.bulb.lit .dot{background:#ffd668;box-shadow:0 0 12px rgba(255,214,104,.7)}
+#hist{font-size:13px;color:#aab2dd;line-height:2;text-align:center}
+#hist b{color:#fbbf24}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btn:disabled{opacity:.4;cursor:default}
+.btnrow{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.arow{display:flex;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px dashed #262d52;font-size:14px}
+.ab{min-width:86px;background:#2a3157;border:2px solid #3a4470;border-radius:9px;color:#fbbf24;padding:7px 0;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin-top:8px}
+.hide2{display:none}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.9}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>开关与灯泡</h1>
+<p class="tip">隔壁房间 5 盏灯与这里 5 个开关一一对应(每个开关只控制一盏灯)。<br>每次「去查看」都能看到当前开关组合下 5 盏灯的亮灭。最多查看 4 次,<br>推理出完整对应关系(提示:3 次就够)。</p>
+<div class="hud"><span id="hV">已查看 0/4 次</span></div>
+<div class="panel" id="roomA">
+  <div class="ptitle">开关房(点击拨动开关)</div>
+  <div class="swrow" id="sws"></div>
+</div>
+<div class="panel hide2" id="roomB">
+  <div class="ptitle" id="bTitle">灯泡房</div>
+  <div class="swrow" id="bulbs"></div>
+  <div class="ptitle" style="margin-top:10px">历次查看记录(●亮 ○灭)</div>
+  <div id="hist"></div>
+</div>
+<div class="panel hide2" id="ansPanel">
+  <div class="ptitle">你认为的对应关系(点右侧按钮切换)</div>
+  <div id="arows"></div>
+</div>
+<div id="msg"></div>
+<div class="btnrow" id="btnsA">
+  <button class="btn pri" id="bView">去查看灯泡</button>
+  <button class="btn" id="bAns">提交对应关系</button>
+</div>
+<div class="btnrow hide2" id="btnsB">
+  <button class="btn" id="bBack">回去调开关</button>
+  <button class="btn pri" id="bAns2">提交对应关系</button>
+</div>
+<div class="btnrow hide2" id="btnsC">
+  <button class="btn pri" id="bOk">确认提交</button>
+  <button class="btn" id="bBack2">继续观察</button>
+</div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+let perm=[],sw=[],visits=0,history=[],phase="A",ans=[],over=false;
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+const swsEl=document.getElementById("sws"),bulbsEl=document.getElementById("bulbs"),arowsEl=document.getElementById("arows");
+function buildSws(){
+  swsEl.innerHTML="";
+  for(let i=0;i<5;i++){
+    const b=document.createElement("button");
+    b.className="sw"+(sw[i]?" on":"");
+    b.innerHTML=(sw[i]?"开":"关")+"<br>开关"+(i+1);
+    b.addEventListener("click",()=>{
+      if(over||phase!=="A")return;
+      sw[i]=!sw[i];buildSws();
+    });
+    swsEl.appendChild(b);
+  }
+}
+function buildBulbs(){
+  bulbsEl.innerHTML="";
+  for(let i=0;i<5;i++){
+    const lit=sw[perm[i]];
+    const d=document.createElement("div");
+    d.className="bulb"+(lit?" lit":"");
+    d.innerHTML='<div class="dot"></div>灯'+(i+1);
+    bulbsEl.appendChild(d);
+  }
+}
+function buildHist(){
+  const h=document.getElementById("hist");
+  h.innerHTML=history.map((row,i)=>"第 <b>"+(i+1)+"</b> 次:"+row.map(v=>v?"●":"○").join(" ")).join("<br>");
+}
+function buildAns(){
+  arowsEl.innerHTML="";
+  for(let i=0;i<5;i++){
+    const row=document.createElement("div");
+    row.className="arow";
+    row.innerHTML="<span>灯 "+(i+1)+" 由谁控制?</span>";
+    const b=document.createElement("button");
+    b.className="ab";
+    b.textContent=ans[i]<0?"未知":"开关"+(ans[i]+1);
+    b.addEventListener("click",()=>{
+      if(over)return;
+      ans[i]=(ans[i]+2)%6-1;
+      buildAns();
+    });
+    row.appendChild(b);
+    arowsEl.appendChild(row);
+  }
+}
+function setPhase(p){
+  phase=p;
+  document.getElementById("roomA").classList.toggle("hide2",p!=="A");
+  document.getElementById("roomB").classList.toggle("hide2",p!=="B");
+  document.getElementById("ansPanel").classList.toggle("hide2",p!=="C");
+  document.getElementById("btnsA").classList.toggle("hide2",p!=="A");
+  document.getElementById("btnsB").classList.toggle("hide2",p!=="B");
+  document.getElementById("btnsC").classList.toggle("hide2",p!=="C");
+}
+function doView(){
+  if(over)return;
+  if(visits>=4){document.getElementById("msg").textContent="查看次数已用完,请提交答案";return;}
+  visits++;
+  history.push(sw.slice());
+  document.getElementById("bTitle").textContent="灯泡房(第 "+visits+" 次查看)";
+  document.getElementById("hV").textContent="已查看 "+visits+"/4 次";
+  buildBulbs();buildHist();
+  setPhase("B");
+  document.getElementById("msg").textContent="";
+}
+function toAnswer(){
+  if(over)return;
+  buildAns();setPhase("C");
+  document.getElementById("msg").textContent="";
+}
+function backA(){
+  if(over)return;
+  setPhase("A");buildSws();
+  document.getElementById("msg").textContent="";
+}
+function submitAns(){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(ans.indexOf(-1)>=0){msg.textContent="还有灯没有指认开关";return;}
+  const seen=new Set();
+  for(const a of ans)seen.add(a);
+  if(seen.size!==5){msg.textContent="对应必须一一对应,不能重复";return;}
+  let ok=true;
+  for(let i=0;i<5;i++)if(ans[i]!==perm[i])ok=false;
+  if(ok){
+    over=true;
+    show("对应关系破解!","全部正确 · 共查看 "+visits+" 次(理论最少 3 次)");
+  }else{
+    over=true;
+    const truth=perm.map((s,i)=>"灯"+(i+1)+"←开关"+(s+1)).join("、");
+    show("遗憾,指认有误","正确对应:"+truth);
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  perm=shuffle([0,1,2,3,4]);
+  sw=[false,false,false,false,false];
+  visits=0;history=[];ans=[-1,-1,-1,-1,-1];over=false;
+  document.getElementById("hV").textContent="已查看 0/4 次";
+  document.getElementById("msg").textContent="";
+  document.getElementById("ov").classList.add("hide");
+  buildSws();buildHist();
+  setPhase("A");
+}
+document.getElementById("bView").addEventListener("click",doView);
+document.getElementById("bAns").addEventListener("click",toAnswer);
+document.getElementById("bAns2").addEventListener("click",toAnswer);
+document.getElementById("bBack").addEventListener("click",backA);
+document.getElementById("bBack2").addEventListener("click",backA);
+document.getElementById("bOk").addEventListener("click",submitAns);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

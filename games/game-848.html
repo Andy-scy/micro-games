@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>九球天平</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:450px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px}
+#balls{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;margin-bottom:14px}
+.ball{width:38px;height:38px;border-radius:50%;background:#2a3157;border:2px solid #3a4470;color:#e8eaf6;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s}
+.ball.l{border-color:#4f6ef7;background:#243272}
+.ball.r{border-color:#ff7b8a;background:#4a2340}
+.ball.pick{outline:3px solid #ffd668}
+#balance{display:flex;align-items:flex-end;justify-content:center;gap:6px;transition:transform .5s ease;transform-origin:50% 80%}
+.pan{width:120px;min-height:66px;background:#232946;border:2px solid #3a4470;border-radius:10px 10px 16px 16px;padding:6px;text-align:center;font-size:12px;color:#8f97c0}
+.panv{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:4px}
+.ptag{background:#1c2240;border-radius:6px;padding:2px 7px;font-size:13px;color:#e8eaf6;font-weight:700}
+.bar{width:36px;height:8px;background:#3a4470;border-radius:4px;margin-bottom:30px}
+#log{margin-top:10px;font-size:13px;color:#aab2dd;line-height:1.8;min-height:20px;text-align:center}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin-top:6px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>九球天平</h1>
+<p class="tip">9 个球外观相同,其中 1 个偏重。点击球轮流放入左盘/右盘,<br>只能称 2 次,找出那个重球!</p>
+<div class="hud"><span id="hW">剩余称重 2 次</span></div>
+<div class="panel">
+  <div id="balls"></div>
+  <div id="balance">
+    <div class="pan">左盘<div class="panv" id="panL"></div></div>
+    <div class="bar"></div>
+    <div class="pan">右盘<div class="panv" id="panR"></div></div>
+  </div>
+  <div id="log"></div>
+  <div id="msg"></div>
+</div>
+<div class="btnrow"><button class="btn pri" id="bWeigh">称重</button><button class="btn" id="bPick">指认它!</button><button class="btn" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+let heavy=0,place=[],used=0,pick=-1,over=false,logLines=[];
+const ballsEl=document.getElementById("balls");
+const ballEls=[];
+for(let i=0;i<9;i++){
+  const b=document.createElement("button");
+  b.className="ball";b.textContent=String(i+1);
+  b.addEventListener("click",()=>clickBall(i));
+  ballsEl.appendChild(b);ballEls.push(b);
+}
+function clickBall(i){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(used>=2){
+    pick=(pick===i)?-1:i;
+    msg.textContent=pick>=0?("你指认了 "+(pick+1)+" 号球,点「指认它!」确认"):"";
+    render();return;
+  }
+  place[i]=(place[i]+1)%3;
+  msg.textContent="";
+  render();
+}
+function render(){
+  for(let i=0;i<9;i++){
+    const b=ballEls[i];
+    b.classList.toggle("l",place[i]===1);
+    b.classList.toggle("r",place[i]===2);
+    b.classList.toggle("pick",pick===i);
+  }
+  const pl=document.getElementById("panL"),pr=document.getElementById("panR");
+  pl.querySelectorAll(".ptag").forEach(x=>x.remove());
+  pr.querySelectorAll(".ptag").forEach(x=>x.remove());
+  for(let i=0;i<9;i++){
+    if(place[i]===1){const t=document.createElement("span");t.className="ptag";t.textContent=String(i+1);pl.appendChild(t);}
+    else if(place[i]===2){const t=document.createElement("span");t.className="ptag";t.textContent=String(i+1);pr.appendChild(t);}
+  }
+  document.getElementById("log").innerHTML=logLines.join("<br>");
+}
+function weigh(){
+  if(over)return;
+  if(used>=2){document.getElementById("msg").textContent="称重次数已用完,请指认重球";return;}
+  const msg=document.getElementById("msg");
+  const nl=place.filter(x=>x===1).length,nr=place.filter(x=>x===2).length;
+  if(nl===0&&nr===0){msg.textContent="两边都空着,先放几个球上去";return;}
+  if(nl!==nr){msg.textContent="两边球数必须相等才能比较";return;}
+  used++;
+  let res,deg=0;
+  const hl=place[heavy]===1,hr=place[heavy]===2;
+  if(hl){res="左边更重";deg=-6;}
+  else if(hr){res="右边更重";deg=6;}
+  else{res="天平平衡";deg=0;}
+  document.getElementById("balance").style.transform="rotate("+deg+"deg)";
+  logLines.push("第 "+used+" 次称重:"+res);
+  document.getElementById("hW").textContent="剩余称重 "+(2-used)+" 次";
+  msg.textContent=used>=2?"称重机会用完,点击重球并按「指认它!」":"";
+  render();
+}
+function resolve(){
+  if(over)return;
+  if(used<2){document.getElementById("msg").textContent="先用完(或想清楚再用)2 次称重吧,现在还猜不准";return;}
+  if(pick<0){document.getElementById("msg").textContent="先点击一个球选中它";return;}
+  if(pick===heavy){
+    over=true;
+    show("找到了!","重球就是 "+(heavy+1)+" 号球 · 用了 "+used+" 次称重(最少 2 次)");
+  }else{
+    over=true;
+    show("指认错误","重球其实是 "+(heavy+1)+" 号球。提示:三次结果分左/右/平,可区分 3 组。");
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  heavy=Math.floor(Math.random()*9);
+  place=new Array(9).fill(0);
+  used=0;pick=-1;over=false;logLines=[];
+  document.getElementById("hW").textContent="剩余称重 2 次";
+  document.getElementById("msg").textContent="";
+  document.getElementById("balance").style.transform="rotate(0deg)";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+document.getElementById("bWeigh").addEventListener("click",weigh);
+document.getElementById("bPick").addEventListener("click",resolve);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

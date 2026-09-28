@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>诗词云梯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:24px;text-align:center;color:#a0e7a0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#a0e7a0}
+#ladder{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.lr{height:14px;border-radius:7px;background:#232a48;border:1px solid #2c3357;position:relative}
+.lr.past{background:#2c5c40;border-color:#3f7a58}
+.lr.cur{background:#a0e7a0;box-shadow:0 0 10px rgba(160,231,160,.6)}
+.lr span{position:absolute;right:8px;top:-2px;font-size:10px;color:#5b648a}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#a0e7a0;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#a0e7a0}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#a0e7a0;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#a0e7a0;color:#10240f;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>诗词云梯</h1>
+  <p class="tips">名句对接爬塔赛:给出上句(或下句),选出它的"另一半"。答对向上爬一层,答错或超时坠落一层;从 0 层爬到 8 层即登顶获胜,坠到 -3 层跌落失败。每题限时 15 秒。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">当前高度</div><div class="big" id="hg">0 层</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">答对</div><div class="big" id="ok">0</div></div>
+  </div></div>
+  <div class="card">
+    <div id="ladder"></div>
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">诗词云梯</h2><p id="ovp">· 每题给出一句古诗名句,选出正确的上下句<br>· 每题限时 15 秒,共 12 层云梯(从 0 层出发)<br>· 答对 +1 层并得 100 分<br>· 答错或超时 -1 层<br>· 登上 8 层即获胜(额外 +500),<br>　坠到 -3 层则挑战失败</p><button class="btn" id="obtn">开始登梯</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'「海上生明月」的下一句是?',o:['天涯共此时','天涯若比邻','明月照我还','低头思故乡']},
+{q:'「白日依山尽」的下一句是?',o:['黄河入海流','更上一层楼','大漠孤烟直','长河落日圆']},
+{q:'「春眠不觉晓」的下一句是?',o:['处处闻啼鸟','花落知多少','夜来风雨声','红杏出墙来']},
+{q:'「举头望明月」的下一句是?',o:['低头思故乡','疑是地上霜','月是故乡明','千里共婵娟']},
+{q:'「谁知盘中餐」的下一句是?',o:['粒粒皆辛苦','汗滴禾下土','处处闻啼鸟','春种一粒粟']},
+{q:'「欲穷千里目」的下一句是?',o:['更上一层楼','黄河入海流','一览众山小','白日依山尽']},
+{q:'「危楼高百尺」的下一句是?',o:['手可摘星辰','不敢高声语','恐惊天上人','疑是银河落']},
+{q:'「红豆生南国」的下一句是?',o:['春来发几枝','愿君多采撷','此物最相思','万物生光辉']},
+{q:'「空山不见人」的下一句是?',o:['但闻人语响','返景入深林','复照青苔上','清泉石上流']},
+{q:'「野火烧不尽」的下一句是?',o:['春风吹又生','一岁一枯荣','远芳侵古道','晴翠接荒城']},
+{q:'「采菊东篱下」的下一句是?',o:['悠然见南山','心远地自偏','问君何能尔','飞鸟相与还']},
+{q:'「海内存知己」的下一句是?',o:['天涯若比邻','无为在歧路','儿女共沾巾','同是宦游人']},
+{q:'「春风又绿江南岸」的下一句是?',o:['明月何时照我还','钟山只隔数重山','春风送暖入屠苏','总把新桃换旧符']},
+{q:'「不识庐山真面目」的下一句是?',o:['只缘身在此山中','横看成岭侧成峰','远近高低各不同','多少楼台烟雨中']},
+{q:'「竹外桃花三两枝」的下一句是?',o:['春江水暖鸭先知','蒌蒿满地芦芽短','正是河豚欲上时','桃花依旧笑春风']},
+{q:'「等闲识得东风面」的下一句是?',o:['万紫千红总是春','胜日寻芳泗水滨','无边光景一时新','为有源头活水来']},
+{q:'「落霞与孤鹜齐飞」的下一句是?',o:['秋水共长天一色','渔舟唱晚响穷彭蠡','雁阵惊寒声断衡阳','画栋朝飞南浦云']},
+{q:'「会当凌绝顶」的下一句是?',o:['一览众山小','荡胸生曾云','决眦入归鸟','造化钟神秀']},
+{q:'「随风潜入夜」的下一句是?',o:['润物细无声','好雨知时节','当春乃发生','花重锦官城']},
+{q:'「大漠孤烟直」的下一句是?',o:['长河落日圆','萧关逢候骑','都护在燕然','征蓬出汉塞']},
+{q:'「两个黄鹂鸣翠柳」的下一句是?',o:['一行白鹭上青天','窗含西岭千秋雪','门泊东吴万里船','黄鹤一去不复返']},
+{q:'「停车坐爱枫林晚」的下一句是?',o:['霜叶红于二月花','远上寒山石径斜','白云生处有人家','轻舟已过万重山']},
+{q:'「但愿人长久」的下一句是?',o:['千里共婵娟','把酒问青天','不知天上宫阙','高处不胜寒']},
+{q:'「生当作人杰」的下一句是?',o:['死亦为鬼雄','至今思项羽','不肯过江东','万里赴戎机']},
+{q:'「横看成岭侧成峰」的下一句是?',o:['远近高低各不同','不识庐山真面目','只缘身在此山中','飞流直下三千尺']},
+{q:'「咬定青山不放松」的下一句是?',o:['立根原在破岩中','千磨万击还坚劲','任尔东西南北风','千枝万叶入云霄']},
+{q:'「天街小雨润如酥」的下一句是?',o:['草色遥看近却无','最是一年春好处','绝胜烟柳满皇都','浅草才能没马蹄']},
+{q:'「春色满园关不住」的下一句是?',o:['一枝红杏出墙来','应怜屐齿印苍苔','小扣柴扉久不开','万条垂下绿丝绦']},
+{q:'「黄河远上白云间」的下一句是?',o:['一片孤城万仞山','羌笛何须怨杨柳','春风不度玉门关','欲饮琵琶马上催']},
+{q:'「小荷才露尖尖角」的下一句是?',o:['早有蜻蜓立上头','泉眼无声惜细流','树阴照水爱晴柔','映日荷花别样红']}
+];
+var TOP=8,BOT=-3,QLEN=15;
+var height=0,score=0,okCnt=0,playing=false,over=false,locked=false,qLeft=QLEN,S=0,qi=0,order=[];
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function buildLadder(){
+  var box=$('ladder');box.innerHTML='';
+  for(var lvl=TOP;lvl>=BOT;lvl--){
+    var d=document.createElement('div');
+    d.className='lr';
+    if(lvl===TOP||lvl===8||lvl===4||lvl===0||lvl===BOT){var s=document.createElement('span');s.textContent=lvl+' 层';d.appendChild(s);}
+    box.appendChild(d);
+  }
+  paintLadder();
+}
+function paintLadder(){
+  var rows=$('ladder').children;
+  for(var lvl=BOT;lvl<=TOP;lvl++){
+    var el=rows[TOP-lvl];
+    el.className='lr'+(lvl===height?' cur':(lvl<height?' past':''));
+  }
+  $('hg').textContent=height+' 层';
+}
+function startGame(){
+  S++;height=0;score=0;okCnt=0;over=false;playing=true;locked=false;qi=0;order=shuffle(BANK.slice());
+  $('sc').textContent='0';$('ok').textContent='0';
+  $('overlay').classList.add('hide');
+  buildLadder();
+  showQ();
+}
+function showQ(){
+  if(qi>=order.length){order=order.concat(shuffle(BANK.slice()));}
+  var it=order[qi];qi++;
+  locked=false;qLeft=QLEN;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  resolve(btn.dataset.ok==='1',btn);
+}
+function resolve(good,btn){
+  locked=true;
+  var btns=$('opts').children,i;
+  if(good){
+    height++;okCnt++;score+=100;
+    if(btn)btn.classList.add('ok');
+    $('msg').textContent='答对了,上升一层!';
+  }else{
+    height--;
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=good?'':'答错了,坠落一层…正确答案已标出';
+  }
+  $('sc').textContent=score;$('ok').textContent=okCnt;
+  paintLadder();
+  schedule(function(){
+    if(!playing||over)return;
+    if(height>=TOP){finish(true);return;}
+    if(height<=BOT){finish(false);return;}
+    showQ();
+  },1300);
+}
+function finish(win){
+  playing=false;over=true;
+  if(win){score+=500;$('sc').textContent=score;}
+  $('ovt').textContent=win?'成功登顶!诗心飞扬':'不幸跌落云梯…';
+  $('ovp').innerHTML='最终高度 <b>'+height+'</b> 层,答对 '+okCnt+' 题<br>总分 <b>'+score+'</b> 分<br>'+(win?'云梯之巅,尽览群诗!':'再背几句名篇,卷土重来!');
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)resolve(false,null);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双人对决</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#e8eaf6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{font-size:16px}
+.r{color:#f87171}.bl{color:#60a5fa}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#e8eaf6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#e8eaf6;color:#1a1e30;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双人对决</h1>
+  <p class="hint">红方 A/D · 蓝方 ← → · 触屏各点自己半场 · 空格开始</p>
+  <div class="hud">
+    <span>红方躲避 <b class="r" id="p1">0</b></span>
+    <span>距离 <b id="dist">0 m</b></span>
+    <span>蓝方躲避 <b class="bl" id="p2">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双人对决</h2>
+      <p id="ovDesc">同屏 1v1 车道对决!两侧车流完全相同,全看谁活得久:红方用 A / D,蓝方用 ← →,先撞车的一方告负。车速会越来越快,手抖就是输!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始对决</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elP1=$("p1"),elP2=$("p2"),elDist=$("dist");
+var COLORS=["#e05252","#5297e0","#7ed957","#c07ee0","#e0a052","#52d9c7"];
+var CARY=H-110;
+var state="menu";
+var P1,P2,roadSpd,elapsed,dist,dash,spawnT;
+function makeSide(lanes,color){
+  return{lanes:lanes,lane:1,px:(lanes[0]+lanes[2])/2,cars:[],dodged:0,alive:true,color:color};
+}
+function reset(){
+  P1=makeSide([52,120,188],"#f87171");
+  P2=makeSide([292,360,428],"#60a5fa");
+  roadSpd=280;elapsed=0;dist=0;dash=0;spawnT=0.7;
+  elP1.textContent="0";elP2.textContent="0";elDist.textContent="0 m";
+}
+function spawnWave(){
+  var n=Math.random()<Math.min(0.6,0.2+elapsed*0.012)?2:1;
+  var used=[],i,ln;
+  for(i=0;i<n;i++){
+    do{ln=(Math.random()*3)|0;}while(used.indexOf(ln)>=0);
+    used.push(ln);
+  }
+  var picks=[P1,P2],j;
+  for(j=0;j<2;j++){
+    var s=picks[j];
+    for(i=0;i<n;i++){
+      s.cars.push({lane:used[i],x:s.lanes[used[i]],y:-90-Math.random()*40,color:COLORS[(Math.random()*COLORS.length)|0],passed:false});
+    }
+  }
+}
+function endGame(){
+  state="over";
+  var title,desc;
+  if(!P1.alive&&!P2.alive){
+    title="平局!";ovTitle.style.color="#e8eaf6";
+    desc="两边同时撞车,握手言和。";
+  }else if(P1.alive){
+    title="红方获胜!";ovTitle.style.color="#f87171";
+    desc="蓝方先撞车了,红方笑到最后。";
+  }else{
+    title="蓝方获胜!";ovTitle.style.color="#60a5fa";
+    desc="红方先撞车了,蓝方笑到最后。";
+  }
+  ovTitle.textContent=title;
+  ovDesc.textContent=desc;
+  ovScore.style.display="block";
+  ovScore.textContent="红方躲避 "+P1.dodged+" 辆 · 蓝方躲避 "+P2.dodged+" 辆 · 距离 "+Math.floor(dist/40)+" m";
+  btnGo.textContent="再战一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");ovTitle.style.color="#e8eaf6";}
+function updateSide(s,dt){
+  var i,c;
+  s.px+=(s.lanes[s.lane]-s.px)*Math.min(1,dt*10);
+  for(i=s.cars.length-1;i>=0;i--){
+    c=s.cars[i];
+    c.x=s.lanes[c.lane];
+    c.y+=roadSpd*0.45*dt;
+    if(!c.passed&&c.y>CARY-60){c.passed=true;s.dodged++;}
+    if(c.y>H+120){s.cars.splice(i,1);continue;}
+    if(s.alive&&Math.abs(c.x-s.px)<36&&Math.abs(c.y-CARY)<66)s.alive=false;
+  }
+}
+function update(dt){
+  elapsed+=dt;
+  roadSpd=Math.min(620,280+elapsed*7);
+  dist+=roadSpd*dt;
+  dash=(dash+roadSpd*dt)%64;
+  spawnT-=dt;
+  if(spawnT<=0){spawnWave();spawnT=Math.max(0.62,1.15-elapsed*0.004);}
+  updateSide(P1,dt);
+  updateSide(P2,dt);
+  elP1.textContent=P1.dodged;
+  elP2.textContent=P2.dodged;
+  elDist.textContent=Math.floor(dist/40)+" m";
+  if(!P1.alive||!P2.alive){endGame();return;}
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawCar(x,y,w,h,body){
+  rr(x-w/2,y-h/2,w,h,8);ctx.fillStyle=body;ctx.fill();
+  rr(x-w*0.3,y-h*0.36,w*0.6,h*0.3,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(10,12,22,0.9)";
+  ctx.fillRect(x-w/2-4,y-h*0.4,4,h*0.18);ctx.fillRect(x+w/2,y-h*0.4,4,h*0.18);
+  ctx.fillRect(x-w/2-4,y+h*0.22,4,h*0.18);ctx.fillRect(x+w/2,y+h*0.22,4,h*0.18);
+}
+function drawRoad(x0,w0,dashX1,dashX2){
+  ctx.fillStyle="#232742";ctx.fillRect(x0,0,w0,H);
+  ctx.fillStyle="#f6d35c";
+  var i;
+  for(i=-1;i<H/64+2;i++){
+    ctx.fillRect(dashX1,i*64+dash-64,4,34);
+    ctx.fillRect(dashX2,i*64+dash-64,4,34);
+  }
+}
+function drawSide(s){
+  var i;
+  for(i=0;i<s.cars.length;i++)drawCar(s.cars[i].x,s.cars[i].y,40,64,s.cars[i].color);
+  drawCar(s.px,CARY,42,68,s.color);
+  ctx.fillStyle="rgba(255,120,80,0.85)";
+  ctx.fillRect(s.px-14,CARY+30,9,4);ctx.fillRect(s.px+5,CARY+30,9,4);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#12182a";ctx.fillRect(0,0,W,H);
+  drawRoad(8,224,76,161);
+  drawRoad(248,224,316,401);
+  ctx.fillStyle="#3a3f5c";ctx.fillRect(4,0,5,H);ctx.fillRect(231,0,3,H);ctx.fillRect(245,0,3,H);ctx.fillRect(471,0,5,H);
+  drawSide(P1);
+  drawSide(P2);
+  ctx.font="bold 14px system-ui";ctx.textAlign="center";
+  ctx.fillStyle=P1.alive?"#f87171":"#565f82";ctx.fillText("P1",120,H-18);
+  ctx.fillStyle=P2.alive?"#60a5fa":"#565f82";ctx.fillText("P2",360,H-18);
+  ctx.fillStyle="#565f82";ctx.font="bold 12px system-ui";
+  ctx.save();ctx.translate(239,300);ctx.rotate(Math.PI/2);ctx.fillText("VS",0,4);ctx.restore();
+}
+function moveP(s,d){if(state==="playing"&&s.alive){var nl=s.lane+d;if(nl>=0&&nl<3)s.lane=nl;}}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="a"||e.key==="A"){e.preventDefault();moveP(P1,-1);}
+  else if(e.key==="d"||e.key==="D"){e.preventDefault();moveP(P1,1);}
+  else if(e.key==="ArrowLeft"){e.preventDefault();moveP(P2,-1);}
+  else if(e.key==="ArrowRight"){e.preventDefault();moveP(P2,1);}
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var i,t,rc=cv.getBoundingClientRect();
+  for(i=0;i<e.changedTouches.length;i++){
+    t=e.changedTouches[i];
+    var lx=(t.clientX-rc.left)/rc.width*W;
+    if(lx<240)moveP(P1,lx<120?-1:1);
+    else moveP(P2,lx<360?-1:1);
+  }
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

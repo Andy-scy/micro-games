@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色点速数</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#ffd166;border-radius:6px}
+#q{text-align:center;font-size:16px;font-weight:700;color:#e8eaf6;min-height:24px;margin-bottom:10px}
+#dots{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;min-height:120px;align-content:center}
+.dot{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.12);transition:background .12s}
+#dots.dim .dot{background:#232a48!important}
+#opts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;min-height:44px}
+.opt{border:0;border-radius:10px;padding:10px 18px;font-size:16px;font-weight:800;background:#2a3154;color:#cdd6f4;cursor:pointer}
+.opt:disabled{opacity:.4;cursor:default}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色点速数</h1>
+  <p class="tips">一堆彩色圆点只给你看几秒钟!倒计时结束后圆点全部熄灭,回答「目标色有几个」。答对得分进入下一关(圆点更多、时间更短),答错 -1 生命(共 3 条)。撑过 8 关通关!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/8</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="q"></div>
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="dots"></div>
+    <div id="opts"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色点速数</h2><p id="ovp">玩法:瞬间记忆+速算。<br>· 圆点阵短暂展示(约 2.5 秒,逐关缩短)<br>· 倒计时结束圆点熄灭,从 6 个选项里选出目标色的数量<br>· 答对 +10+关卡×5 分,进入下一关<br>· 答错 -1 生命,共 3 条;撑过 8 关通关<br>· 技巧:按颜色分组扫视,别一个一个数!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PAL=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var level=1,lives=3,score=0,phase='idle',count=0,tgt=0;
+var showT=0,showLen=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function renderDots(arr){
+  var box=$('dots');
+  box.innerHTML='';
+  box.classList.remove('dim');
+  for(var i=0;i<arr.length;i++){
+    var d=document.createElement('span');
+    d.className='dot';
+    d.style.background=PAL[arr[i]][1];
+    box.appendChild(d);
+  }
+}
+function startRound(){
+  phase='show';
+  var N=Math.min(42,18+level*4);
+  tgt=Math.floor(Math.random()*5);
+  count=4+Math.floor(Math.random()*6);
+  var arr=[];
+  for(var i=0;i<count;i++)arr.push(tgt);
+  for(i=count;i<N;i++){
+    var c=Math.floor(Math.random()*5);
+    if(c===tgt)c=(c+1)%5;
+    arr.push(c);
+  }
+  for(i=N-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=arr[i];arr[i]=arr[j];arr[j]=t;
+  }
+  renderDots(arr);
+  showLen=Math.max(1.2,2.7-level*0.15);
+  showT=showLen;
+  $('q').textContent='盯紧:有几个「'+PAL[tgt][0]+'色」圆点?';
+  $('lv').textContent=Math.min(level,8)+'/8';
+  $('opts').innerHTML='';
+}
+function buildOpts(){
+  var cand=[];
+  for(var d=-3;d<=3;d++){
+    var v=count+d;
+    if(v>=1&&v<=60&&d!==0)cand.push(v);
+  }
+  for(var i=cand.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=cand[i];cand[i]=cand[j];cand[j]=t;
+  }
+  var opts=cand.slice(0,5);
+  opts.push(count);
+  for(i=opts.length-1;i>0;i--){
+    j=Math.floor(Math.random()*(i+1));
+    t=opts[i];opts[i]=opts[j];opts[j]=t;
+  }
+  var box=$('opts');box.innerHTML='';
+  for(i=0;i<opts.length;i++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=opts[i];
+    (function(v){b.addEventListener('click',function(){answer(v)})})(opts[i]);
+    box.appendChild(b);
+  }
+}
+function answer(v){
+  if(!playing||over||phase!=='ask')return;
+  phase='wait';
+  if(v===count){
+    score+=10+level*5;
+    level++;
+    if(level>8){finish(true);return;}
+    $('q').textContent='答对了!下一关…';
+    var tk=++S;
+    setTimeout(function(){if(tk===S&&playing&&!over)startRound()},900);
+  }else{
+    lives--;
+    if(lives<=0){finish(false);return;}
+    $('q').textContent='答错了,其实是 '+count+' 个。再来!';
+    var tk2=++S;
+    setTimeout(function(){if(tk2===S&&playing&&!over)startRound()},1100);
+  }
+}
+var S=0;
+function finish(win){
+  playing=false;over=true;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+  $('ovt').textContent=win?'眼明手快,数色如神!':'三只眼也不够用…';
+  $('ovp').innerHTML=(win?'8 关速数全部通过!':'止步第 '+level+' 关。')+'<br>总分 <b>'+score+'</b><br>分组扫视是速数的秘诀,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  S++;level=1;lives=3;score=0;
+  playing=true;over=false;
+  $('sc').textContent='0';
+  $('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  startRound();
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&phase==='show'){
+    showT-=dt;
+    $('tbar').style.width=(Math.max(0,showT)/showLen*100)+'%';
+    if(showT<=0){
+      phase='ask';
+      $('dots').classList.add('dim');
+      buildOpts();
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

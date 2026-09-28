@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天平疑云</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#e879f9;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#e879f9;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:10px}
+.timebar i{display:block;height:100%;background:#e879f9;width:100%}
+.beam{display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+.beam .bar{width:260px;height:10px;background:#5a4a7a;border-radius:6px;transition:transform .5s;position:relative}
+.beam .bar:before,.beam .bar:after{content:"";position:absolute;top:-14px;width:70px;height:16px;border:2px solid #7a6aa2;border-radius:8px}
+.beam .bar:before{left:-30px}
+.beam .bar:after{right:-30px}
+.tiltL{transform:rotate(-7deg)}
+.tiltR{transform:rotate(7deg)}
+.pans{display:flex;gap:10px;margin-bottom:10px}
+.pan{flex:1;background:#0b0e1a;border-radius:10px;min-height:56px;padding:8px;text-align:center}
+.pan h4{font-size:12px;color:#8b90b0;margin-bottom:4px}
+.pan p{font-size:16px;font-weight:800;color:#e879f9;min-height:22px}
+.coins{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:10px}
+.coins button{width:52px;height:44px;background:#232949;color:#e8eaf6;border:2px solid transparent;border-radius:50% / 40%;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit}
+.coins button.onL{border-color:#60a5fa;color:#60a5fa;background:#12233c}
+.coins button.onR{border-color:#fbbf24;color:#fbbf24;background:#332a12}
+.coins button.fake{background:#3a1620;border-color:#f87171;color:#f87171}
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.tools button{background:#2a2140;color:#e8eaf6;border:none;border-radius:10px;padding:11px 0;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+.tools button.warn{background:#e879f9;color:#3d0a3d}
+.log{font-size:12px;color:#8b90b0;min-height:48px;margin-top:8px;line-height:1.7;text-align:center}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:4px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.93);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#e879f9}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#e879f9;color:#3d0a3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>天平疑云</h1>
+  <p class="hint">金币中混着一枚更轻的假币 · 点硬币分配到左右盘(点击循环)· 称量次数有限,找出假币!</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/3 轮</span>
+    <span>称量 <b id="wleft">2</b> 次</span>
+    <span>时间 <b id="time">60</b>s</span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="beam"><div class="bar" id="bar"></div></div>
+    <div class="pans">
+      <div class="pan"><h4>左盘</h4><p id="panL">-</p></div>
+      <div class="pan"><h4>右盘</h4><p id="panR">-</p></div>
+    </div>
+    <div class="coins" id="coins"></div>
+    <div class="tools">
+      <button id="btnWeigh">⚖ 称量</button>
+      <button id="btnAccuse">指认假币</button>
+      <button id="btnClear">清空两盘</button>
+    </div>
+    <div class="log" id="log"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">天平疑云</h2>
+      <p id="ovD">三批金币各藏一枚轻假币。点硬币把它轮流放进左盘→右盘→移回,两侧数量相等后称量,根据倾斜缩小范围,在称量次数用完前后指认假币。越少称量、越快指认,得分越高!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始断案</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elW=$("wleft"),elTime=$("time"),elLives=$("lives"),elScore=$("score"),elTbar=$("tbar");
+var bar=$("bar"),panL=$("panL"),panR=$("panR"),elCoins=$("coins"),elLog=$("log"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var btnWeigh=$("btnWeigh"),btnAccuse=$("btnAccuse"),btnClear=$("btnClear");
+var ROUNDS=[{n:6,w:2,t:60000},{n:9,w:2,t:75000},{n:12,w:3,t:100000}];
+var state,round,score,lives,fake,side,timeLeft,coins,accuseMode,logLines,lastT;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function updHud(){
+  elNo.textContent=round;
+  elW.textContent=weighLeft();
+  elScore.textContent=score;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function weighLeft(){return ROUNDS[round-1].w-logLines.length;}
+function newRound(){
+  var cfg=ROUNDS[round-1];
+  fake=rnd(0,cfg.n-1);
+  side=Math.random()<0.5?-1:1;
+  coins=[];
+  elCoins.innerHTML="";
+  var i;
+  for(i=0;i<cfg.n;i++){
+    var b=document.createElement("button");
+    b.textContent=i+1;
+    (function(ix){
+      b.addEventListener("click",function(){coinTap(ix);});
+    })(i);
+    elCoins.appendChild(b);
+    coins.push({btn:b,st:0});
+  }
+  logLines=[];
+  renderLog();
+  panL.textContent="-";panR.textContent="-";
+  bar.className="bar";
+  accuseMode=false;
+  btnAccuse.className="";
+  timeLeft=cfg.t;
+  setMsg("第 "+round+" 轮:"+cfg.n+" 枚金币,假币更轻,称量 "+cfg.w+" 次","");
+  updHud();
+}
+function renderLog(){
+  var t="",i;
+  for(i=0;i<logLines.length;i++)t+="第"+(i+1)+"次:"+logLines[i]+"  ";
+  elLog.textContent=t||"尚无称量记录";
+}
+function coinTap(ix){
+  if(state!=="playing")return;
+  if(accuseMode){
+    accuse(ix);
+    return;
+  }
+  var c=coins[ix];
+  c.st=(c.st+1)%3;
+  c.btn.className=c.st===1?"onL":(c.st===2?"onR":"");
+  renderPans();
+}
+function lists(){
+  var L=[],R=[],i;
+  for(i=0;i<coins.length;i++){
+    if(coins[i].st===1)L.push(i+1);
+    else if(coins[i].st===2)R.push(i+1);
+  }
+  return {L:L,R:R};
+}
+function renderPans(){
+  var ls=lists();
+  panL.textContent=ls.L.length?ls.L.join(" "):"-";
+  panR.textContent=ls.R.length?ls.R.join(" "):"-";
+}
+function weigh(){
+  if(state!=="playing")return;
+  if(weighLeft()<=0){setMsg("称量次数已用完,快去指认!","badc");return;}
+  var ls=lists();
+  if(!ls.L.length||!ls.R.length){setMsg("左右盘都要放至少一枚金币","badc");return;}
+  if(ls.L.length!==ls.R.length){setMsg("两侧金币数量必须相等","badc");return;}
+  var res,tilt;
+  if(ls.L.indexOf(fake+1)>=0){res="左盘更轻";tilt="tiltL";}
+  else if(ls.R.indexOf(fake+1)>=0){res="右盘更轻";tilt="tiltR";}
+  else{res="平衡";tilt="";}
+  logLines.push(res);
+  bar.className="bar"+(tilt?" "+tilt:"");
+  renderLog();updHud();
+  if(weighLeft()===0)setMsg(res+"!称量机会用完,立即指认","badc");
+  else setMsg(res+"!还剩 "+weighLeft()+" 次称量","");
+}
+function accuse(ix){
+  accuseMode=false;
+  btnAccuse.className="";
+  coins[fake].btn.className="fake";
+  if(ix===fake){
+    var cfg=ROUNDS[round-1];
+    var gain=100+weighLeft()*20+Math.ceil(timeLeft/1000);
+    score+=gain;
+    setMsg("正确!"+(fake+1)+" 号是假币,+ "+gain+" 分","good");
+    updHud();
+    round++;
+    if(round>3)setTimeout(gameOverWin,1300);
+    else setTimeout(function(){if(state==="playing")newRound();},1400);
+  }else{
+    setMsg("指认错误!假币其实是 "+(fake+1)+" 号,生命 -1","badc");
+    lives--;
+    updHud();
+    round++;
+    if(lives<=0)setTimeout(gameOverLose,1300);
+    else if(round>3)setTimeout(gameOverLose,1300);
+    else setTimeout(function(){if(state==="playing")newRound();},1600);
+  }
+}
+function toggleAccuse(){
+  if(state!=="playing")return;
+  accuseMode=!accuseMode;
+  btnAccuse.className=accuseMode?"warn":"";
+  setMsg(accuseMode?"指认模式:点一枚金币,确认它就是假币":"已退出指认模式","");
+}
+function clearPans(){
+  if(state!=="playing")return;
+  var i;
+  for(i=0;i<coins.length;i++){coins[i].st=0;coins[i].btn.className="";}
+  renderPans();
+}
+function timeout(){
+  setMsg("时间到!假币是 "+(fake+1)+" 号,生命 -1","badc");
+  coins[fake].btn.className="fake";
+  lives--;
+  updHud();
+  round++;
+  if(lives<=0||round>3)setTimeout(gameOverLose,1300);
+  else setTimeout(function(){if(state==="playing")newRound();},1400);
+}
+function gameOverWin(){
+  state="over";
+  ovT.textContent="疑云散尽!";
+  ovD.textContent="三轮假币全部落网,你就是金币大师!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function gameOverLose(){
+  state="over";
+  ovT.textContent="断案失败…";
+  ovD.textContent="假币逃过了你的眼睛。小提示:每次把候选币三等分称量最有效。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";round=1;score=0;lives=3;lastT=0;
+  ovS.style.display="none";
+  newRound();
+  ov.classList.add("hide");
+}
+btnWeigh.addEventListener("click",weigh);
+btnAccuse.addEventListener("click",toggleAccuse);
+btnClear.addEventListener("click",clearPans);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+  }else if(e.key==="Enter"){e.preventDefault();weigh();}
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;timeout();}
+    var cfg=ROUNDS[Math.min(round,3)-1];
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elTbar.style.width=(timeLeft/cfg.t*100)+"%";
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

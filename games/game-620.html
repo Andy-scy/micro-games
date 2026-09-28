@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>速算马拉松</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#f97316;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#f97316;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.timebar i{display:block;height:100%;background:#f97316;width:0%}
+.q{text-align:center;font-size:34px;font-weight:800;min-height:78px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;line-height:1.4}
+.q.word{font-size:19px;font-weight:600;color:#c7cbe8}
+.ans{text-align:center;font-size:24px;font-weight:700;color:#f97316;background:#0b0e1a;border-radius:10px;padding:8px 0;min-height:44px;margin-bottom:12px;letter-spacing:3px}
+.kp{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kp button{background:#232949;color:#e8eaf6;border:none;border-radius:10px;padding:12px 0;font-size:19px;font-weight:700;cursor:pointer;font-family:inherit}
+.kp button:active{transform:scale(.95)}
+.kp .ok{background:#f97316;color:#3d1500}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:10px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.93);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#f97316}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:22px;color:#fbbf24;font-weight:800}
+.overlay button{margin-top:6px;background:#f97316;color:#3d1500;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>速算马拉松</h1>
+  <p class="hint">30 道混合题型长跑:四则、方程、应用题、百分比、数列 · 答错扣一颗心 · 冲击 S 级评价</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/30 题</span>
+    <span>答对 <b id="ok">0</b></span>
+    <span>用时 <b id="time">0:00</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="q" id="q">准备起跑</div>
+    <div class="ans" id="ans">&nbsp;</div>
+    <div class="kp" id="kp">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="del">⌫</button><button data-k="0">0</button><button data-k="ok" class="ok">确认</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">速算马拉松</h2>
+      <p id="ovD">一场 30 题的心算长跑:口算四则、解小方程、购物找零、百分比、数列接力轮番上阵。答错会损失一颗心,三颗心耗尽即退赛;完赛后按正确率与用时给出 S/A/B/C 评级!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">起跑</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elOk=$("ok"),elTime=$("time"),elLives=$("lives"),elTbar=$("tbar");
+var elQ=$("q"),elAns=$("ans"),elMsg=$("msg"),kp=$("kp");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var state,score,correct,lives,no,cur,input,bag,elapsed,lastT,lock;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function pick(arr){return arr[(Math.random()*arr.length)|0];}
+function shuffle(a){
+  var i,j,t;
+  for(i=a.length-1;i>0;i--){j=(Math.random()*(i+1))|0;t=a[i];a[i]=a[j];a[j]=t;}
+  return a;
+}
+function updHud(){
+  elNo.textContent=no;elOk.textContent=correct;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function showAns(){elAns.textContent=input===""?"\u00a0":input;}
+function nextType(){
+  if(!bag.length)bag=shuffle([0,1,2,3,4,5,6,7,8,9]);
+  return bag.pop();
+}
+function gen(){
+  var t=nextType(),q,ans,word=false;
+  if(t===0){var a=rnd(11,89),b=rnd(11,89);q=a+" + "+b+" = ?";ans=a+b;}
+  else if(t===1){var a2=rnd(31,99),b2=rnd(11,a2-11);q=a2+" − "+b2+" = ?";ans=a2-b2;}
+  else if(t===2){var a3=rnd(3,12),b3=rnd(3,12);q=a3+" × "+b3+" = ?";ans=a3*b3;}
+  else if(t===3){var b4=rnd(3,9),c=rnd(3,12);q=(b4*c)+" ÷ "+b4+" = ?";ans=c;}
+  else if(t===4){
+    var m=pick([2,3,4,5,6,7,8]),x=rnd(2,12),s=rnd(2,20);
+    if(Math.random()<0.5){q="x + "+s+" = "+(x+s)+",  x = ?";ans=x;}
+    else{q=m+"x = "+(m*x)+",  x = ?";ans=x;}
+  }
+  else if(t===5){
+    var n=rnd(3,9)*pick([2,3,4]),p=pick([2,3,4]);
+    while(n%p!==0)p=p===4?2:p+1;
+    q="把 "+n+" 个苹果平均分给 "+p+" 个同学,每人分几个?";ans=n/p;word=true;
+  }
+  else if(t===6){
+    var pr=pick([2,3,5,6,8]),k=rnd(3,9);
+    q="每支笔 "+pr+" 元,买 "+k+" 支一共多少元?";ans=pr*k;word=true;
+  }
+  else if(t===7){
+    var sp=pick([40,50,60,70,80]),h=rnd(2,5);
+    q="一辆汽车每小时行 "+sp+" 千米,行驶 "+h+" 小时共行多少千米?";ans=sp*h;word=true;
+  }
+  else if(t===8){
+    var pc=pick([10,25,50,75]),base;
+    if(pc===10)base=rnd(2,20)*10;
+    else base=rnd(2,30)*4;
+    q=base+" 的 "+pc+"% 是多少?";ans=base*pc/100;
+  }
+  else{
+    var st=rnd(1,10),d=rnd(2,9),i2,terms=[];
+    for(i2=0;i2<4;i2++)terms.push(st+d*i2);
+    q=terms.join("、")+" … 第 5 个数是?";ans=st+d*4;
+  }
+  cur={ans:ans,q:q};
+  elQ.textContent=q;
+  elQ.className="q"+(word?" word":"");
+  input="";
+  showAns();
+}
+function submit(){
+  if(state!=="playing"||lock)return;
+  if(input===""){setMsg("先输入答案","badc");return;}
+  var v=parseInt(input,10);
+  if(v===cur.ans){
+    correct++;score+=10;
+    setMsg("答对了!继续冲","");
+    updHud();
+    no++;
+    if(no===11||no===21)setMsg(no-1+" /30 里程碑达成,保持节奏!","good");
+    if(no>30){finish();return;}
+    lock=true;
+    setTimeout(next,450);
+  }else{
+    lives--;updHud();
+    setMsg("正确答案是 "+cur.ans+" · 生命 -1","badc");
+    no++;
+    if(no===11||no===21)setMsg((no-1)+" /30 里程碑达成,别停下!","good");
+    if(lives<=0){setTimeout(gameOverLose,1000);return;}
+    if(no>30){finish();return;}
+    lock=true;
+    setTimeout(next,1000);
+  }
+}
+function next(){
+  lock=false;
+  setMsg("");
+  gen();
+}
+function fmtTime(ms){
+  var s=(ms/1000)|0;
+  return ((s/60)|0)+":"+("0"+(s%60)).slice(-2);
+}
+function finish(){
+  state="over";
+  var sec=(elapsed/1000)|0;
+  var rating=correct===30&&sec<240?"S":(correct>=27?"A":(correct>=22?"B":"C"));
+  ovT.textContent="冲线!评级 "+rating;
+  ovD.textContent="答对 "+correct+" / 30 题 · 总用时 "+fmtTime(elapsed);
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再跑一次";
+  ov.classList.remove("hide");
+}
+function gameOverLose(){
+  state="over";
+  ovT.textContent="体力耗尽…";
+  ovD.textContent="跑到第 "+no+" 题,答对 "+correct+" 题。下次先在草稿上把大数拆开算!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再跑一次";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;correct=0;lives=3;no=1;input="";
+  bag=shuffle([0,1,2,3,4,5,6,7,8,9]);
+  elapsed=0;lastT=0;lock=false;
+  ovS.style.display="none";
+  setMsg("");
+  gen();updHud();
+  ov.classList.add("hide");
+}
+function press(k){
+  if(state!=="playing")return;
+  if(k==="del")input=input.slice(0,-1);
+  else if(k==="ok")submit();
+  else if(input.length<5)input+=k;
+  showAns();
+}
+kp.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute("data-k"))press(t.getAttribute("data-k"));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key>="0"&&e.key<="9"){press(e.key);e.preventDefault();}
+  else if(e.key==="Backspace"){press("del");e.preventDefault();}
+  else if(e.key==="Enter"){press("ok");e.preventDefault();}
+});
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==="playing"){
+    if(!lastT)lastT=t;
+    elapsed+=Math.min(100,t-lastT);
+    elTime.textContent=fmtTime(elapsed);
+    elTbar.style.width=(no-1)/30*100+"%";
+  }
+  lastT=t;
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

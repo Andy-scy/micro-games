@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三车道狂飙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>三车道狂飙</h1>
+  <p class="tips">城市快速路车流滚滚,你在三条车道间见缝插针。← → 或 A / D 切换车道,坚持越远车速越快!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">距离</div><div class="big" id="sd">0 m</div></div>
+    <div class="stat"><div class="mut">时速</div><div class="big" id="sv">0</div></div>
+    <div class="stat"><div class="mut">躲过车流</div><div class="big" id="sw">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="400" height="540"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">三车道狂飙</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 切换车道(触屏点按画面左右两侧)<br>· 车流同向行驶但更慢,追尾即撞车<br>· 车速随里程不断攀升,反应要越来越快<br>· 撞车即结束,看看你能跑多远</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=540,LANES=3,LANE_W=W/LANES;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var cars=[],running=false,speed=320,dist=0,dodged=0,spawnT=0.7,stripe=0,shake=0,playerLane=1,playerX=LANE_W*1.5;
+var CAR_COLORS=['#4da3ff','#51d88a','#b07cff','#ff9f43'];
+var PY=H-110;
+function $i(id){return document.getElementById(id)}
+function laneCx(l){return LANE_W*l+LANE_W/2}
+function reset(){
+  cars.length=0;speed=320;dist=0;dodged=0;spawnT=0.7;stripe=0;shake=0;playerLane=1;playerX=laneCx(1);
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.floor(dist)+' m';
+  $i('sv').textContent=Math.floor(speed*0.42);
+  $i('sw').textContent=dodged;
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function blockedMask(){
+  var m=0,i;
+  for(i=0;i<cars.length;i++){if(cars[i].y<220&&cars[i].y>-70)m|=(1<<cars[i].lane);}
+  return m;
+}
+function spawn(){
+  var m=blockedMask(),cand=[],l,i,ok;
+  for(l=0;l<LANES;l++){if(!(m&(1<<l)))cand.push(l);}
+  if(cand.length<=1)return;
+  l=cand[Math.floor(Math.random()*cand.length)];
+  ok=true;
+  for(i=0;i<cars.length;i++){if(cars[i].lane===l&&cars[i].y<160)ok=false;}
+  if(!ok)return;
+  cars.push({lane:l,x:laneCx(l),y:-90,passed:false,
+    c:CAR_COLORS[Math.floor(Math.random()*CAR_COLORS.length)],
+    spd:120+Math.random()*90});
+}
+function update(dt){
+  speed=Math.min(680,speed+9*dt);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%80;
+  playerX+=(laneCx(playerLane)-playerX)*Math.min(1,dt*10);
+  spawnT-=dt;
+  if(spawnT<=0){spawn();spawnT=Math.max(0.42,1.25-speed*0.001);}
+  var i,c;
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    c.y+=(speed-c.spd)*dt;
+    if(!c.passed&&c.y>PY+46){c.passed=true;dodged++;}
+    if(c.y>H+100){cars.splice(i,1);continue;}
+    if(c.lane===playerLane&&Math.abs(c.y-PY)<64){
+      shake=1;
+      endRun('撞车了!','本次成绩:<br>距离 <b>'+Math.floor(dist)+' m</b><br>躲过车流 '+dodged+' 辆<br>最高时速 '+Math.floor(speed*0.42)+'<br>变道要趁早,别贪最后一格!');
+      return;
+    }
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-21,y-36,42,72,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-16,y-20,32,20,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-16,y+6,32,18,5);ctx.fill();
+  ctx.fillStyle='#ffe08a';ctx.fillRect(x-18,y+30,10,5);ctx.fillRect(x+8,y+30,10,5);
+}
+function draw(){
+  ctx.save();
+  if(shake>0){shake=Math.max(0,shake-0.05);ctx.translate((Math.random()-.5)*18*shake,(Math.random()-.5)*18*shake);}
+  ctx.fillStyle='#181c36';ctx.fillRect(-20,-20,W+40,H+40);
+  ctx.fillStyle='#2b3158';ctx.fillRect(14,-20,W-28,H+40);
+  ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(16,-20);ctx.lineTo(16,H+20);ctx.moveTo(W-16,-20);ctx.lineTo(W-16,H+20);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=3;
+  ctx.setLineDash([28,34]);ctx.lineDashOffset=-stripe;
+  var l;
+  for(l=1;l<LANES;l++){ctx.beginPath();ctx.moveTo(LANE_W*l,-20);ctx.lineTo(LANE_W*l,H+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(l=0;l<cars.length;l++)drawCar(cars[l].x,cars[l].y,cars[l].c);
+  drawCar(playerX,PY,'#ff5c5c');
+  if(running&&Math.floor(Date.now()/300)%2===0){
+    ctx.fillStyle='#ff3b3b';ctx.fillRect(playerX-18,PY+30,10,5);ctx.fillRect(playerX+8,PY+30,10,5);
+  }
+  ctx.restore();
+}
+window.addEventListener('keydown',function(e){
+  if(running){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){if(playerLane>0)playerLane--;}
+    else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D'){if(playerLane<LANES-1)playerLane++;}
+  }
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var rect=cv.getBoundingClientRect();
+  var x=(e.clientX-rect.left)*W/rect.width;
+  if(x<W*0.4&&playerLane>0)playerLane--;
+  else if(x>W*0.6&&playerLane<LANES-1)playerLane++;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

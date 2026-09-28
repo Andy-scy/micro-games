@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞刀转盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ef5350;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ef5350;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ef5350;color:#3e0b0b;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>飞刀转盘</h1>
+<p class="tip">点击屏幕或按空格，把飞刀掷上旋转的木盘 · 扎爆 5 只气球，别撞上已插的刀 · 共 10 把刀，盘速越来越快</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,CX=240,CY=300,R=148;
+var wheelAng,omega,dir,knives,knifeArr,balloons,phase,flyT,stickFx,msg,msgT,threw;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function angDiff(a,b){
+  var d=(a-b)%(Math.PI*2);
+  if(d>Math.PI)d-=Math.PI*2;
+  if(d<-Math.PI)d+=Math.PI*2;
+  return Math.abs(d);
+}
+function reset(){
+  wheelAng=0;dir=1;knifeArr=[];phase='ready';flyT=-1;stickFx=null;msg='';msgT=0;threw=0;
+  knives=10;
+  balloons=[];
+  for(var i=0;i<5;i++)balloons.push({rel:i*(Math.PI*2/5)+rnd(-0.25,0.25),c:['#ef5350','#ffee58','#66bb6a','#42a5f5','#ab47bc'][i],alive:true,pop:0});
+  calcOmega();
+}
+function calcOmega(){
+  var left=0;
+  for(var i=0;i<balloons.length;i++)if(balloons[i].alive)left++;
+  omega=dir*(1.55+(5-left)*0.32);
+}
+function throwKnife(){
+  if(phase!=='ready'||flyT>=0)return;
+  flyT=0;phase='throw';threw++;
+}
+function landKnife(){
+  var rel=-Math.PI/2-wheelAng;
+  for(var i=0;i<knifeArr.length;i++){
+    if(angDiff(rel,knifeArr[i])<0.21){
+      phase='ready';msg='撞刀了！浪费一把';msgT=0.8;
+      knives--;
+      checkEnd();
+      return;
+    }
+  }
+  for(var j=0;j<balloons.length;j++){
+    var b=balloons[j];
+    if(b.alive&&angDiff(rel,b.rel)<0.15){
+      b.alive=false;b.pop=0.5;msg='砰！气球爆了';msgT=0.7;break;
+    }
+  }
+  knifeArr.push(rel);
+  knives--;
+  phase='ready';
+  dir=-dir;
+  calcOmega();
+  checkEnd();
+}
+function checkEnd(){
+  var left=0;
+  for(var i=0;i<balloons.length;i++)if(balloons[i].alive)left++;
+  if(left===0){
+    phase='over';
+    ovT.textContent='刀法如神！';
+    ovX.textContent='用 '+threw+' 把刀扎爆全部气球，还剩 '+knives+' 把。转盘在你的刀下停服了！';
+    ov.classList.remove('hidden');
+    return;
+  }
+  if(knives<=0){
+    phase='over';
+    ovT.textContent='刀用完了';
+    ovX.textContent='还剩 '+left+' 只气球没扎爆。等气球转到正上方再出手，插刀越密越要留出角度。';
+    ov.classList.remove('hidden');
+  }
+}
+function update(dt){
+  msgT-=dt;
+  wheelAng+=omega*dt;
+  for(var i=0;i<balloons.length;i++)if(balloons[i].pop>0)balloons[i].pop-=dt;
+  if(phase==='throw'){
+    flyT+=dt/0.11;
+    if(flyT>=1){flyT=-1;landKnife();}
+  }
+  if(stickFx)stickFx-=dt;
+}
+function drawKnifeAbs(rel,len){
+  var x=CX+Math.cos(rel)*(R+len*0.5-6),y=CY+Math.sin(rel)*(R+len*0.5-6);
+  ctx.save();ctx.translate(x,y);ctx.rotate(rel+Math.PI/2);
+  ctx.fillStyle='#cfd8dc';ctx.fillRect(-2.5,-16,5,20);
+  ctx.beginPath();ctx.moveTo(-2.5,-16);ctx.lineTo(0,-24);ctx.lineTo(2.5,-16);ctx.fill();
+  ctx.fillStyle='#8d6e63';ctx.fillRect(-4,4,8,12);
+  ctx.fillStyle='#5d4037';ctx.fillRect(-4,4,8,3);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1a1f36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.04)';
+  for(var i=0;i<7;i++)ctx.fillRect(0,40+i*82,W,2);
+  ctx.fillStyle='#5d4037';ctx.beginPath();ctx.arc(CX,CY,R+16,0,7);ctx.fill();
+  ctx.fillStyle='#8d6e63';ctx.beginPath();ctx.arc(CX,CY,R,0,7);ctx.fill();
+  ctx.strokeStyle='rgba(62,39,35,.6)';ctx.lineWidth=3;
+  for(var s2=0;s2<8;s2++){
+    var a2=wheelAng+s2*Math.PI/4;
+    ctx.beginPath();ctx.moveTo(CX,CY);ctx.lineTo(CX+Math.cos(a2)*R,CY+Math.sin(a2)*R);ctx.stroke();
+  }
+  for(var r2=1;r2<4;r2++){
+    ctx.beginPath();ctx.arc(CX,CY,R*r2/4,0,7);ctx.stroke();
+  }
+  ctx.fillStyle='#3e2723';ctx.beginPath();ctx.arc(CX,CY,12,0,7);ctx.fill();
+  for(var k2=0;k2<knifeArr.length;k2++)drawKnifeAbs(wheelAng+knifeArr[k2],34);
+  for(var b2=0;b2<balloons.length;b2++){
+    var b=balloons[b2];
+    var bx=CX+Math.cos(wheelAng+b.rel)*(R+26),by=CY+Math.sin(wheelAng+b.rel)*(R+26);
+    ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(CX+Math.cos(wheelAng+b.rel)*(R+8),CY+Math.sin(wheelAng+b.rel)*(R+8));ctx.lineTo(bx,by+14);ctx.stroke();
+    if(b.alive){
+      ctx.fillStyle=b.c;ctx.beginPath();ctx.ellipse(bx,by,13,16,0,0,7);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.45)';ctx.beginPath();ctx.ellipse(bx-4,by-5,4,6,0,0,7);ctx.fill();
+    }else if(b.pop>0){
+      ctx.strokeStyle=b.c;ctx.globalAlpha=b.pop*2;ctx.lineWidth=3;
+      for(var pp=0;pp<6;pp++){
+        var pa=b.rel+pp;
+        ctx.beginPath();ctx.moveTo(bx+Math.cos(pa)*8,by+Math.sin(pa)*8);ctx.lineTo(bx+Math.cos(pa)*(22-b.pop*20),by+Math.sin(pa)*(22-b.pop*20));ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    }
+  }
+  if(phase==='throw'){
+    var t=flyT,ky=600-(600-(CY-R))*t;
+    ctx.save();ctx.translate(CX,ky);
+    ctx.fillStyle='#cfd8dc';ctx.fillRect(-2.5,-16,5,20);
+    ctx.beginPath();ctx.moveTo(-2.5,-16);ctx.lineTo(0,-24);ctx.lineTo(2.5,-16);ctx.fill();
+    ctx.fillStyle='#8d6e63';ctx.fillRect(-4,4,8,12);
+    ctx.restore();
+  }else if(phase==='ready'){
+    ctx.save();ctx.translate(CX,606);
+    ctx.fillStyle='#cfd8dc';ctx.fillRect(-2.5,-16,5,20);
+    ctx.beginPath();ctx.moveTo(-2.5,-16);ctx.lineTo(0,-24);ctx.lineTo(2.5,-16);ctx.fill();
+    ctx.fillStyle='#8d6e63';ctx.fillRect(-4,4,8,12);
+    ctx.restore();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('剩余飞刀 ×'+knives,14,28);
+  var left=0;
+  for(var l2=0;l2<balloons.length;l2++)if(balloons[l2].alive)left++;
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';
+  ctx.fillText('剩余气球 '+left,W-100,28);
+  if(msgT>0){ctx.fillStyle='#ef5350';ctx.font='18px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,CX,80);}
+  if(phase==='ready'){ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('点击 或 空格 掷刀',CX,628);}
+}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();throwKnife();});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();if(!e.repeat)throwKnife();}
+});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

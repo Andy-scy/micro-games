@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>印章任务簿</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #713f12;background:#10141f;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.tools{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:6px;margin-top:10px}
+.tools .chip{width:26px;height:26px;border-radius:8px;border:2px solid #2a3050;cursor:pointer}
+.tools .chip.on{border-color:#fbbf24;box-shadow:0 0 0 2px rgba(251,191,36,.35)}
+.tools button{background:#241d33;color:#e8eaf6;border:1px solid #4c3a72;border-radius:9px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.tools button.on{border-color:#fbbf24;box-shadow:0 0 0 2px rgba(251,191,36,.3)}
+.quests{list-style:none;margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.quests li{font-size:13px;color:#8b90b0;background:#141a2e;border-radius:8px;padding:6px 10px}
+.quests li.done{color:#4ade80}
+.overlay{position:absolute;inset:0;background:rgba(12,10,4,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#422b05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>印章任务簿</h1>
+  <p class="hint">画笔随意涂,印章点一点,完成<b style="color:#fbbf24">随机 4 项委托</b>即交稿!<br>90 秒内全部打勾得高分;时间一到没做完就算违约。</p>
+  <div class="hud"><span>委托 <b id="qdone">0/4</b></span><span>时间 <b id="time">90</b>秒</span><span>颜色 <b id="cn">1</b> 种</span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="400"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">印章任务簿</h2>
+      <p id="ovP">创作委托随机派发:画几笔、用几种颜色、盖什么章、四角留痕、一笔横跨画布……每局都不同,看清清单再动笔!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">接下委托</button>
+    </div>
+  </div>
+  <div class="tools" id="tools"></div>
+  <ul class="quests" id="qlist"></ul>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elQ=$("qdone"),elTime=$("time"),elCn=$("cn"),toolsEl=$("tools"),qlist=$("qlist");
+var COLORS=["#ef4444","#facc15","#4ade80","#38bdf8","#f472b6","#e2e8f0"];
+var state="menu",col=COLORS[0],mode="pen",timeLeft=90,lastT=0;
+var strokes=0,colors={},stampC={star:0,heart:0,flower:0},maxSpan=0,quads=[false,false,false,false];
+var pcv=document.createElement("canvas");pcv.width=480;pcv.height=400;
+var pctx=pcv.getContext("2d");
+var isDown=false,last=null,bb=null;
+var QPOOL=[
+ {txt:"画至少 5 笔线条",ck:function(){return strokes>=5;}},
+ {txt:"用上 3 种不同颜色",ck:function(){var c=0,k;for(k in colors)c++;return c>=3;}},
+ {txt:"盖上 3 颗星星",ck:function(){return stampC.star>=3;}},
+ {txt:"盖上 2 颗爱心",ck:function(){return stampC.heart>=2;}},
+ {txt:"盖上 2 朵小花",ck:function(){return stampC.flower>=2;}},
+ {txt:"一笔横跨画布(超360px)",ck:function(){return maxSpan>=360;}},
+ {txt:"四个角落都有笔迹",ck:function(){return quads[0]&&quads[1]&&quads[2]&&quads[3];}}
+];
+var quests=[];
+function pickQuests(){
+  var idx=[0,1,2,3,4,5,6],i,j,t;
+  for(i=idx.length-1;i>0;i--){
+    j=(Math.random()*(i+1))|0;t=idx[i];idx[i]=idx[j];idx[j]=t;
+  }
+  quests=[];
+  for(i=0;i<4;i++)quests.push(QPOOL[idx[i]]);
+  qlist.innerHTML="";
+  for(i=0;i<quests.length;i++){
+    var li=document.createElement("li");
+    li.textContent="□ "+quests[i].txt;
+    qlist.appendChild(li);
+  }
+}
+function updateQuests(){
+  var done=0,i;
+  for(i=0;i<quests.length;i++){
+    var ok=quests[i].ck();
+    if(ok)done++;
+    qlist.children[i].textContent=(ok?"✓ ":"□ ")+quests[i].txt;
+    qlist.children[i].className=ok?"done":"";
+  }
+  elQ.textContent=done+"/4";
+  var c=0,k;for(k in colors)c++;elCn.textContent=c;
+  if(done>=4&&state==="playing")win();
+}
+function markQuad(x,y){
+  if((x<120||x>=360)&&(y<110||y>=290)){
+    var t=(y<110)?0:1,l=(x<120)?0:1;
+    quads[t*2+l]=true;
+  }
+}
+function drawStar(g,cx,cy,r,rot){
+  g.beginPath();
+  var i;
+  for(i=0;i<10;i++){
+    var rad=(i%2===0)?r:r*0.45,a=rot-Math.PI/2+Math.PI*i/5;
+    var x=cx+rad*Math.cos(a),y=cy+rad*Math.sin(a);
+    if(i===0)g.moveTo(x,y);else g.lineTo(x,y);
+  }
+  g.closePath();g.fill();
+}
+function drawHeart(g,cx,cy,r){
+  g.beginPath();
+  g.moveTo(cx,cy+r*0.9);
+  g.bezierCurveTo(cx-r*1.4,cy-r*0.2,cx-r*0.6,cy-r*1.3,cx,cy-r*0.4);
+  g.bezierCurveTo(cx+r*0.6,cy-r*1.3,cx+r*1.4,cy-r*0.2,cx,cy+r*0.9);
+  g.closePath();g.fill();
+}
+function drawFlower(g,cx,cy,r){
+  var i;
+  for(i=0;i<6;i++){
+    var a=Math.PI*2*i/6;
+    g.beginPath();g.arc(cx+Math.cos(a)*r*0.72,cy+Math.sin(a)*r*0.72,r*0.5,0,Math.PI*2);g.fill();
+  }
+  g.fillStyle="#10141f";
+  g.beginPath();g.arc(cx,cy,r*0.4,0,Math.PI*2);g.fill();
+}
+function stamp(x,y){
+  pctx.save();
+  pctx.translate(x,y);
+  pctx.rotate(Math.random()*0.6-0.3);
+  pctx.fillStyle=col;
+  if(mode==="star")drawStar(pctx,0,0,22,0);
+  else if(mode==="heart")drawHeart(pctx,0,0,20);
+  else drawFlower(pctx,0,0,20);
+  pctx.restore();
+  stampC[mode]++;
+  colors[col]=1;
+  markQuad(x,y);
+  updateQuests();
+  draw();
+}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){
+  if(state!=="playing")return;
+  var p=pos(e);
+  if(mode!=="pen"){stamp(p.x,p.y);return;}
+  isDown=true;last=p;
+  strokes++;colors[col]=1;
+  bb={x0:p.x,y0:p.y,x1:p.x,y1:p.y};
+  pctx.fillStyle=col;
+  pctx.beginPath();pctx.arc(p.x,p.y,4,0,Math.PI*2);pctx.fill();
+  markQuad(p.x,p.y);
+  updateQuests();
+}
+function moveP(e){
+  if(!isDown||state!=="playing")return;
+  var p=pos(e);
+  pctx.strokeStyle=col;pctx.lineWidth=7;pctx.lineCap="round";pctx.lineJoin="round";
+  pctx.beginPath();pctx.moveTo(last.x,last.y);pctx.lineTo(p.x,p.y);pctx.stroke();
+  bb.x0=Math.min(bb.x0,p.x);bb.y0=Math.min(bb.y0,p.y);
+  bb.x1=Math.max(bb.x1,p.x);bb.y1=Math.max(bb.y1,p.y);
+  maxSpan=Math.max(maxSpan,bb.x1-bb.x0,bb.y1-bb.y0);
+  markQuad(p.x,p.y);
+  last=p;
+  updateQuests();
+}
+function endP(){isDown=false;last=null;}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+function draw(){
+  ctx.fillStyle="#10141f";ctx.fillRect(0,0,480,400);
+  ctx.drawImage(pcv,0,0);
+}
+function buildTools(){
+  var i;
+  for(i=0;i<COLORS.length;i++){
+    (function(c){
+      var d=document.createElement("div");
+      d.className="chip"+(c===col?" on":"");
+      d.style.background=c;
+      d.addEventListener("click",function(){
+        col=c;
+        var ch=toolsEl.querySelectorAll(".chip"),k;
+        for(k=0;k<ch.length;k++)ch[k].className="chip";
+        d.className="chip on";
+      });
+      toolsEl.appendChild(d);
+    })(COLORS[i]);
+  }
+  var modes=[["pen","画笔"],["star","印章·星"],["heart","印章·心"],["flower","印章·花"]];
+  for(i=0;i<modes.length;i++){
+    (function(m){
+      var b=document.createElement("button");
+      b.textContent=m[1];
+      if(m[0]==="pen")b.className="on";
+      b.addEventListener("click",function(){
+        mode=m[0];
+        var bs=toolsEl.querySelectorAll("button"),k;
+        for(k=0;k<bs.length;k++)bs[k].className="";
+        b.className="on";
+      });
+      toolsEl.appendChild(b);
+    })(modes[i]);
+  }
+}
+function win(){
+  state="over";
+  var s=100+Math.round(timeLeft);
+  ovT.textContent="委托全部完成!";
+  ovP.textContent="客户很满意,尾款到账。剩余 "+Math.ceil(timeLeft)+" 秒,手快有奖。";
+  ovS.style.display="block";ovS.textContent="得分 "+s;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function lose(){
+  state="over";
+  ovT.textContent="交付超时";
+  ovP.textContent="委托还有没打勾的项目。下次先做简单的,再慢慢磨细节。";
+  ovS.style.display="block";ovS.textContent="时间耗尽";
+  btnGo.textContent="再接一单";
+  ov.classList.remove("hide");
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT)/1000;lastT=t;
+  if(state!=="playing")return;
+  timeLeft-=dt;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  if(timeLeft<=0)lose();
+}
+btnGo.addEventListener("click",function(){
+  strokes=0;colors={};stampC={star:0,heart:0,flower:0};maxSpan=0;
+  quads=[false,false,false,false];
+  pctx.clearRect(0,0,480,400);
+  timeLeft=90;mode="pen";
+  state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  pickQuests();updateQuests();draw();
+});
+buildTools();
+pickQuests();
+draw();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>链球旋转</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ce93d8;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ce93d8;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ce93d8;color:#3a1044;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>链球旋转</h1>
+<p class="tip">按住开始旋转，链球越转越快 · 在链球摆到左上方绿区时松手掷出 · 3 掷取最远，55 米以上获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,GY=548,CX=170,CY=452,PPM=8;
+var phase,att,attT,best,msg,resT,ang,om,rr,spinT,ham,hx,hy,trail,dizzy;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  phase='ready';att=0;attT=0;best=0;msg='';resT=0;ang=Math.PI;om=3;rr=26;spinT=0;ham=null;hx=0;hy=0;trail=[];dizzy=false;
+}
+function startSpin(){
+  phase='spin';ang=Math.PI*0.9;om=3;rr=26;spinT=0;dizzy=false;trail=[];
+}
+function release(){
+  var sp=Math.min(510,om*rr*0.55);
+  var tx=-Math.sin(ang),ty=Math.cos(ang);
+  ham={x:CX+Math.cos(ang)*rr,y:CY+Math.sin(ang)*rr,vx:tx*sp,vy:ty*sp,trail:[]};
+  hx=ham.x;hy=ham.y;
+  phase='fly';
+}
+function update(dt){
+  if(phase==='spin'){
+    spinT+=dt;attT+=dt;
+    if(spinT<5.5){om=Math.min(12,3+2.4*spinT);}
+    else{dizzy=true;om=Math.max(2.2,om-3*dt);}
+    if(spinT>7){release();return;}
+    rr=Math.min(74,26+spinT*14);
+    ang+=om*dt;
+  }
+  if(phase==='fly'&&ham){
+    var steps=Math.max(1,Math.ceil(dt/0.006)),sd=dt/steps;
+    for(var i=0;i<steps;i++){
+      ham.vy+=420*sd;
+      ham.vx*=(1-0.04*sd);
+      ham.x+=ham.vx*sd;ham.y+=ham.vy*sd;
+      if(ham.y>=GY-8){
+        ham.y=GY-8;phase='land';resT=0;
+        var m=Math.max(0,(ham.x-170)/PPM);
+        att++;
+        if(m>best){best=m;msg='最远纪录 '+m.toFixed(1)+' 米！';}
+        else{msg='本次 '+m.toFixed(1)+' 米';}
+        break;
+      }
+    }
+    if(ham){ham.trail.push({x:ham.x,y:ham.y});if(ham.trail.length>22)ham.trail.shift();}
+  }
+  if(phase==='land'){
+    resT+=dt;
+    if(resT>1.4){
+      if(att>=3){end(best>=55);return;}
+      ham=null;phase='ready';msg='';
+    }
+  }
+}
+function end(win){
+  phase='over';
+  ovT.textContent=win?'链球力士！':'三掷结束';
+  ovX.textContent='最远成绩 '+best.toFixed(1)+' 米（获胜需 55 米）。'+(win?'旋转与时机完美结合！':'转满约 3.5 秒，链球摆到左上绿区时松手。');
+  ov.classList.remove('hidden');
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var sky=ctx.createLinearGradient(0,0,0,GY);
+  sky.addColorStop(0,'#171530');sky.addColorStop(1,'#241d33');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2c4531';ctx.fillRect(0,GY-4,W,4);
+  ctx.fillStyle='#243a28';ctx.fillRect(0,GY,W,H-GY);
+  ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(170,GY-4);ctx.lineTo(170,GY-30);ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.5)';ctx.font='11px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('掷圈',170,GY-36);
+  for(var dm=1;dm<=9;dm++){
+    var mx=170+dm*10*PPM;
+    ctx.strokeStyle='rgba(255,255,255,.12)';
+    ctx.beginPath();ctx.moveTo(mx,GY-4);ctx.lineTo(mx,GY-18);ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,.45)';ctx.font='11px system-ui,sans-serif';
+    ctx.fillText((dm*10)+'m',mx,GY-24);
+  }
+  ctx.strokeStyle='#ffd54f';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(170+55*PPM,GY-4);ctx.lineTo(170+55*PPM,GY-30);ctx.stroke();
+  if(phase==='spin'||phase==='ready'){
+    ctx.fillStyle='rgba(102,187,106,.18)';
+    ctx.beginPath();ctx.moveTo(CX,CY);
+    ctx.arc(CX,CY,74,Math.PI,Math.PI*1.45);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='rgba(102,187,106,.5)';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(CX,CY,74,Math.PI,Math.PI*1.45);ctx.stroke();
+  }
+  ctx.fillStyle='#eceff1';
+  ctx.beginPath();ctx.arc(CX,CY-34,7,0,7);ctx.fill();
+  ctx.fillRect(CX-6,CY-28,12,26);
+  ctx.strokeStyle='#90a4ae';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(CX,CY-2);ctx.lineTo(CX-9,GY);ctx.moveTo(CX,CY-2);ctx.lineTo(CX+9,GY);ctx.stroke();
+  if(phase==='spin'){
+    var hxp=CX+Math.cos(ang)*rr,hyp=CY+Math.sin(ang)*rr;
+    ctx.strokeStyle='#ce93d8';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(CX,CY-6);ctx.lineTo(hxp,hyp);ctx.stroke();
+    ctx.fillStyle='#ab47bc';
+    ctx.beginPath();ctx.arc(hxp,hyp,10,0,7);ctx.fill();
+    ctx.fillStyle='#e1bee7';ctx.beginPath();ctx.arc(hxp-3,hyp-3,3,0,7);ctx.fill();
+    var bx=60,bw=140;
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(bx,84,bw,12);
+    ctx.fillStyle=dizzy?'#ef5350':'#ce93d8';
+    ctx.fillRect(bx,84,bw*Math.min(1,(om-3)/9),12);
+    ctx.strokeStyle='#9fa8da';ctx.strokeRect(bx,84,bw,12);
+    ctx.fillStyle='#9fa8da';ctx.font='12px system-ui,sans-serif';ctx.textAlign='left';
+    ctx.fillText('转速 '+(om*8).toFixed(0)+' 转/分',bx,76);
+  }
+  if(phase==='ready'){
+    ctx.fillStyle='#9fa8da';ctx.font='14px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('按住 开始旋转',CX+40,600);
+  }
+  if(ham){
+    for(var t2=0;t2<ham.trail.length;t2++){
+      ctx.fillStyle='rgba(206,147,216,'+(t2/ham.trail.length*0.35)+')';
+      ctx.beginPath();ctx.arc(ham.trail[t2].x,ham.trail[t2].y,6,0,7);ctx.fill();
+    }
+    ctx.fillStyle='#ab47bc';ctx.beginPath();ctx.arc(ham.x,ham.y,10,0,7);ctx.fill();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+Math.min(att+1,3)+' / 3 掷',14,28);
+  ctx.fillText('最远 '+best.toFixed(1)+' 米',14,52);
+  if(msg&&phase==='land'){
+    ctx.fillStyle='#ce93d8';ctx.font='22px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText(msg,W/2,110);
+  }
+  if(phase==='spin'&&dizzy){
+    ctx.fillStyle='#ef5350';ctx.font='14px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('转太久头晕了！',CX+60,150);
+  }
+}
+function press(){
+  if(phase==='ready')startSpin();
+  else if(phase==='spin')release();
+}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();press();});
+window.addEventListener('keydown',function(e){if(e.code==='Space'){e.preventDefault();if(!e.repeat)press();}});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

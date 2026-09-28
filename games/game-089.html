@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无声潜航</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#9ee6b8;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#9ee6b8;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#9ee6b8;color:#0c2415;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#9ee6b8;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>无声潜航</h1>
+<p class="tip">这架侦察机没有任何武器!用鼠标 / 手指拖动或方向键驾驶,躲开巡逻舰的弹幕、陨石和闪红预警的纵向光束,静默潜航 60 秒即获胜。碰到任何危险都会坠毁。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">无声潜航</h2>
+<p id="ovX">禁火静默,只身穿越封锁线。你唯一的武器,是走位。</p>
+<button id="btn">开始潜航</button>
+</div></div>
+</div>
+<div class="hud"><span>时间<b id="hT">0.0/60</b></span><span>得分<b id="hS">0</b></span><span>状态<b id="hZ">静默</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hT=document.getElementById("hT"),hS=document.getElementById("hS"),hZ=document.getElementById("hZ");
+var GOAL=60;
+var state="ready",timer=0,t=0,spawn=0.9,beamT=4;
+var ship={x:W/2,y:H-100};
+var hazards=[],ebullets=[],beams=[],parts=[],stars=[];
+var keys={},px=W/2,py=H-100,pressed=false,hasPointer=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*20+6});}
+function reset(){
+  timer=0;t=0;spawn=0.9;beamT=4;
+  ship.x=W/2;ship.y=H-100;
+  px=ship.x;py=ship.y;hasPointer=false;
+  hazards=[];ebullets=[];beams=[];parts=[];
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*150+40;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.4,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"潜航成功":"信号中断";
+  ovX.textContent="静默了 "+timer.toFixed(1)+" 秒,得分 "+Math.floor(timer*10)+(win?" · 你无声地穿过了整条封锁线!":" · 下一次,让弹幕从你身边滑过。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(x,y){
+  boom(x,y,26,"#ff6b6b");
+  gameOver(false);
+}
+function update(dt){
+  t+=dt;timer+=dt;spawn-=dt;beamT-=dt;
+  var sp=300;
+  var moved=false;
+  if(keys.ArrowLeft||keys.a){ship.x-=sp*dt;moved=true;}
+  if(keys.ArrowRight||keys.d){ship.x+=sp*dt;moved=true;}
+  if(keys.ArrowUp||keys.w){ship.y-=sp*dt;moved=true;}
+  if(keys.ArrowDown||keys.s){ship.y+=sp*dt;moved=true;}
+  if(pressed&&hasPointer&&!moved){
+    ship.x+=(px-ship.x)*Math.min(1,dt*9);
+    ship.y+=(py-ship.y)*Math.min(1,dt*9);
+  }
+  ship.x=Math.max(18,Math.min(W-18,ship.x));
+  ship.y=Math.max(18,Math.min(H-30,ship.y));
+  if(spawn<=0){
+    spawn=Math.max(0.55,1.5-timer*0.013);
+    var r=Math.random();
+    if(r<0.4){
+      hazards.push({x:40+Math.random()*(W-80),y:-26,vy:70+timer,ph:Math.random()*6.283,kind:0,ft:1.2});
+    }else if(r<0.8){
+      hazards.push({x:30+Math.random()*(W-60),y:-40,vy:150+timer*2,ph:Math.random()*6.283,kind:1});
+    }
+  }
+  if(beamT<=0){
+    beamT=Math.max(2,4.6-timer*0.03);
+    beams.push({x:30+Math.random()*(W-60),warn:0.9,on:0.55});
+  }
+  var bi;
+  for(i=hazards.length-1;i>=0;i--){
+    var h=hazards[i];
+    h.y+=h.vy*dt;
+    if(h.kind===0){
+      h.x+=Math.sin(t*2+h.ph)*46*dt;
+      h.ft-=dt;
+      if(h.ft<=0&&h.y<H-120){
+        h.ft=Math.max(1.1,2.2-timer*0.02);
+        var dx=ship.x-h.x,dy=ship.y-h.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+        ebullets.push({x:h.x,y:h.y+12,vx:dx/d*190,vy:dy/d*190});
+      }
+    }
+    if(h.y>H+30){hazards.splice(i,1);continue;}
+    var hx=Math.abs(h.x-ship.x),hy=Math.abs(h.y-ship.y);
+    if(hx<(h.kind===0?22:26)&&hy<(h.kind===0?22:28)){die(ship.x,ship.y);return;}
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var b=ebullets[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-10||b.x>W+10||b.y>H+10){ebullets.splice(i,1);continue;}
+    var bx=b.x-ship.x,by=b.y-ship.y;
+    if(bx*bx+by*by<144){die(ship.x,ship.y);return;}
+  }
+  for(i=beams.length-1;i>=0;i--){
+    var bm=beams[i];
+    if(bm.warn>0){bm.warn-=dt;continue;}
+    bm.on-=dt;
+    if(bm.on<=0){beams.splice(i,1);continue;}
+    if(Math.abs(bm.x-ship.x)<16){die(ship.x,ship.y);return;}
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(timer>=GOAL)gameOver(true);
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.25+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  for(i=0;i<beams.length;i++){
+    var bm=beams[i];
+    if(bm.warn>0){
+      if(Math.floor(bm.warn*10)%2===0){
+        ctx.fillStyle="rgba(255,107,107,0.5)";
+        ctx.fillRect(bm.x-2,0,4,H);
+      }
+    }else{
+      ctx.fillStyle="rgba(255,107,107,0.85)";
+      ctx.fillRect(bm.x-9,0,18,H);
+      ctx.fillStyle="rgba(255,255,255,0.7)";
+      ctx.fillRect(bm.x-2,0,4,H);
+    }
+  }
+  for(i=0;i<hazards.length;i++){
+    var h=hazards[i];
+    ctx.save();ctx.translate(h.x,h.y);
+    if(h.kind===0){
+      ctx.fillStyle="#ff9f9f";
+      ctx.beginPath();ctx.moveTo(0,14);ctx.lineTo(-13,-10);ctx.lineTo(0,-4);ctx.lineTo(13,-10);
+      ctx.closePath();ctx.fill();
+    }else{
+      ctx.rotate(t*2+h.ph);
+      ctx.fillStyle="#7d6b58";
+      ctx.beginPath();ctx.arc(0,0,14,0,6.283);ctx.fill();
+      ctx.strokeStyle="#4a3f34";ctx.lineWidth=3;ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.fillStyle="#ff6b6b";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4.5,0,6.283);ctx.fill();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.strokeStyle="#9ee6b8";ctx.lineWidth=2;
+    ctx.strokeRect(-12,-16,24,32);
+    ctx.fillStyle="#9ee6b8";
+    ctx.beginPath();ctx.moveTo(0,-16);ctx.lineTo(0,-24);ctx.lineTo(5,-16);ctx.closePath();ctx.fill();
+    ctx.fillStyle="rgba(158,230,184,0.25)";
+    ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(-16,18);ctx.lineTo(16,18);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  for(var k=0;k<stars.length;k++){
+    var st=stars[k];
+    st.y+=st.v*dt;
+    if(st.y>H){st.y=-2;st.x=Math.random()*W;}
+  }
+  if(state==="play")update(dt);
+  draw();
+  hT.textContent=Math.min(timer,GOAL).toFixed(1)+"/"+GOAL;
+  hS.textContent=Math.floor(timer*10);
+  hZ.textContent=timer>GOAL*0.75?"即将脱出":(timer>GOAL*0.4?"静默中":"潜航中");
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+  hasPointer=true;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

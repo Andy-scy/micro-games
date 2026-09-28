@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>调色实验室</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.sws{display:flex;gap:14px;justify-content:center;margin:10px 0}
+.swbox{text-align:center}
+.sw{width:110px;height:110px;border-radius:14px;border:2px solid rgba(255,255,255,.2)}
+.swlab{font-size:12px;color:#9aa3c0;margin-top:6px}
+.sl{display:flex;align-items:center;gap:10px;margin:9px 0}
+.sl b{width:20px;font-size:15px}
+.sl input{flex:1;accent-color:#4cc9f0}
+.sl span{width:34px;text-align:right;font-size:13px;color:#cdd6f4}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.4;cursor:default}
+#fb{text-align:center;font-size:14px;color:#cdd6f4;min-height:22px;margin-top:8px;line-height:1.6}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>调色实验室</h1>
+  <p class="tips">目标色已锁定!拖动红/绿/蓝三根滑杆,把你的颜色调到和目标一致。色差越小得分越高,欧氏距离 ≤46 记为完美。8 轮后总分 ≥360 判定通关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">轮次</div><div class="big" id="rd">1/8</div></div>
+      <div class="stat"><div class="mut">累计得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">完美次数</div><div class="big" id="pc">0</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="sws">
+      <div class="swbox"><div class="sw" id="tgt"></div><div class="swlab">目标色</div></div>
+      <div class="swbox"><div class="sw" id="mine"></div><div class="swlab">你的颜色</div></div>
+    </div>
+    <div class="sl"><b style="color:#ff6b6b">红</b><input type="range" id="sr" min="0" max="255" value="128"><span id="vr">128</span></div>
+    <div class="sl"><b style="color:#69db7c">绿</b><input type="range" id="sg" min="0" max="255" value="128"><span id="vg">128</span></div>
+    <div class="sl"><b style="color:#74c0fc">蓝</b><input type="range" id="sb" min="0" max="255" value="128"><span id="vb">128</span></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="go">提交配色</button></div>
+    <div id="fb"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">调色实验室</h2><p id="ovp">玩法:左侧是随机生成的目标色,拖动三根滑杆混合出相同颜色。<br>· 提交后按色差计分:越接近分越高,距离 ≤46 算「完美」<br>· 共 8 轮,8 轮结束总分 ≥360 通关<br>· 小技巧:先眯眼感受色偏,再单通道微调</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var round=1,total=0,perfect=0,busy=false,playing=false,over=false;
+var target=[128,128,128];
+function $(id){return document.getElementById(id)}
+function newTarget(){
+  target=[40+Math.floor(Math.random()*180),40+Math.floor(Math.random()*180),40+Math.floor(Math.random()*180)];
+  $('tgt').style.background='rgb('+target[0]+','+target[1]+','+target[2]+')';
+}
+function cur(){return [+$('sr').value,+$('sg').value,+$('sb').value]}
+function updatePreview(){
+  var c=cur();
+  $('mine').style.background='rgb('+c[0]+','+c[1]+','+c[2]+')';
+  $('vr').textContent=c[0];$('vg').textContent=c[1];$('vb').textContent=c[2];
+}
+function dist(a,b){
+  var d=(a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]);
+  return Math.sqrt(d);
+}
+function submit(){
+  if(!playing||over||busy)return;
+  busy=true;
+  var c=cur(),d=dist(c,target);
+  var pts=Math.max(0,Math.round(100-d/2.2));
+  total+=pts;
+  var msg;
+  if(d<=46){msg='完美匹配!色差 '+Math.round(d)+' · +'+pts+' 分';perfect++;}
+  else if(d<=90)msg='相当接近,色差 '+Math.round(d)+' · +'+pts+' 分';
+  else if(d<=170)msg='方向对了,色差 '+Math.round(d)+' · +'+pts+' 分';
+  else msg='色差明显…'+Math.round(d)+' · +'+pts+' 分';
+  $('fb').textContent=msg;
+  $('sc').textContent=total;
+  $('pc').textContent=perfect;
+  $('go').disabled=true;
+  $('sr').disabled=true;$('sg').disabled=true;$('sb').disabled=true;
+  setTimeout(next,1300);
+}
+function next(){
+  round++;
+  if(round>8){finish();return;}
+  $('rd').textContent=round+'/8';
+  $('fb').textContent='新一轮目标色已生成!';
+  $('go').disabled=false;
+  $('sr').disabled=false;$('sg').disabled=false;$('sb').disabled=false;
+  busy=false;
+  newTarget();updatePreview();
+}
+function finish(){
+  playing=false;over=true;
+  var win=total>=360;
+  $('ovt').textContent=win?'实验圆满成功!':'实验报告不合格';
+  $('ovp').innerHTML='8 轮总分 <b>'+total+'</b>(通关线 360)· 完美 <b>'+perfect+'</b> 次<br>'+(win?'你的眼睛就是精密比色计!':'多感受通道间的偏差,再来一局!');
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  round=1;total=0;perfect=0;busy=false;playing=true;over=false;
+  $('rd').textContent='1/8';
+  $('sc').textContent='0';$('pc').textContent='0';
+  $('fb').textContent='拖动滑杆,逼近目标色!';
+  $('go').disabled=false;
+  $('sr').disabled=false;$('sg').disabled=false;$('sb').disabled=false;
+  $('sr').value=128;$('sg').value=128;$('sb').value=128;
+  newTarget();updatePreview();
+  $('overlay').classList.add('hide');
+}
+$('go').addEventListener('click',submit);
+$('sr').addEventListener('input',updatePreview);
+$('sg').addEventListener('input',updatePreview);
+$('sb').addEventListener('input',updatePreview);
+$('obtn').addEventListener('click',startGame);
+newTarget();updatePreview();
+</script>
+</body>
+</html>

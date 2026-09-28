@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>成语反义</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#ff8fa3;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ff8fa3}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#ff8fa3;border-radius:6px}
+#mode{text-align:center;margin-bottom:10px}
+#badge{display:inline-block;border-radius:999px;padding:5px 18px;font-size:15px;font-weight:800}
+#badge.fan{background:#3a1a20;color:#ff8fa3;border:1px solid #7a2c3c}
+#badge.jin{background:#10283a;color:#8ecaff;border:1px solid #2c4a66}
+#word{text-align:center;font-size:34px;font-weight:800;letter-spacing:6px;color:#e8eaf6;background:#232a48;border:2px solid #2c3357;border-radius:12px;padding:16px 0;margin-bottom:12px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:11px 13px;font-size:16px;margin-bottom:8px;cursor:pointer;text-align:center;font-family:inherit;letter-spacing:3px}
+.opt:hover{border-color:#ff8fa3}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ff8fa3;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ff8fa3;color:#2a0a14;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>成语反义</h1>
+  <p class="tips">看徽章再出手!红色「找反义」就要选出意思相反的成语,蓝色「找近义」就要选出意思相近的成语。每题 12 秒,共 15 题,3 条命,答对 +110。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/15</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="mode"><span id="badge" class="fan">找反义</span></div>
+    <div id="word">全力以赴</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">成语反义</h2><p id="ovp">· 每题先看徽章:「找反义」选意思相反的,<br>　「找近义」选意思相近的<br>· 每题限时 12 秒,答对 +110<br>· 答错或超时 -1 条命并公布答案对<br>· 共 15 题,3 命用完结束<br>· 小心:近义和反义会混着出!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{w:'全力以赴',m:'反',o:['敷衍了事','百折不挠','锲而不舍','奋不顾身']},
+{w:'雪中送炭',m:'反',o:['雪上加霜','锦上添花','如虎添翼','画蛇添足']},
+{w:'一丝不苟',m:'反',o:['马马虎虎','小心翼翼','谨慎从事','全神贯注']},
+{w:'名副其实',m:'反',o:['名不副实','有口皆碑','家喻户晓','尽人皆知']},
+{w:'井然有序',m:'反',o:['杂乱无章','有条不紊','秩序井然','一丝不乱']},
+{w:'持之以恒',m:'反',o:['半途而废','坚持不懈','始终如一','锲而不舍']},
+{w:'门庭若市',m:'反',o:['门可罗雀','车水马龙','熙熙攘攘','人山人海']},
+{w:'理直气壮',m:'反',o:['理屈词穷','义正词严','振振有词','据理力争']},
+{w:'波澜壮阔',m:'反',o:['风平浪静','浩浩荡荡','汹涌澎湃','排山倒海']},
+{w:'固若金汤',m:'反',o:['危如累卵','坚不可摧','稳如泰山','铜墙铁壁']},
+{w:'兴高采烈',m:'反',o:['垂头丧气','眉飞色舞','喜气洋洋','欢天喜地']},
+{w:'口若悬河',m:'反',o:['哑口无言','滔滔不绝','能说会道','伶牙俐齿']},
+{w:'深思熟虑',m:'反',o:['轻举妄动','小心谨慎','步步为营','谨小慎微']},
+{w:'生机勃勃',m:'反',o:['死气沉沉','欣欣向荣','朝气蓬勃','生龙活虎']},
+{w:'锦上添花',m:'反',o:['落井下石','雪中送炭','济困扶危','乐善好施']},
+{w:'全神贯注',m:'反',o:['心不在焉','聚精会神','专心致志','目不转睛']},
+{w:'守株待兔',m:'近',o:['刻舟求剑','随机应变','通权达变','因时制宜']},
+{w:'画蛇添足',m:'近',o:['多此一举','恰到好处','画龙点睛','恰如其分']},
+{w:'十全十美',m:'近',o:['尽善尽美','一无是处','美中不足','漏洞百出']},
+{w:'未雨绸缪',m:'近',o:['防患未然','临渴掘井','江心补漏','亡羊补牢']},
+{w:'水滴石穿',m:'近',o:['铁杵成针','半途而废','一曝十寒','浅尝辄止']},
+{w:'高瞻远瞩',m:'近',o:['深谋远虑','鼠目寸光','急功近利','饮鸩止渴']},
+{w:'沉鱼落雁',m:'近',o:['花容月貌','其貌不扬','獐头鼠目','蓬头垢面']},
+{w:'一箭双雕',m:'近',o:['一举两得','事倍功半','得不偿失','劳而无功']},
+{w:'家喻户晓',m:'近',o:['众所周知','默默无闻','无人问津','鲜为人知']},
+{w:'出类拔萃',m:'近',o:['鹤立鸡群','滥竽充数','相形见绌','碌碌无为']}
+];
+var N=15,QLEN=12;
+var quiz=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  var badge=$('badge');
+  if(it.m==='反'){badge.className='fan';badge.textContent='找反义';}
+  else{badge.className='jin';badge.textContent='找近义';}
+  $('word').textContent=it.w;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var it=quiz[idx];
+  locked=true;
+  var btns=$('opts').children,i,ans='';
+  for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')ans=btns[i].textContent;
+  if(btn.dataset.ok==='1'){
+    score+=110;
+    btn.classList.add('ok');
+    $('msg').textContent='答对了!+110';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    var rel=it.m==='反'?'反义对':'近义对';
+    $('msg').textContent=(qLeft<=0?'超时!':'答错了!')+rel+':'+it.w+' ↔ '+ans;
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1500);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1500?'词库活字典!':(score>=1000?'成语好手!':'边玩边学!');
+  $('ovt').textContent=win?'全部完成 · '+rank:'生命耗尽…';
+  $('ovp').innerHTML='完成 '+Math.min(idx+1,N)+'/15 题<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 先看徽章再动脑,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0){
+      var it=quiz[idx],btns=$('opts').children,i,ans='';
+      locked=true;
+      lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+      for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1'){btns[i].classList.add('ok');ans=btns[i].textContent;}
+      var rel=it.m==='反'?'反义对':'近义对';
+      $('msg').textContent='超时!'+rel+':'+it.w+' ↔ '+ans;
+      schedule(function(){
+        if(!playing||over)return;
+        if(lives<=0)finish(false);
+        else{idx++;showQ();}
+      },1500);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

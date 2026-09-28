@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色词风暴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+#rule{text-align:center;font-size:17px;font-weight:800;color:#4cc9f0;margin-bottom:8px;min-height:24px}
+#word{text-align:center;font-size:62px;font-weight:900;letter-spacing:6px;line-height:1.2;min-height:84px}
+#opts{display:flex;gap:10px;justify-content:center;margin-top:12px}
+.opt{width:58px;height:58px;border-radius:12px;border:3px solid rgba(255,255,255,.15);cursor:pointer;transition:transform .08s}
+.opt:active{transform:scale(.9)}
+#hint{text-align:center;font-size:12px;color:#9aa3c0;margin-top:8px}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.shake{animation:shake .25s}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色词风暴</h1>
+  <p class="tips">屏幕中央出现一个颜色字,字义和字色可能不一致!按顶部规则作答:点「字的颜色」或点「字的意思」。规则每几题切换一次,答对加分回时,答错扣 2 秒,45 秒内冲高分!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+      <div class="stat" style="flex:2"><div class="mut">剩余时间 <span id="tleft">45.0s</span></div><div class="tbarWrap"><div id="tbar"></div></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="rule"></div>
+    <div id="word">色</div>
+    <div id="opts"></div>
+    <div id="hint">也可按键盘 1-4 作答</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色词风暴</h2><p id="ovp">玩法:中央显示一个用某种颜色写的颜色名(比如蓝色的「红」字)。<br>· 规则「点字的颜色」:点出这个字的书写颜色<br>· 规则「点字的意思」:点出这个字表示的颜色<br>· 规则每 4-6 题随机切换,小心头脑打架!<br>· 答对 +1 分(连击有加成)并回 0.4 秒;答错连击清零并 -2 秒</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var COLS=[{n:'红',c:'#ff5c5c'},{n:'黄',c:'#ffd166'},{n:'绿',c:'#51d88a'},{n:'蓝',c:'#4da3ff'}];
+var score=0,streak=0,maxStreak=0,hits=0,total=0,timeLeft=45,rule=0,ruleLeft=5;
+var curW=0,curI=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function showRound(){
+  curW=Math.floor(Math.random()*4);
+  curI=Math.floor(Math.random()*4);
+  var w=$('word');
+  w.textContent=COLS[curW].n;
+  w.style.color=COLS[curI].c;
+  $('rule').textContent=rule===0?'本回合:点「字的颜色」':'本回合:点「字的意思」';
+}
+function drawTop(){
+  $('sc').textContent=score;
+  $('ck').textContent=streak;
+  $('tbar').style.width=(timeLeft/45*100)+'%';
+  $('tleft').textContent=Math.max(0,timeLeft).toFixed(1)+'s';
+}
+function answer(k){
+  if(!playing||over)return;
+  var want=rule===0?curI:curW;
+  total++;
+  if(k===want){
+    hits++;streak++;
+    maxStreak=Math.max(maxStreak,streak);
+    score+=1+Math.floor(streak/6);
+    timeLeft=Math.min(45,timeLeft+0.4);
+  }else{
+    streak=0;
+    timeLeft=Math.max(0,timeLeft-2);
+    var w=$('word');
+    w.classList.remove('shake');void w.offsetWidth;w.classList.add('shake');
+  }
+  ruleLeft--;
+  if(ruleLeft<=0){rule=1-rule;ruleLeft=4+Math.floor(Math.random()*3);}
+  if(timeLeft<=0){drawTop();finish();return;}
+  showRound();drawTop();
+}
+function buildOpts(){
+  var box=$('opts');box.innerHTML='';
+  for(var i=0;i<4;i++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.style.background=COLS[i].c;
+    (function(idx){b.addEventListener('click',function(){answer(idx)})})(i);
+    box.appendChild(b);
+  }
+}
+document.addEventListener('keydown',function(e){
+  if(e.repeat)return;
+  if(e.key>='1'&&e.key<='4')answer(+e.key-1);
+});
+function startGame(){
+  score=0;streak=0;maxStreak=0;hits=0;total=0;timeLeft=45;
+  rule=0;ruleLeft=5;playing=true;over=false;
+  $('overlay').classList.add('hide');
+  showRound();drawTop();
+}
+function finish(){
+  playing=false;over=true;
+  var acc=total>0?Math.round(hits/total*100):0;
+  $('ovt').textContent='风暴平息!';
+  $('ovp').innerHTML='得分 <b>'+score+'</b> · 最高连击 <b>'+maxStreak+'</b> · 命中率 <b>'+acc+'%</b><br>字义与字色还在打架吗?再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+buildOpts();showRound();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;drawTop();finish();}
+    else drawTop();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

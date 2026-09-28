@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>跑动骑射</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fdd835;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#fdd835;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fdd835}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fdd835;color:#332f00;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>跑动骑射</h1>
+  <p class="hint">骑手不停上下跑动 · 按住稳住马步再松手放箭 · 60 秒冲 200 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">60</b>秒</span>
+    <span>状态 <b id="st">奔跑</b></span>
+    <span>目标 <b>200</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">跑动骑射</h2>
+      <p id="ovD">骑手在跑道上来回奔突,颠簸得厉害,这时放箭散布极大。按住鼠标或手指(任意位置)会让骑手勒马稳住、散布迅速收拢,同时准星跟着你的手走;松手的一瞬箭离弦。停—瞄—放的节奏,就是骑射的全部。三只靶分值 5/10/15,越小越值钱,命中后换位。60 秒冲 200 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">翻身上马</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elSt=$("st"),elMsg=$("msg");
+const GOAL=200,DUR=60,AX=70;
+let state="menu",score=0,timeLeft=DUR,tp=0;
+let ay=280,avy=130,standing=false,spread=26;
+let aim={x:240,y:280},targets=[],flies=[],pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function placeTargets(){
+  targets=[
+    {r:36,val:5,x:0,y:0},
+    {r:28,val:10,x:0,y:0},
+    {r:20,val:15,x:0,y:0}
+  ];
+  for(let i=0;i<targets.length;i++)repos(targets[i]);
+}
+function repos(t){
+  let tries=0;
+  while(tries<80){
+    const nx=260+Math.random()*180,ny=90+Math.random()*380;
+    let ok=true;
+    for(let i=0;i<targets.length;i++){
+      const o=targets[i];
+      if(o!==t&&Math.hypot(nx-o.x,ny-o.y)<80){ok=false;break;}
+    }
+    if(ok){t.x=nx;t.y=ny;break;}
+    tries++;
+  }
+}
+function beginAim(){
+  if(state!=="play")return;
+  standing=true;
+  elSt.textContent="瞄准";
+}
+function endAim(){
+  if(!standing)return;
+  standing=false;
+  elSt.textContent="奔跑";
+  if(state!=="play")return;
+  const a=Math.random()*6.28,m=Math.sqrt(Math.random())*spread;
+  const lx=aim.x+Math.cos(a)*m,ly=aim.y+Math.sin(a)*m;
+  flies.push({x0:AX,y0:ay,x1:lx,y1:ly,t:0,dur:0.14});
+}
+function resolve(f){
+  let hit=null;
+  for(let i=0;i<targets.length;i++){
+    if(Math.hypot(f.x1-targets[i].x,f.y1-targets[i].y)<targets[i].r){hit=targets[i];break;}
+  }
+  if(hit){
+    score+=hit.val;
+    elMsg.textContent="马上命中!+"+hit.val;
+    for(let i=0;i<9;i++){
+      const a=Math.random()*6.28,s=60+Math.random()*130;
+      pops.push({x:f.x1,y:f.y1,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.45,c:"#fdd835"});
+    }
+    repos(hit);
+    elSc.textContent=score;
+  }else{
+    elMsg.textContent="颠簸之下,箭偏了";
+  }
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;
+  ay=280;avy=130;standing=false;spread=26;
+  flies=[];pops=[];
+  placeTargets();
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;elSt.textContent="奔跑";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";standing=false;
+  const win=score>=GOAL;
+  ovT.textContent=win?"骑射无双!":"马背踉跄";
+  ovT.style.color=win?"#fdd835":"#ef9a9a";
+  ovD.textContent=win?"人马合一,动如脱兔,静如处子。":"跑动中放箭十有九空。先按住勒马,把圆圈收小,再松手。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){aim=evPos(e);});
+cv.addEventListener("mousedown",function(e){aim=evPos(e);beginAim();});
+window.addEventListener("mouseup",function(){endAim();});
+cv.addEventListener("touchstart",function(e){aim=evPos(e.touches[0]);beginAim();e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){aim=evPos(e.touches[0]);e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(){endAim();});
+cv.addEventListener("touchcancel",function(){endAim();});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(!standing){
+      ay+=avy*dt;
+      if(ay<90){ay=90;avy=-avy;}
+      if(ay>470){ay=470;avy=-avy;}
+      spread=Math.min(26,spread+40*dt);
+    }else{
+      spread=Math.max(3,spread-34*dt);
+    }
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];f.t+=dt/f.dur;
+      if(f.t>=1){resolve(f);flies.splice(i,1);}
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function drawRider(){
+  const bob=standing?0:Math.sin(tp*14)*2.5;
+  ctx.save();ctx.translate(AX,ay+bob);
+  ctx.strokeStyle="rgba(253,216,53,0.25)";ctx.lineWidth=2;
+  if(!standing){
+    ctx.beginPath();ctx.moveTo(-10,-34);ctx.lineTo(-16,-34);ctx.moveTo(-10,10);ctx.lineTo(-18,10);ctx.stroke();
+  }
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.ellipse(0,10,26,11,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#5d4037";
+  ctx.fillRect(-22,16,7,16);
+  ctx.fillRect(15,16,7,16);
+  ctx.beginPath();ctx.arc(-24,4,6,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#8d6e63";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(-24,2);ctx.lineTo(-30,-8);ctx.stroke();
+  ctx.fillStyle="#33691e";
+  ctx.beginPath();ctx.arc(4,-16,9,0,Math.PI*2);ctx.fill();
+  ctx.fillRect(-2,-10,12,12);
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(16,-14,14,Math.PI*1.05,Math.PI*1.95);ctx.stroke();
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2c2a12");g.addColorStop(1,"#171509");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(253,216,53,0.2)";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(AX,60);ctx.lineTo(AX,500);ctx.stroke();
+  ctx.strokeStyle="rgba(253,216,53,0.08)";ctx.lineWidth=14;
+  ctx.beginPath();ctx.moveTo(AX,60);ctx.lineTo(AX,500);ctx.stroke();
+  for(let i=0;i<targets.length;i++){
+    const tr=targets[i];
+    ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+    const cols=["#eceff1","#e53935","#ffc107"];
+    const rs=[1,0.6,0.28];
+    for(let k=0;k<3;k++){
+      ctx.fillStyle=cols[k];
+      ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r*rs[k],0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
+    ctx.fillStyle="#332f00";ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(String(tr.val),tr.x,tr.y);
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.45);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  drawRider();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i],e=Math.min(1,f.t);
+    const px=f.x0+(f.x1-f.x0)*e,py=f.y0+(f.y1-f.y0)*e;
+    const ang=Math.atan2(f.y1-f.y0,f.x1-f.x0);
+    ctx.save();ctx.translate(px,py);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==="play"){
+    ctx.strokeStyle="rgba(253,216,53,0.6)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(aim.x,aim.y,Math.max(3,spread),0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle="#fdd835";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(aim.x,aim.y,2.5,0,Math.PI*2);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

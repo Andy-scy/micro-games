@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>引力反转</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>引力反转</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 向当前引力反方向跳 · 穿过光门会翻转引力!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>引力 <b id="gdir">↓</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">引力反转</h2>
+      <p id="ovDesc">没有管道,只有天地两壁!飞过粉色光门,引力立刻反转,你会被甩向另一侧墙壁。贴壁滑行躲避浮空方块,遇到壁上尖刺要点按跳开。每过一道光门 +1 分,碰刺即亡!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,SPEED=150,GRAV=1050,JUMP=-400,BX=120,BR=13;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),elG=$("gdir"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,gates,spikes,blocks,popups,score,best=0,tick,gsign,genG,genX;
+function reset(){
+  bird={y:GROUND-BR-4,vy:0};
+  gates=[];spikes=[];blocks=[];popups=[];
+  score=0;tick=0;gsign=1;genG=1;genX=W+170;
+  while(genX<W+520)spawnSection();
+  elScore.textContent="0";
+  elG.textContent="↓";
+}
+function spawnSection(){
+  gates.push({x:genX,w:36,dir:-genG,flipped:false});
+  genG=-genG;
+  spikes.push({x:genX+195,w:50,side:genG===1?"ceil":"floor"});
+  spikes.push({x:genX+322,w:50,side:genG===1?"floor":"ceil"});
+  if(Math.random()<0.55)blocks.push({x:genX+258,y:160+Math.random()*(GROUND-370),s:44});
+  genX+=400;
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=-gsign*400;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,g;
+  tick+=dt;
+  while(genX<W+520)spawnSection();
+  bird.vy+=gsign*GRAV*dt;
+  bird.y+=bird.vy*dt;
+  if(bird.y<BR+4){bird.y=BR+4;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y>GROUND-BR-4){bird.y=GROUND-BR-4;bird.vy=Math.min(bird.vy,0);}
+  for(i=0;i<gates.length;i++)gates[i].x-=SPEED*dt;
+  for(i=0;i<spikes.length;i++)spikes[i].x-=SPEED*dt;
+  for(i=0;i<blocks.length;i++)blocks[i].x-=SPEED*dt;
+  for(i=gates.length-1;i>=0;i--)if(gates[i].x<-120)gates.splice(i,1);
+  for(i=spikes.length-1;i>=0;i--)if(spikes[i].x<-120)spikes.splice(i,1);
+  for(i=blocks.length-1;i>=0;i--)if(blocks[i].x<-120)blocks.splice(i,1);
+  for(i=0;i<gates.length;i++){
+    g=gates[i];
+    if(!g.flipped&&g.x+g.w/2<BX){
+      g.flipped=true;gsign=g.dir;score++;
+      elScore.textContent=String(score);
+      elG.textContent=gsign===1?"↓":"↑";
+      popups.push({x:W/2,y:bird.y-40,txt:gsign===1?"引力向下!":"引力向上!",life:1});
+    }
+  }
+  for(i=0;i<spikes.length;i++){
+    var s=spikes[i];
+    var ry=s.side==="floor"?GROUND-34:0;
+    if(circleRect(BX,bird.y,BR,s.x,ry,s.w,34)){die("扎进了壁上尖刺!");return;}
+  }
+  for(i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    if(circleRect(BX,bird.y,BR,b.x,b.y,b.s,b.s)){die("撞上了浮空方块!");return;}
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=40*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawSpike(s){
+  var i,n=Math.round(s.w/12.5),base=s.side==="floor"?GROUND:0,dir=s.side==="floor"?-1:1;
+  ctx.fillStyle=s.side==="floor"?"#9f3d6e":"#c05a88";
+  for(i=0;i<n;i++){
+    ctx.beginPath();
+    ctx.moveTo(s.x+i*12.5,base);
+    ctx.lineTo(s.x+i*12.5+6.25,base+dir*48);
+    ctx.lineTo(s.x+i*12.5+12.5,base);
+    ctx.closePath();ctx.fill();
+  }
+}
+function draw(){
+  var i,g;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#170f1f";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#2b1f3a";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillRect(0,0,W,10);
+  ctx.fillStyle="#3a2b52";
+  for(i=0;i<W/30;i++){ctx.fillRect(i*30+((tick*150)%30)-15,GROUND+8,15,4);}
+  for(i=0;i<gates.length;i++){
+    g=gates[i];
+    ctx.fillStyle=g.flipped?"rgba(244,114,182,0.12)":"rgba(244,114,182,0.30)";
+    ctx.fillRect(g.x,10,g.w,GROUND-10);
+    ctx.strokeStyle="rgba(244,114,182,0.85)";ctx.lineWidth=2;
+    ctx.strokeRect(g.x,10,g.w,GROUND-10);
+    var d=g.dir;
+    ctx.strokeStyle="#f9a8d4";ctx.lineWidth=3;
+    for(var k=0;k<4;k++){
+      var yy=140+k*110;
+      ctx.beginPath();
+      ctx.moveTo(g.x+8,yy-d*7);ctx.lineTo(g.x+g.w/2,yy+d*7);ctx.lineTo(g.x+g.w-8,yy-d*7);
+      ctx.stroke();
+    }
+  }
+  for(i=0;i<spikes.length;i++)drawSpike(spikes[i]);
+  for(i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    ctx.fillStyle="#7c4a9e";
+    ctx.fillRect(b.x,b.y,b.s,b.s);
+    ctx.fillStyle="#b784d9";
+    ctx.fillRect(b.x+5,b.y+5,b.s-10,6);
+  }
+  ctx.fillStyle="#f9a8d4";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.arc(BX-3,bird.y-Math.sign(gsign)*4,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a0f22";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.2,0,Math.PI*2);ctx.fill();
+  ctx.font="bold 15px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(249,168,212,"+Math.min(1,popups[i].life)+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

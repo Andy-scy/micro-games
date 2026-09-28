@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰位积分板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:25px;text-align:center;color:#4cc9f0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:52px;height:52px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45);cursor:pointer}
+.die.act{outline:3px solid #ffd166}
+.die.empty{background:#232a48;box-shadow:none;cursor:default}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+#slots{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.slot{flex:1;min-width:88px;background:#232a48;border:1px solid #333c63;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer}
+.slot:hover{border-color:#4cc9f0}
+.slot.full{background:#173043;border-color:#2b6a8f;cursor:default}
+.slot .m{color:#ffd166;font-weight:800;font-size:16px}
+.slot .d{color:#cdd6f4;font-size:14px;font-weight:700;min-height:20px;margin:4px 0}
+.slot .c{color:#9aa3c0;font-size:11px}
+.big{font-size:20px;font-weight:800;color:#4cc9f0}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#4cc9f0;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰位积分板</h1>
+  <p class="tips">10 回合,每回合掷 2 骰,把它们分配到 5 个倍率槽(×1 到 ×5,每槽限放 4 颗)。终局时<b>装满 4 颗</b>的槽按「点数和 × 倍率」计分,没装满的槽只算点数和。想拿高分,就把大点数喂给高倍槽!目标 170 分。</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">回合</div><div class="big" id="rd">1/10</div></div>
+    <div class="card stat"><div class="mut">当前累计</div><div class="big" id="cur">0</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="mut">本回合的骰(点选后再点槽位放置)</div>
+    <div class="row" style="margin:8px 0">
+      <div class="die empty" id="h0"></div>
+      <div class="die empty" id="h1"></div>
+    </div>
+    <div id="slots"></div>
+  </div>
+  <div class="card log" id="log">第一回合的骰子马上掷出!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var MULT=[1,2,3,4,5];
+var slots=[[],[],[],[],[]],hand=[0,0],act=0,round=1,over=false,rolling=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function curScore(){
+  var t=0,k;
+  for(k=0;k<5;k++){
+    var s=0,i;
+    for(i=0;i<slots[k].length;i++)s+=slots[k][i];
+    t+=s*(slots[k].length===4?MULT[k]:1);
+  }
+  return t;
+}
+function drawHand(){
+  var i;
+  for(i=0;i<2;i++){
+    var el=$(('h')+i);
+    if(hand[i]>0){setDie(el,hand[i]);el.classList.remove('empty');el.classList.toggle('act',act===i&&!over)}
+    else{el.innerHTML='';el.classList.add('empty');el.classList.remove('act')}
+  }
+}
+function drawSlots(){
+  var box=$('slots');box.innerHTML='';
+  for(var k=0;k<5;k++){
+    var d=document.createElement('div');
+    d.className='slot'+(slots[k].length===4?' full':'');
+    var nums='';
+    for(var i=0;i<slots[k].length;i++)nums+=slots[k][i]+(i<slots[k].length-1?' ·':'');
+    d.innerHTML='<div class="m">×'+MULT[k]+' 槽</div><div class="d">'+(nums||'空')+'</div><div class="c">'+slots[k].length+'/4</div>';
+    (function(kk){d.onclick=function(){
+      if(over||rolling)return;
+      if(hand[act]<=0)return;
+      if(slots[kk].length>=4){say('这个槽已装满 4 颗,换个槽吧。');return}
+      slots[kk].push(hand[act]);
+      hand[act]=0;
+      act=hand[0]>0?0:(hand[1]>0?1:0);
+      $('cur').textContent=curScore();
+      drawHand();drawSlots();
+      if(hand[0]===0&&hand[1]===0){
+        setTimeout(nextRound,650);
+        say('两颗骰子都已入槽,下一回合即将掷骰…');
+      }else{
+        say('放置成功!把剩下的骰子也放进去。');
+      }
+    }})(k);
+    box.appendChild(d);
+  }
+}
+function say(m){$('log').textContent=m}
+function nextRound(){
+  if(over)return;
+  round++;
+  if(round>10){finish();return}
+  $('rd').textContent=round+'/10';
+  rolling=true;drawHand();
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<560){
+      if(t-last>70){last=t;setDie($('h0'),rnd());setDie($('h1'),rnd())}
+      requestAnimationFrame(step);
+    }else{
+      hand=[rnd(),rnd()];act=0;rolling=false;
+      drawHand();drawSlots();
+      say('第 '+round+' 回合:掷出 '+hand[0]+' 和 '+hand[1]+',先点选骰子,再点槽位!');
+    }
+  }
+  requestAnimationFrame(step);
+}
+function finish(){
+  over=true;drawHand();drawSlots();
+  var sc=curScore();
+  var good=sc>=170;
+  $('ovt').textContent=good?'积分大师!':'策略欠佳';
+  $('ovp').innerHTML='最终得分 <b>'+sc+'</b> / 目标 170<br>'+(good?'高倍槽喂得漂亮,骰尽其用!':'记住口诀:大点数进高倍槽,先喂满再收账。');
+  $('overlay').classList.add('show');
+}
+(function(){
+  var hs=document.querySelectorAll('.die');
+  for(var i=0;i<hs.length;i++){
+    (function(k){hs[k].onclick=function(){
+      if(over||rolling)return;
+      if(hand[k]>0){act=k;drawHand();say('已选中第 '+(k+1)+' 颗骰('+hand[k]+' 点),点一个槽位放置。')}
+    }})(i);
+  }
+})();
+$('again').onclick=function(){
+  slots=[[],[],[],[],[]];hand=[0,0];act=0;round=1;over=false;
+  $('overlay').classList.remove('show');
+  $('cur').textContent='0';
+  drawHand();drawSlots();
+  say('新的积分板,第一回合马上开始!');
+  setTimeout(nextRound,400);
+};
+drawHand();drawSlots();
+setTimeout(nextRound,400);
+</script>
+</body>
+</html>

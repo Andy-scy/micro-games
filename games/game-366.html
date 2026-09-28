@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鼓点回声</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb923c;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb923c;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb923c}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb923c;color:#2b1503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>鼓点回声</h1>
+  <p class="hint">先听鼓机演奏,再用 A S D(或点鼓面)原样回出这段节奏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>回合 <b id="round">1</b></span>
+    <span>生命 <b id="life">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">鼓点回声</h2>
+      <p id="ovDesc">山谷里的鼓机先敲一段,你要像回声一样原样敲回来。
+三面鼓音色不同:低鼓、军鼓、镲片。
+每回对一整段,下一段就更长;
+敲错扣生命,完成第 8 回合成为回声大师!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elRound=$("round"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=520;
+var PADX=[110,240,370],PADY=380,PADR=64;
+var PADC=["#fb923c","#f87171","#fbbf24"];
+var PADN=["低鼓","军鼓","镲片"];
+var KEY={KeyA:0,KeyS:1,KeyD:2,Digit1:0,Digit2:1,Digit3:2};
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g366");
+
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function drum(p){
+  if(p===0){tone("sine",150,42,0.22,0.5);}
+  else if(p===1){noiseHit(0.14,0.35,1800);tone("triangle",190,120,0.1,0.2);}
+  else{noiseHit(0.07,0.3,7000);}
+}
+function sGood(){tone("triangle",760,1020,0.14,0.2);}
+function sBad(){tone("sawtooth",190,85,0.3,0.24);}
+
+var state="menu",round,score,life,pat,idx,phase,showIdx,showT,waitT,flashT,msg,msgT,replaySame;
+function reset(){
+  round=1;score=0;life=3;
+  pat=[];idx=0;phase="wait";showIdx=0;showT=0;waitT=0;
+  flashT=[0,0,0];
+  msg="";msgT=0;replaySame=false;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");newRound();}
+function upd(){
+  elScore.textContent=score;
+  elRound.textContent=round;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function setMsg(t){msg=t;msgT=performance.now();}
+function newRound(keep){
+  var len=Math.min(round+1,9),i;
+  idx=0;showIdx=0;
+  if(!keep||!pat.length){
+    pat=[];
+    for(i=0;i<len;i++)pat.push((Math.random()*3)|0);
+  }
+  phase="show";showT=performance.now()+900;
+  setMsg(keep?"别急,再听一遍":"听!第 "+round+" 段");
+  upd();
+}
+function win(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g366",best);}
+  upd();
+  ovTitle.textContent="回声大师!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="八段鼓点全部原样回响,山谷都记住了你!";
+  btnGo.textContent="再战一次";
+  ov.classList.remove("hide");
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g366",best);}
+  upd();
+  ovTitle.textContent="回声消散";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="止步第 "+round+" 回合\n听准音色,再来一遍!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function tapPad(p){
+  if(state!=="play")return;
+  drum(p);
+  flashT[p]=performance.now();
+  if(phase!=="reply")return;
+  if(p===pat[idx]){
+    idx++;score+=40;
+    if(idx>=pat.length){
+      score+=pat.length*60;
+      setMsg("完美回声 +"+(pat.length*60));
+      sGood();
+      if(round>=8){upd();win();return;}
+      round++;
+      phase="wait";waitT=performance.now()+900;
+    }
+    upd();
+  }else{
+    life--;sBad();
+    setMsg("听错了!再听一遍");
+    upd();
+    if(life<=0){gameOver();return;}
+    phase="wait";waitT=performance.now()+900;
+    replaySame=true;
+  }
+}
+function update(now){
+  var i;
+  if(phase==="show"){
+    if(now>=showT){
+      if(showIdx<pat.length){
+        drum(pat[showIdx]);
+        flashT[pat[showIdx]]=now;
+        showIdx++;
+        showT+=460;
+      }else{
+        phase="reply";idx=0;
+        setMsg("该你了!回出这段节奏");
+      }
+    }
+  }else if(phase==="wait"){
+    if(now>=waitT){
+      var keep=replaySame;
+      replaySame=false;
+      newRound(keep);
+    }
+  }
+  for(i=0;i<3;i++){if(now-flashT[i]>260)flashT[i]=0;}
+}
+function draw(now){
+  var i,x,y,fl;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.textAlign="center";
+  var mr=1-(now-msgT)/1600;
+  if(mr>0&&msg){
+    ctx.fillStyle="rgba(232,234,246,"+Math.min(1,mr+0.3)+")";
+    ctx.font="bold 22px system-ui";
+    ctx.fillText(msg,W/2,90);
+  }
+  if(phase==="reply"){
+    for(i=0;i<pat.length;i++){
+      if(i<idx){ctx.fillStyle="#4ade80";}
+      else if(i===idx){ctx.fillStyle="#fbbf24";}
+      else{ctx.fillStyle="rgba(139,144,176,0.4)";}
+      ctx.beginPath();ctx.arc(190+i*22,130,7,0,Math.PI*2);ctx.fill();
+    }
+  }
+  for(i=0;i<3;i++){
+    x=PADX[i];y=PADY;
+    fl=flashT[i]?(1-(now-flashT[i])/260):0;if(fl<0)fl=0;
+    ctx.fillStyle="rgba(251,146,60,"+(0.1+fl*0.55)+")";
+    ctx.beginPath();ctx.arc(x,y,PADR,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="rgba(251,146,60,0.6)";
+    ctx.beginPath();ctx.arc(x,y,PADR,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle=PADC[i];
+    ctx.beginPath();ctx.arc(x,y,PADR-14+fl*5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(10,12,24,0.85)";
+    ctx.font="bold 24px system-ui";
+    ctx.fillText(PADN[i],x,y+8);
+    ctx.fillStyle="rgba(139,144,176,0.9)";
+    ctx.font="bold 15px system-ui";
+    ctx.fillText("ASD"[i],x,y+38);
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+function onTap(cx,cy){
+  var p=toXY(cx,cy),i,dx,dy;
+  for(i=0;i<3;i++){
+    dx=p.x-PADX[i];dy=p.y-PADY;
+    if(dx*dx+dy*dy<=(PADR+16)*(PADR+16)){tapPad(i);return;}
+  }
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap(e.clientX,e.clientY);});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap(e.clientX,e.clientY);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];onTap(t.clientX,t.clientY);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.repeat)return;
+  var p=KEY[e.code];
+  if(p===undefined)return;
+  e.preventDefault();
+  tapPad(p);
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play")update(now);
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

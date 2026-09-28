@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>屋顶护蛋员</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>屋顶护蛋员</h1>
+  <p class="tips">鸡蛋从屋脊滚下,滑出屋檐后带着横向速度抛落!← → 或 A/D 移动篮子,触屏拖动。蛋落地即碎,破裂 5 次 game over——看清滚落方向,提前到位!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">破裂</div><div class="big" id="ck">0/5</div></div>
+    <div class="stat"><div class="mut">接住</div><div class="big" id="ca">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">屋顶护蛋员</h2><p id="ovp">玩法:斜面滚落 + 抛物线二次接应。<br>· 鸡蛋在屋顶斜坡越滚越快<br>· 冲出屋檐后沿斜向抛出,划出抛物线<br>· 键盘 ← → 或 A/D 移篮,触屏拖动<br>· 接住 +20;蛋落地破裂 +1<br>· 破裂满 5 个游戏结束</p><button class="btn" id="obtn">开始护蛋</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var PKX=W/2,PKY=70,LVY=212;
+var S=null;
+function reset(){S={on:false,score:0,crack:0,caught:0,eggs:[],pops:[],t:0,st:0.9,bx:W/2,bw:86,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('ck').textContent='0/5';$('ca').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:1})}
+function newEgg(){
+  var side=Math.random()<0.5?-1:1;
+  var ex=side>0?W-40:40;
+  var dx=ex-PKX,dy=LVY-PKY,len=Math.sqrt(dx*dx+dy*dy);
+  var u=0.15+Math.random()*0.68;
+  return {m:0,ux:dx/len,uy:dy/len,sx:PKX+dx*u,sy:PKY+dy*u,left:(1-u)*len,d:0,sp:26,x:PKX+dx*u,y:PKY+dy*u,vx:0,vy:0,rot:0};
+}
+function update(dt){
+  S.t+=dt;
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.75,1.5-S.t*0.02)*(0.8+Math.random()*0.4);
+    S.eggs.push(newEgg());
+  }
+  var by=H-46;
+  for(var i=S.eggs.length-1;i>=0;i--){
+    var e=S.eggs[i];
+    if(e.m===0){
+      e.sp+=260*dt;e.d+=e.sp*dt;
+      if(e.d>=e.left){e.m=1;e.vx=e.ux*e.sp*0.8;e.vy=e.uy*e.sp*0.8}
+      else{e.x=e.sx+e.ux*e.d;e.y=e.sy+e.uy*e.d}
+      e.rot+=e.sp*dt*0.02*(e.ux<0?-1:1);
+    }else{
+      e.vy+=560*dt;e.x+=e.vx*dt;e.y+=e.vy*dt;e.rot+=e.vx*dt*0.012;
+    }
+    if(e.y>=by-18&&e.y<=by+10&&Math.abs(e.x-S.bx)<S.bw/2+8){
+      S.score+=20;S.caught++;$('sc').textContent=S.score;$('ca').textContent=S.caught;
+      pop(e.x,by-30,'+20','#51d88a');
+      S.eggs.splice(i,1);continue;
+    }
+    if(e.y>H-14){
+      S.eggs.splice(i,1);
+      S.crack++;$('ck').textContent=Math.min(5,S.crack)+'/5';
+      pop(e.x,H-70,'啪!蛋破了','#ff6b6b');
+      if(S.crack>=5)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='碎蛋太多…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>成功接住 <b>'+S.caught+'</b> 个蛋<br>盯紧屋檐抛出的方向,提前站好位!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='#4a3f63';
+  ctx.beginPath();
+  ctx.moveTo(24,LVY+12);ctx.lineTo(PKX,PKY-30);ctx.lineTo(W-24,LVY+12);
+  ctx.lineTo(W-24,LVY-4);ctx.lineTo(PKX,PKY-6);ctx.lineTo(24,LVY-4);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#6d5a94';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(24,LVY-4);ctx.lineTo(PKX,PKY-6);ctx.lineTo(W-24,LVY-4);ctx.stroke();
+  ctx.fillStyle='#9aa3c0';ctx.font='12px system-ui';ctx.textAlign='center';
+  ctx.fillText('屋檐',40,LVY+30);ctx.fillText('屋檐',W-40,LVY+30);
+  for(var i=0;i<S.eggs.length;i++){
+    var e=S.eggs[i];
+    ctx.save();ctx.translate(e.x,e.y);ctx.rotate(e.rot*0.4);
+    ctx.fillStyle='#fff7ec';ctx.beginPath();ctx.ellipse(0,0,9,12,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.18)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='rgba(0,0,0,.08)';ctx.beginPath();ctx.ellipse(-3,-3,4,6,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';
+  ctx.fillText('软草篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

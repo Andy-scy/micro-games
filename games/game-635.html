@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>惊鸿一色</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+#patch{width:150px;height:150px;border-radius:18px;margin:8px auto;background:#232a48;display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:900;color:#555c80}
+#q{text-align:center;font-size:15px;color:#cdd6f4;min-height:22px;margin-top:6px}
+#opts{display:flex;gap:9px;justify-content:center;flex-wrap:wrap;margin-top:12px;min-height:52px}
+.opt{width:52px;height:52px;border-radius:12px;border:3px solid rgba(255,255,255,.15);cursor:pointer;transition:transform .08s}
+.opt:active{transform:scale(.88)}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>惊鸿一色</h1>
+  <p class="tips">一块颜色只闪现一瞬(最短仅 0.16 秒)!随后从 6 个高度相似的候选色里挑出刚才那一块。答对得分并升级,闪现越来越快、干扰色越来越近;答错 -1 生命(共 3 条)。撑过 10 关通关!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/10</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="patch">?</div>
+    <div id="q"></div>
+    <div id="opts"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">惊鸿一色</h2><p id="ovp">玩法:瞬时色彩感知。<br>· 中央色块闪现一瞬间后熄灭<br>· 从 6 个候选色里点出刚才闪过的那块<br>· 干扰色都在目标色邻近色域,极其相似<br>· 每关闪现时间缩短 40ms(500ms → 160ms)<br>· 答对 +10+关卡×2 分;答错 -1 生命;撑过 10 关通关</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var level=1,lives=3,score=0,phase='idle',S=0;
+var tgtHue=0,tgtSat=0,tgtLig=0;
+var playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function hsl(h,s,l){return 'hsl('+Math.round(h)+','+Math.round(s)+'%,'+Math.round(l)+'%)'}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function startRound(){
+  phase='flash';
+  tgtHue=Math.floor(Math.random()*360);
+  tgtSat=62+Math.floor(Math.random()*22);
+  tgtLig=50+Math.floor(Math.random()*12);
+  var patch=$('patch');
+  patch.style.background=hsl(tgtHue,tgtSat,tgtLig);
+  patch.textContent='';
+  $('q').textContent='盯住这块颜色……';
+  $('opts').innerHTML='';
+  $('lv').textContent=Math.min(level,10)+'/10';
+  var expo=Math.max(160,520-level*40);
+  var tk=++S;
+  setTimeout(function(){
+    if(tk!==S||!playing||over)return;
+    patch.style.background='#232a48';
+    patch.textContent='?';
+    phase='blank';
+    setTimeout(function(){if(tk===S&&playing&&!over)showOpts()},480);
+  },expo);
+}
+function showOpts(){
+  phase='pick';
+  var offs=[6,12,18,24,30,36];
+  for(var i=offs.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=offs[i];offs[i]=offs[j];offs[j]=t;
+  }
+  var all=[{h:tgtHue,s:tgtSat,l:tgtLig,ok:true}];
+  for(i=0;i<5;i++){
+    var sign=Math.random()<0.5?-1:1;
+    all.push({
+      h:(tgtHue+sign*offs[i]+360)%360,
+      s:clamp(tgtSat+(Math.random()*12-6),40,90),
+      l:clamp(tgtLig+(Math.random()*10-5),42,66),
+      ok:false
+    });
+  }
+  for(i=all.length-1;i>0;i--){
+    j=Math.floor(Math.random()*(i+1));
+    t=all[i];all[i]=all[j];all[j]=t;
+  }
+  var box=$('opts');box.innerHTML='';
+  for(i=0;i<all.length;i++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.style.background=hsl(all[i].h,all[i].s,all[i].l);
+    (function(ok){b.addEventListener('click',function(){pick(ok)})})(all[i].ok);
+    box.appendChild(b);
+  }
+  $('q').textContent='刚才闪过的是哪一块?';
+}
+function pick(ok){
+  if(!playing||over||phase!=='pick')return;
+  phase='wait';
+  if(ok){
+    score+=10+level*2;
+    level++;
+    if(level>10){finish(true);return;}
+    $('q').textContent='答对了!下一块颜色…';
+  }else{
+    lives--;
+    if(lives<=0){finish(false);return;}
+    $('q').textContent='看走眼了,再来!';
+  }
+  $('sc').textContent=score;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+  var tk=++S;
+  setTimeout(function(){if(tk===S&&playing&&!over)startRound()},850);
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'一瞥定色,目力惊人!':'颜色一闪而过…';
+  $('ovp').innerHTML=(win?'10 关闪色全部认出!':'止步第 '+level+' 关。')+'<br>总分 <b>'+score+'</b><br>先记明暗再看色相,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  S++;level=1;lives=3;score=0;
+  playing=true;over=false;
+  $('sc').textContent='0';
+  $('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  startRound();
+}
+$('obtn').addEventListener('click',startGame);
+</script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色雨降临</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:400px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+#tgtchip{display:inline-block;min-width:44px;height:24px;border-radius:7px;vertical-align:-6px}
+canvas{display:block;margin:0 auto;width:100%;max-width:360px;border-radius:10px;touch-action:none}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色雨降临</h1>
+  <p class="tips">天上落下五颜六色的雨滴,只接住顶部指定的目标色!接对 +1 分,接错 -1 生命(共 3 条),雨滴会越下越快。接满 40 颗目标雨滴即通关。移动:鼠标 / 触屏拖动 / 左右方向键。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">接住</div><div class="big" id="sc">0/40</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:8px"><span class="mut">目标色</span><span id="tgtchip"></span><b id="tgtn" style="font-size:16px"></b></div>
+    <canvas id="cv" width="360" height="470"></canvas>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色雨降临</h2><p id="ovp">玩法:底部有一块托盘,天上的雨滴颜色五花八门。<br>· 只接住顶部横幅指定的目标色:接对 +1 分<br>· 接错颜色 -1 生命,共 3 条命<br>· 目标色每接住 8 颗更换一次,雨速逐渐加快<br>· 接满 40 颗目标雨滴通关;漏接目标色只断连击</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PAL=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var drops=[],px=180,PW=76,PY=414;
+var score=0,lives=3,combo=0,catches=0,target=0,spawnAcc=0,hurtT=0;
+var playing=false,over=false,last=0;
+function $(id){return document.getElementById(id)}
+function cv(){return $('cv')}
+function setTarget(){
+  var n=Math.floor(Math.random()*PAL.length);
+  if(n===target)n=(n+1+Math.floor(Math.random()*4))%5;
+  target=n;
+  $('tgtchip').style.background=PAL[target][1];
+  $('tgtn').textContent=PAL[target][0];
+  $('tgtn').style.color=PAL[target][1];
+}
+function spawn(){
+  drops.push({x:24+Math.random()*312,y:-16,v:120+score*3+Math.random()*50,c:Math.floor(Math.random()*PAL.length)});
+}
+function rrect(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.arc(x+w-r,y+r,r,-Math.PI/2,Math.PI/2);
+  c.lineTo(x+r,y+h);c.arc(x+r,y+r,r,Math.PI/2,Math.PI*1.5);
+  c.closePath();
+}
+function draw(){
+  var c=cv().getContext('2d');
+  c.fillStyle='#131832';c.fillRect(0,0,360,470);
+  c.strokeStyle='rgba(255,255,255,.05)';
+  for(var i=1;i<4;i++){c.beginPath();c.moveTo(i*90,0);c.lineTo(i*90,470);c.stroke();}
+  for(i=0;i<drops.length;i++){
+    var d=drops[i];
+    c.beginPath();c.arc(d.x,d.y,11,0,Math.PI*2);
+    c.fillStyle=PAL[d.c][1];c.fill();
+    c.beginPath();c.arc(d.x-3,d.y-3,3.5,0,Math.PI*2);
+    c.fillStyle='rgba(255,255,255,.55)';c.fill();
+  }
+  rrect(c,px-PW/2,PY,PW,13,6);
+  c.fillStyle=PAL[target][1];c.fill();
+  c.strokeStyle='#ffffff';c.lineWidth=2;c.stroke();
+  if(hurtT>0){
+    c.fillStyle='rgba(229,72,77,'+(hurtT*0.9)+')';
+    c.fillRect(0,0,360,470);
+  }
+}
+function drawTop(){
+  $('sc').textContent=score+'/40';
+  $('ck').textContent=combo;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'雨停了,你是接雨大师!':'被淋成了落汤鸡…';
+  $('ovp').innerHTML=(win?'顺利接住 40 颗目标色雨滴!':'生命耗尽,止步于 ')+'<b>'+score+'</b> 颗目标雨滴。<br>盯紧目标色横幅,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function movePaddle(clientX){
+  var r=cv().getBoundingClientRect();
+  var x=(clientX-r.left)*360/r.width;
+  px=Math.max(PW/2,Math.min(360-PW/2,x));
+}
+cv().addEventListener('mousemove',function(e){movePaddle(e.clientX)});
+cv().addEventListener('touchmove',function(e){e.preventDefault();movePaddle(e.touches[0].clientX)},{passive:false});
+cv().addEventListener('touchstart',function(e){movePaddle(e.touches[0].clientX)},{passive:true});
+document.addEventListener('keydown',function(e){
+  if(e.key==='ArrowLeft')px=Math.max(PW/2,px-30);
+  if(e.key==='ArrowRight')px=Math.min(360-PW/2,px+30);
+});
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    spawnAcc+=dt;
+    var gap=Math.max(0.36,0.95-score*0.013);
+    if(spawnAcc>=gap&&drops.length<14){spawnAcc=0;spawn();}
+    for(var i=drops.length-1;i>=0;i--){
+      var d=drops[i];
+      d.y+=d.v*dt;
+      if(d.y>=PY-8&&d.y<=PY+18&&Math.abs(d.x-px)<=PW/2+9){
+        if(d.c===target){
+          score++;catches++;combo++;
+          if(catches%8===0)setTarget();
+        }else{
+          lives--;combo=0;hurtT=0.35;
+        }
+        drops.splice(i,1);
+      }else if(d.y>486){
+        if(d.c===target)combo=0;
+        drops.splice(i,1);
+      }
+    }
+    hurtT=Math.max(0,hurtT-dt);
+    if(score>=40){drawTop();draw();finish(true);requestAnimationFrame(loop);return;}
+    if(lives<=0){drawTop();draw();finish(false);requestAnimationFrame(loop);return;}
+    drawTop();
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+function startGame(){
+  drops=[];px=180;score=0;lives=3;combo=0;catches=0;spawnAcc=0;hurtT=0;
+  playing=true;over=false;
+  target=-1;setTarget();
+  drawTop();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+setTarget();draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

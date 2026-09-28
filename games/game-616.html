@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星点速数</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#fbbf24;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#332100;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.slider{margin:14px 4px 4px}
+.slider input{width:100%;accent-color:#fbbf24}
+.gline{display:flex;justify-content:space-between;align-items:center;font-size:15px;color:#c7cbe8;margin-bottom:10px}
+.gline b{color:#fbbf24;font-size:20px}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:6px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.mid{color:#fbbf24}
+.msg.badc{color:#f87171}
+.btnrow{display:flex;gap:8px}
+.btnrow button{flex:1;background:#232949;color:#e8eaf6;border:none;border-radius:10px;padding:13px 0;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit}
+.btnrow .ok{background:#fbbf24;color:#332100}
+.btnrow button:disabled{opacity:.4}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星点速数</h1>
+  <p class="hint">星点只闪现 0.9 秒 · 用滑条报出你数到的数量 · 共 10 轮,越准得分越高</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/10 轮</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>累计误差 <b id="err">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="420" height="250"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">星点速数</h2>
+      <p id="ovD">星点群只出现一瞬,别一颗颗数,学会"估堆"!凭直觉拖动滑条报数,误差越小分越高。这是心算的源头技能——数感。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始速数</button>
+    </div>
+  </div>
+  <div class="slider"><input type="range" id="rng" min="1" max="60" value="15"></div>
+  <div class="gline">
+    <span>我的估计 <b id="gv">15</b> 颗</span>
+    <div class="btnrow">
+      <button id="btnGo2">重新闪现</button>
+      <button id="btnOk" class="ok">确认报数</button>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var elNo=$("no"),elScore=$("score"),elErr=$("err"),elGv=$("gv"),elMsg=$("msg");
+var rng=$("rng"),btnOk=$("btnOk"),btnGo2=$("btnGo2");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var W=420,Hh=250;
+var state,round,score,errSum,dots,answer,flashLeft,revealT;
+
+var COLORS=["#fbbf24","#60a5fa","#f472b6","#4ade80","#a78bfa","#f87171"];
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function makeDots(n){
+  var arr=[],tries=0;
+  while(arr.length<n&&tries<n*60){
+    tries++;
+    var r=rnd(7,11);
+    var x=rnd(r+6,W-r-6),y=rnd(r+6,Hh-r-6),ok=true,i;
+    for(i=0;i<arr.length;i++){
+      var dx=arr[i].x-x,dy=arr[i].y-y;
+      if(dx*dx+dy*dy<(r+arr[i].r+4)*(r+arr[i].r+4)){ok=false;break;}
+    }
+    if(ok)arr.push({x:x,y:y,r:r,c:COLORS[(Math.random()*COLORS.length)|0]});
+  }
+  return arr;
+}
+function drawDots(){
+  ctx.clearRect(0,0,W,Hh);
+  var i;
+  for(i=0;i<dots.length;i++){
+    var d=dots[i];
+    ctx.fillStyle=d.c;
+    ctx.shadowColor=d.c;
+    ctx.shadowBlur=9;
+    ctx.beginPath();
+    ctx.arc(d.x,d.y,d.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+function drawIdle(text){
+  ctx.clearRect(0,0,W,Hh);
+  ctx.fillStyle="rgba(232,234,246,0.5)";
+  ctx.font="bold 22px system-ui";
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText(text,W/2,Hh/2);
+}
+function newRound(){
+  if(round>10){gameOver();return;}
+  answer=rnd(8,14+round*3);
+  dots=makeDots(answer);
+  flashLeft=900;
+  state="flash";
+  rng.disabled=true;btnOk.disabled=true;btnGo2.disabled=true;
+  setMsg("看好了!","");
+}
+function reveal(){
+  state="reveal";
+  drawDots();
+  var g=parseInt(rng.value,10);
+  var diff=Math.abs(g-answer);
+  var pts=Math.max(0,80-diff*4);
+  score+=pts;errSum+=diff;
+  elScore.textContent=score;
+  elErr.textContent=errSum;
+  var cls=diff<=2?"good":(diff<=6?"mid":"badc");
+  setMsg("实际 "+answer+" 颗 · 你报 "+g+" · 误差 "+diff+" · +"+pts+" 分",cls);
+  round++;
+  elNo.textContent=Math.min(round,10);
+  btnOk.disabled=true;
+  setTimeout(function(){
+    if(state==="reveal"&&round<=10){
+      rng.disabled=false;btnOk.disabled=false;btnGo2.disabled=false;
+      drawIdle("第 "+round+" 轮:准备…");
+      state="wait";
+      setMsg("拖好滑条,点「重新闪现」再看一次新的一群星点","");
+    }else if(state==="reveal"){
+      gameOver();
+    }
+  },1800);
+}
+function gameOver(){
+  state="over";
+  var avg=(errSum/10).toFixed(1);
+  ovT.textContent="速数结束!";
+  ovD.textContent="十轮平均误差 "+avg+" 颗。数感越强,心算越快。";
+  ovS.style.display="block";
+  ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="wait";round=1;score=0;errSum=0;
+  ovS.style.display="none";
+  elScore.textContent="0";elErr.textContent="0";elNo.textContent="1";
+  rng.disabled=false;btnOk.disabled=false;btnGo2.disabled=false;
+  drawIdle("点「重新闪现」开始第 1 轮");
+  setMsg("拖动滑条估计数量,然后确认","");
+  ov.classList.add("hide");
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+rng.addEventListener("input",function(){elGv.textContent=rng.value;});
+btnOk.addEventListener("click",function(){
+  if(state==="wait")reveal();
+});
+btnGo2.addEventListener("click",function(){
+  if(state==="wait")newRound();
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="wait"&&state!=="over"){
+    return;
+  }
+  if(state==="over"||(e.key==="Enter"&&state==="wait")){
+    if(e.key==="Enter"){e.preventDefault();btnOk.click();}
+  }
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==="flash"){
+    flashLeft-=16;
+    drawDots();
+    if(flashLeft<=0){
+      state="wait";
+      drawIdle("它们有多少颗?");
+      rng.disabled=false;btnOk.disabled=false;btnGo2.disabled=false;
+      setMsg("凭感觉拖滑条,然后确认报数","");
+    }
+  }
+}
+drawIdle("准备好了吗?");
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

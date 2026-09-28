@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>萤火归林</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fde68a;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fde68a}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#fde68a;color:#451a03;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>萤火归林</h1>
+  <p class="hint">按住点亮手中灯,萤火自会靠近 · 灯静且缓时萤火跟灯 · 引至老树旁即归巢点亮</p>
+  <div class="hud">
+    <span>跟灯 <b id="hFol">0</b>/5</span>
+    <span>已点亮 <b id="hLit">0</b>/10</span>
+    <span>林间萤 <b id="hWild">14</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">萤火归林</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">提灯入林</button>
+      <button id="btnMore" style="display:none">再守一夜</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hFol=$("hFol"),hLit=$("hLit"),hWild=$("hWild");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,TAU=Math.PI*2;
+var SLOTS=[[402,104],[388,128],[414,140],[392,164],[416,172],[400,196],[384,210],[412,216],[396,240],[408,258]];
+var flies=[],lit=[],respawnT=0,state="menu",goalDone=false,time=0;
+var pressing=false,lantX=0,lantY=0,plX=0,plY=0,lantSp=0;
+function sr(n){var x=Math.sin(n*67.3+23.1)*3571.3453;return x-Math.floor(x);}
+for(var i=0;i<10;i++)lit.push(false);
+function spawnWild(){
+  flies.push({x:8+Math.random()*40,y:30+Math.random()*260,
+    dir:Math.random()*TAU,ph:Math.random()*TAU,st:"wild",orb:0});
+}
+function followCount(){
+  var n=0,i;
+  for(i=0;i<flies.length;i++)if(flies[i].st==="follow")n++;
+  return n;
+}
+function litCount(){
+  var n=0,i;
+  for(i=0;i<10;i++)if(lit[i])n++;
+  return n;
+}
+function step(dt){
+  var i,j;
+  lantSp=Math.sqrt((lantX-plX)*(lantX-plX)+(lantY-plY)*(lantY-plY))/Math.max(dt,0.001);
+  plX=lantX;plY=lantY;
+  if(lantSp>900)lantSp=900;
+  var act=pressing;
+  for(i=flies.length-1;i>=0;i--){var f=flies[i];
+    f.ph+=dt*3;
+    if(f.st==="wild"){
+      f.dir+=(Math.random()-0.5)*2.4*dt;
+      var sp=26;
+      if(act){
+        var dx=lantX-f.x,dy=lantY-f.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+        if(d<85){
+          var want=Math.atan2(dy,dx);
+          var da=want-f.dir;
+          while(da>Math.PI)da-=TAU;
+          while(da<-Math.PI)da+=TAU;
+          f.dir+=da*Math.min(1,6*dt);
+          sp=58;
+          if(d<26&&lantSp<45&&followCount()<5){f.st="follow";f.orb=Math.random()*TAU;continue;}
+        }
+      }
+      f.x+=Math.cos(f.dir)*sp*dt;
+      f.y+=Math.sin(f.dir)*sp*dt;
+      if(f.x<8){f.x=8;f.dir=0;}
+      if(f.x>W-8){f.x=W-8;f.dir=Math.PI;}
+      if(f.y<18){f.y=18;f.dir=Math.PI/2;}
+      if(f.y>H-10){f.y=H-10;f.dir=-Math.PI/2;}
+    }else if(f.st==="follow"){
+      f.orb+=2.2*dt;
+      f.x=lantX+Math.cos(f.orb)*17;
+      f.y=lantY+Math.sin(f.orb)*17-6;
+      if(f.x<10)f.x=10;
+      if(f.x>W-10)f.x=W-10;
+      if(f.y<12)f.y=12;
+      if(f.y>H-8)f.y=H-8;
+    }else if(f.st==="settle"){
+      var bi=-1,bd=1e9;
+      for(j=0;j<10;j++){
+        if(lit[j])continue;
+        var sx=SLOTS[j][0]-f.x,sy=SLOTS[j][1]-f.y,sd=sx*sx+sy*sy;
+        if(sd<bd){bd=sd;bi=j;}
+      }
+      if(bi<0){f.st="wild";continue;}
+      var gx=SLOTS[bi][0]-f.x,gy=SLOTS[bi][1]-f.y,gd=Math.sqrt(gx*gx+gy*gy)||1;
+      if(gd<6){
+        f.st="seated";
+        lit[bi]=true;
+        var lc=litCount();
+        hLit.textContent=lc;
+        addF("一巢灯火 · "+lc+"/10","#fde68a");
+        respawnT=4;
+        if(lc>=10&&!goalDone){
+          goalDone=true;state="zen";
+          ovT.textContent="满树灯辉";
+          ovD.textContent="十巢尽数点亮,老树如缀星河。\n萤火原是林间的,只是借你的灯回了一次家。\n可再守一夜,从头再来。";
+          btnMore.style.display="inline-block";
+          ov.classList.remove("hide");
+        }
+      }else{
+        f.x+=gx/gd*120*dt;
+        f.y+=gy/gd*120*dt;
+      }
+    }
+  }
+  if(act&&lantX>355){
+    for(i=flies.length-1;i>=0;i--){
+      if(flies[i].st==="follow")flies[i].st="settle";
+    }
+  }
+  for(i=flies.length-1;i>=0;i--){
+    if(flies[i].st==="seated")flies.splice(i,1);
+  }
+  if(respawnT>0){
+    respawnT-=dt;
+    if(respawnT<=0)spawnWild();
+  }
+  hFol.textContent=followCount();
+  hWild.textContent=flies.length;
+  for(i=fxL.length-1;i>=0;i--){fxL[i].t-=0.012;
+    if(fxL[i].t<=0)fxL.splice(i,1);}
+}
+var fxL=[];
+function addF(txt,col){fxL.push({txt:txt,col:col||"#fbbf24",t:1.4});}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i,j;
+  var sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#0a1024");sky.addColorStop(1,"#14203a");
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  for(i=0;i<26;i++){
+    var dx0=sr(i*3+1)*W,sc=0.4+sr(i*3+2)*0.5;
+    ctx.fillStyle="rgba(10,14,30,.9)";
+    ctx.beginPath();
+    ctx.moveTo(dx0,300);
+    ctx.lineTo(dx0-16*sc,300);
+    ctx.lineTo(dx0+sc*8,300-70*sc-40);
+    ctx.lineTo(dx0+16*sc+sc*8,300);
+    ctx.closePath();ctx.fill();
+  }
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,296,W,H-296);
+  ctx.fillStyle="#3a2f24";
+  ctx.beginPath();
+  ctx.moveTo(392,300);ctx.quadraticCurveTo(398,190,398,96);
+  ctx.lineTo(412,96);ctx.quadraticCurveTo(414,190,420,300);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle="#3a2f24";ctx.lineWidth=6;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(400,130);ctx.quadraticCurveTo(370,112,348,116);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(406,120);ctx.quadraticCurveTo(436,104,452,110);ctx.stroke();
+  ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(400,150);ctx.lineTo(360,150);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(408,144);ctx.lineTo(444,140);ctx.stroke();
+  ctx.lineCap="butt";
+  for(j=0;j<10;j++){
+    var sx2=SLOTS[j][0],sy2=SLOTS[j][1];
+    if(lit[j]){
+      var pu=0.7+0.3*Math.sin(time*2.4+j);
+      var gg=ctx.createRadialGradient(sx2,sy2,1,sx2,sy2,14);
+      gg.addColorStop(0,"rgba(253,230,138,"+(0.5*pu).toFixed(2)+")");
+      gg.addColorStop(1,"rgba(253,230,138,0)");
+      ctx.fillStyle=gg;
+      ctx.beginPath();ctx.arc(sx2,sy2,14,0,TAU);ctx.fill();
+      ctx.fillStyle="#fde68a";
+      ctx.beginPath();ctx.arc(sx2,sy2,3.6,0,TAU);ctx.fill();
+    }else{
+      ctx.fillStyle="#232b3e";
+      ctx.beginPath();ctx.arc(sx2,sy2,4.4,0,TAU);ctx.fill();
+    }
+  }
+  for(i=0;i<flies.length;i++){var f=flies[i];
+    var gl=0.5+0.5*Math.sin(f.ph*2);
+    var fg=ctx.createRadialGradient(f.x,f.y,0.5,f.x,f.y,10);
+    fg.addColorStop(0,"rgba(253,230,138,"+(0.75*gl).toFixed(2)+")");
+    fg.addColorStop(1,"rgba(253,230,138,0)");
+    ctx.fillStyle=fg;
+    ctx.beginPath();ctx.arc(f.x,f.y,10,0,TAU);ctx.fill();
+    ctx.fillStyle="rgba(255,244,214,"+(0.6+0.4*gl).toFixed(2)+")";
+    ctx.beginPath();ctx.arc(f.x,f.y,1.9,0,TAU);ctx.fill();
+  }
+  if(pressing){
+    var lg=ctx.createRadialGradient(lantX,lantY,2,lantX,lantY,34);
+    lg.addColorStop(0,"rgba(255,236,170,.5)");
+    lg.addColorStop(1,"rgba(255,236,170,0)");
+    ctx.fillStyle=lg;
+    ctx.beginPath();ctx.arc(lantX,lantY,34,0,TAU);ctx.fill();
+    ctx.strokeStyle="rgba(253,230,138,.8)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(lantX,lantY,7,0,TAU);ctx.stroke();
+  }
+  if(fxL.length>0){
+    ctx.font="bold 14px system-ui";ctx.textAlign="center";
+    for(i=fxL.length-1;i>=0;i--){var f2=fxL[i];
+      f2.t-=1/120;
+      if(f2.t<=0){fxL.splice(i,1);continue;}
+      ctx.globalAlpha=Math.min(1,f2.t);ctx.fillStyle=f2.col;
+      ctx.fillText(f2.txt,W/2,40);ctx.globalAlpha=1;}
+  }
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;var p=ptr(e);lantX=p.x;lantY=p.y;plX=p.x;plY=p.y;}
+function mv(e){if(!pressing||state!=="play")return;e.preventDefault();var p=ptr(e);lantX=p.x;lantY=p.y;}
+function up(){pressing=false;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+function reset(){
+  flies=[];lit=[];
+  for(var i2=0;i2<10;i2++)lit.push(false);
+  respawnT=0;goalDone=false;
+  for(i2=0;i2<14;i2++)spawnWild();
+  hLit.textContent="0";
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="萤火归林";
+  ovD.textContent="林中流萤四散,老树上有十处空巢。\n按住屏幕点亮手中灯:萤火自会围拢;\n持灯稳而慢,它们便愿意跟灯同行(至多五只)。\n把灯引到老树旁,跟灯的萤火便会归巢点亮。\n点亮十巢,满树灯辉,即是圆满。";
+  btnGo.textContent="提灯入林";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){reset();state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){reset();state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

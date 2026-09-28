@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>追鱼斗杆</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>追鱼斗杆</h1>
+<p class="tip">中鱼后进入斗杆:鱼标在水道里乱窜,拖动抄网区(鼠标/手指,或↑↓键)追住它!持续罩住 2 秒即抄获,一条比一条快。75 秒抄上 5 条!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">75</b> 秒</span><span>抄获 <b id="s3">0/5</b></span></div>
+<canvas id="cv" width="480" height="520"></canvas>
+<div id="ov"><h2 id="ot">追鱼斗杆</h2><p id="op">线那头的家伙不好对付!<br>让抄网区一直罩住乱窜的鱼标,<br>蓄满 2 秒就能抄上岸。五条连胜即是高手!</p><button id="ob">甩竿中鱼</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2'),eL=document.getElementById('s3');
+var W=cv.width,H=cv.height;
+var state='ready',tl=75,score=0,msg='';
+var fy=260,fv=0,fvt=0,ftT=0.5,zy=260,tz=260,progress=0,fc=0,landed=0,lvl=0,keys={};
+function rnd(a,b){return a+Math.random()*(b-a)}
+function clamp(v,a,b){return v<a?a:(v>b?b:v)}
+function finish(win){
+  state='over';ob.textContent='再斗一场';
+  ot.textContent=win?'五连抄!':'让它溜了…';
+  op.innerHTML='抄获 <b style="color:#ffd75e">'+landed+' / 5</b> 条 · 得分 '+score+'<br>'+(win?'斗杆稳如老手,鱼护都装满了!':'别急着重合的瞬间,要的是「一直」罩住它。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=75;score=0;msg='';fy=260;fv=0;fvt=0;ftT=0.5;zy=260;tz=260;
+  progress=0;fc=0;landed=0;lvl=0;keys={};
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(landed>=5);return}
+  if(keys.up)tz-=300*dt;
+  if(keys.down)tz+=300*dt;
+  tz=clamp(tz,110,400);
+  zy+=(tz-zy)*Math.min(1,dt*12);
+  if(fc>0){
+    fc-=dt;
+    progress=Math.max(0,progress-dt*0.2);
+    return;
+  }
+  ftT-=dt;
+  if(ftT<=0){
+    ftT=rnd(0.5,1.2);
+    fvt=(Math.random()<0.5?-1:1)*rnd(120,260)*(1+lvl*0.15);
+  }
+  fv+=(fvt-fv)*Math.min(1,dt*3);
+  fy+=fv*dt;
+  if(fy<70){fy=70;fv=Math.abs(fv);fvt=Math.abs(fvt)}
+  if(fy>450){fy=450;fv=-Math.abs(fv);fvt=-Math.abs(fvt)}
+  var overlap=Math.abs(fy-zy)<62;
+  if(overlap)progress+=dt/2;
+  else progress-=dt*0.3;
+  progress=clamp(progress,0,1);
+  if(overlap)msg='罩住它!稳住…';
+  else msg='追!抄网区跟上鱼标';
+  if(progress>=1){
+    var v=60+lvl*25+Math.round(rnd(0,30));
+    score+=v;landed++;lvl++;
+    msg='抄获!+'+v+' 分';
+    progress=0;fy=rnd(100,420);fv=0;fvt=0;fc=0.9;
+    if(landed>=5){finish(true);return}
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,H);g.addColorStop(0,'#122842');g.addColorStop(1,'#081426');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  X.fillStyle='rgba(6,12,26,.75)';
+  X.fillRect(150,60,100,400);
+  X.strokeStyle='rgba(127,212,255,.18)';X.lineWidth=1;
+  var i;
+  for(i=1;i<8;i++){X.beginPath();X.moveTo(150,60+i*50);X.lineTo(250,60+i*50);X.stroke()}
+  var t=Date.now()*0.001;
+  var overlap=Math.abs(fy-zy)<62&&fc<=0;
+  X.fillStyle='rgba(99,201,122,'+(overlap?0.30:0.16)+')';
+  X.fillRect(150,zy-50,100,100);
+  X.strokeStyle=overlap?'rgba(127,255,150,.9)':'rgba(99,201,122,.6)';
+  X.lineWidth=2;
+  X.strokeRect(150,zy-50,100,100);
+  X.strokeStyle='rgba(230,240,250,.25)';
+  for(i=0;i<5;i++){
+    X.beginPath();X.moveTo(150,zy-50+i*25);X.lineTo(250,zy-50+i*25);X.stroke();
+  }
+  var wig=Math.sin(t*10)*4;
+  X.fillStyle=fc>0?'rgba(160,190,220,.5)':'#9fc9e8';
+  X.beginPath();X.ellipse(200+wig*0.4,fy,20,11,0,0,7);X.fill();
+  X.beginPath();X.moveTo(216,fy);X.lineTo(236,fy-9+wig);X.lineTo(236,fy+9+wig);X.closePath();X.fill();
+  X.fillStyle='#0f1220';X.beginPath();X.arc(191,fy-3,2.4,0,7);X.fill();
+  X.fillStyle='rgba(10,16,32,.8)';X.fillRect(380,60,26,400);
+  X.fillStyle=progress>0.7?'#63c97a':'#4fa8e0';
+  X.fillRect(380,60,26,400*progress);
+  X.strokeStyle='rgba(127,212,255,.4)';X.strokeRect(380,60,26,400);
+  X.fillStyle='rgba(200,215,235,.8)';X.font='12px system-ui';X.textAlign='center';
+  X.fillText('蓄力',393,54);
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,36);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('拖动 / ↑↓ 移动抄网区',W/2,H-14);
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'){keys.up=true;e.preventDefault()}
+  if(e.key==='ArrowDown'||e.key==='s'){keys.down=true;e.preventDefault()}
+  if((e.key===' '||e.key==='Enter')&&state!=='play'){e.preventDefault();start()}
+});
+document.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w')keys.up=false;
+  if(e.key==='ArrowDown'||e.key==='s')keys.down=false;
+});
+function setTz(e){
+  var r=cv.getBoundingClientRect();
+  var my=(e.clientY-r.top)*(H/r.height);
+  tz=clamp(my,110,400);
+}
+cv.addEventListener('pointerdown',function(e){if(state==='play')setTz(e)});
+cv.addEventListener('pointermove',function(e){if(state==='play')setTz(e)});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);eL.textContent=landed+'/5';
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

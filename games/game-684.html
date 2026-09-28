@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连锁爆破</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>连锁爆破</h1>
+  <p class="tips">点击一个泡泡引爆它周围 3×3!被炸毁达 2 个邻居的泡泡会在下一波自动殉爆,形成连环。用有限的引爆次数清空全盘!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">剩余引爆</div><div class="big" id="mv">11</div></div>
+      <div class="stat"><div class="mut">剩余泡泡</div><div class="big" id="rm">81</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">连锁爆破</h2><p id="ovp">玩法说明:<br>· 点击任意泡泡,炸毁以它为中心的 3×3 区域<br>· 若某个幸存泡泡的 8 个邻居中有 2 个刚被炸毁,<br>　它会在下一波自动殉爆,层层连环<br>· 连环波数越多单泡得分越高(波数 ×10)<br>· 每关引爆次数有限,清空全盘即过关<br>· 次数用完仍有残留泡泡则失败</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff'];
+var N=9,grid=[],level=1,score=0,moves=0,left=0;
+var booms=[],floats=[],state='idle',lastT=0,animT=0;
+var ox=0,oy=54,CS=40;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function layout(){
+  CS=Math.floor(400/N);
+  ox=Math.floor((W-CS*N)/2);
+  oy=Math.floor((H-30-CS*N)/2)+20;
+}
+function newBoard(){
+  grid=[];
+  for(var r=0;r<N;r++){
+    var a=[];
+    for(var c=0;c<N;c++)a.push(Math.floor(Math.random()*COLORS.length));
+    grid.push(a);
+  }
+  left=N*N;
+  moves=Math.ceil(N/3)*Math.ceil(N/3)+2;
+  layout();upd();
+}
+function resetGame(){
+  level=1;score=0;N=9;booms=[];floats=[];
+  newBoard();
+}
+function upd(){
+  $i('lv').textContent=level;
+  $i('sc').textContent=score;
+  $i('mv').textContent=moves;
+  $i('rm').textContent=left;
+}
+function countNb(r,c,dest){
+  var cnt=0;
+  for(var dr=-1;dr<=1;dr++)for(var dc=-1;dc<=1;dc++){
+    if(dr===0&&dc===0)continue;
+    var rr=r+dr,cc=c+dc;
+    if(rr<0||cc<0||rr>=N||cc>=N)continue;
+    if(dest[rr+'_'+cc])cnt++;
+  }
+  return cnt;
+}
+function boom(r,c,per,all){
+  for(var dr=-1;dr<=1;dr++)for(var dc=-1;dc<=1;dc++){
+    var rr=r+dr,cc=c+dc;
+    if(rr<0||cc<0||rr>=N||cc>=N)continue;
+    var k=rr+'_'+cc;
+    if(grid[rr][cc]<0||all[k])continue;
+    all[k]=1;per[k]=1;
+    booms.push({x:ox+cc*CS+CS/2,y:oy+rr*CS+CS/2,life:0.4,c:COLORS[grid[rr][cc]]});
+  }
+}
+function detonate(r0,c0){
+  var all={},per={};
+  boom(r0,c0,per,all);
+  var chain=1,gained=0,n=0,k;
+  for(k in per)n++;
+  gained+=n*10*chain;
+  if(n>0)floats.push({x:ox+c0*CS+CS/2,y:oy+r0*CS,txt:'+'+(n*10*chain),c:'#ffd166',life:0.9});
+  while(true){
+    var next={};
+    for(var r=0;r<N;r++)for(var c=0;c<N;c++){
+      if(grid[r][c]<0)continue;
+      var kk=r+'_'+c;
+      if(all[kk])continue;
+      if(countNb(r,c,per)>=2)next[kk]=[r,c];
+    }
+    var any=false;
+    for(var kk2 in next){any=true;break;}
+    if(!any)break;
+    chain++;per={};n=0;
+    for(var kk3 in next){var p=next[kk3];boom(p[0],p[1],per,all);}
+    for(kk3 in per)n++;
+    gained+=n*10*chain;
+    if(n>0)floats.push({x:W/2,y:oy+CS*1.2,txt:'连锁 x'+chain,c:'#4cc9f0',life:1.1});
+  }
+  for(k in all){
+    var ps=k.split('_');
+    grid[+ps[0]][+ps[1]]=-1;
+  }
+  left-=gainedCount(all);
+  score+=gained;
+  animT=0.35;
+  return chain;
+}
+function gainedCount(all){
+  var n=0;
+  for(var k in all)n++;
+  return n;
+}
+function boardLeft(){
+  var n=0;
+  for(var r=0;r<N;r++)for(var c=0;c<N;c++)if(grid[r][c]>=0)n++;
+  return n;
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(state!=='play'||moves<=0)return;
+  var p=pt(e);
+  var c=Math.floor((p.x-ox)/CS),r=Math.floor((p.y-oy)/CS);
+  if(r<0||c<0||r>=N||c>=N)return;
+  if(grid[r][c]<0)return;
+  moves--;
+  detonate(r,c);
+  left=boardLeft();
+  upd();
+  if(left===0){
+    score+=150;level++;
+    if(level>4)N=12;else N=8+level;
+    floatClear();
+    newBoard();
+  }else if(moves<=0){
+    state='over';
+    $i('ovt').textContent='引爆次数用完!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达关卡:第 '+level+' 关<br>还剩 '+left+' 个泡泡没炸掉';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+});
+function floatClear(){floats=[]}
+function update(dt){
+  var i;
+  for(i=booms.length-1;i>=0;i--){booms[i].life-=dt;if(booms[i].life<=0)booms.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=34*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+  if(animT>0)animT-=dt;
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var r,c;
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    var x=ox+c*CS,y=oy+r*CS;
+    ctx.fillStyle='rgba(255,255,255,.04)';
+    ctx.fillRect(x+2,y+2,CS-4,CS-4);
+    if(grid[r][c]>=0){
+      var rad=CS*0.36;
+      if(animT>0)rad*=1+animT*0.5;
+      ctx.beginPath();ctx.arc(x+CS/2,y+CS/2,rad,0,6.2832);
+      ctx.fillStyle=COLORS[grid[r][c]];ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.25)';ctx.stroke();
+      ctx.beginPath();ctx.arc(x+CS*0.4,y+CS*0.4,rad*0.24,0,6.2832);
+      ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+    }
+  }
+  var i;
+  for(i=0;i<booms.length;i++){
+    var b=booms[i],t=b.life/0.4;
+    ctx.globalAlpha=t;
+    ctx.beginPath();ctx.arc(b.x,b.y,CS*(1.7-t*0.9),0,6.2832);
+    ctx.strokeStyle=b.c;ctx.lineWidth=4;ctx.stroke();
+    ctx.globalAlpha=t*0.4;
+    ctx.fillStyle=b.c;ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  ctx.font='13px system-ui';ctx.fillStyle='#9aa3c0';
+  ctx.fillText('引爆 3×3 · 邻居被炸 2 个即殉爆',W/2,H-8);
+}
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  resetGame();state='play';
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

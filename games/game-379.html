@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三线闪避</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f97316;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f97316;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f97316}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f97316;color:#2b1203;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>三线闪避</h1>
+  <p class="hint">左右键(或点两侧)切换跑道 · 障碍踩着节拍压来 · 贴拍变道有高分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">3</b></span>
+    <span>速度 <b id="bpm">96</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">三线闪避</h2>
+      <p id="ovDesc">尖刺障碍会踩着节拍从上方压来!
+左右键(A/D)或点屏幕两侧切换跑道躲开它。
+在障碍抵达的一瞬 ±0.2 秒内完成变道=完美闪避,
+高分连击;每 12 拍提速一次,撞上 3 次游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBpm=$("bpm");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,PY=470,APPROACH=1500;
+var LX=[90,240,390];
+var BPM0=96,BPMAX=150;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g379");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sTick(){noiseHit(0.04,0.07,6000);}
+function sDodge(per){tone("triangle",per?880:600,per?1300:600,0.1,0.2);}
+function sHit(){tone("sawtooth",160,60,0.3,0.3);noiseHit(0.15,0.2,1500);}
+function sMove(){tone("sine",340,340,0.05,0.08);}
+
+var state="menu",bpm,obs,score,combo,life,maxCombo,dodged,lane,laneT,invT,schedBeat,tickBeat,beatNo,deathFlash;
+function beatInt(){return 60000/bpm;}
+function reset(){
+  bpm=BPM0;obs=[];
+  score=0;combo=0;life=3;maxCombo=0;dodged=0;
+  lane=1;laneT=0;invT=0;beatNo=0;deathFlash=0;
+  schedBeat=performance.now()+2000;
+  tickBeat=schedBeat;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBpm.textContent=Math.round(bpm);
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g379",best);}
+  upd();
+  ovTitle.textContent="被节奏撞翻";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="闪过 "+dodged+" 个障碍 · 最高连击 "+maxCombo+"\n终速 "+Math.round(bpm)+" BPM\n脚下有拍,心里有数,再来!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  if(schedBeat-now>4000)schedBeat=now+2000;
+  while(schedBeat-now<APPROACH){
+    beatNo++;
+    var l1=(Math.random()*3)|0;
+    obs.push({lane:l1,t:schedBeat,counted:false,dead:false});
+    if(beatNo%4===0){
+      var l2=(l1+1+((Math.random()*2)|0))%3;
+      obs.push({lane:l2,t:schedBeat,counted:false,dead:false});
+    }
+    if(beatNo%12===0&&bpm<BPMAX)bpm=Math.min(BPMAX,bpm+3);
+    schedBeat+=beatInt();
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTick();tickBeat+=beatInt();}
+}
+function move(d){
+  if(state!=="play")return;
+  var nl=lane+d;
+  if(nl<0||nl>2)return;
+  lane=nl;
+  laneT=performance.now();
+  sMove();
+}
+function update(now){
+  var i,o,y,prog;
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];
+    prog=1-(o.t-now)/APPROACH;
+    y=-40+prog*560;
+    if(o.dead){obs.splice(i,1);continue;}
+    if(o.lane===lane&&Math.abs(y-PY)<38&&now>invT){
+      o.dead=true;
+      life--;combo=0;
+      deathFlash=now;invT=now+1200;
+      sHit();
+      upd();
+      if(life<=0){gameOver();return;}
+      continue;
+    }
+    if(prog>=1&&!o.counted){
+      o.counted=true;
+      dodged++;
+      if(Math.abs(now-o.t)<=220&&laneT>o.t-220){
+        combo++;if(combo>maxCombo)maxCombo=combo;
+        score+=150+combo*8;
+        addPop(LX[o.lane],PY-70,"贴拍闪避 +"+(150+combo*8),"#fbbf24");
+        sDodge(true);
+      }else{
+        score+=40;
+        addPop(LX[o.lane],PY-70,"闪过 +40","#8b90b0");
+        sDodge(false);
+      }
+      upd();
+    }
+    if(now>o.t+400)obs.splice(i,1);
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>600)pops.splice(i,1);}
+}
+var pops=[];
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function tri(x,y,r){
+  ctx.beginPath();
+  ctx.moveTo(x,y-r);
+  ctx.lineTo(x+r*0.9,y+r*0.8);
+  ctx.lineTo(x-r*0.9,y+r*0.8);
+  ctx.closePath();
+  ctx.fill();
+}
+function draw(now){
+  var i,o,y;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(249,115,22,0.15)";
+  for(i=0;i<3;i++){
+    ctx.beginPath();ctx.moveTo(LX[i],0);ctx.lineTo(LX[i],H);ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(249,115,22,0.5)";
+  ctx.beginPath();ctx.moveTo(0,PY+34);ctx.lineTo(W,PY+34);ctx.stroke();
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    var prog=1-(o.t-now)/APPROACH;
+    if(prog<0)prog=0;
+    y=-40+prog*560;
+    if(y<-40||y>H+40)continue;
+    ctx.fillStyle="#ef4444";
+    tri(LX[o.lane],y,20);
+    ctx.strokeStyle="rgba(239,68,68,0.35)";
+    ctx.beginPath();ctx.moveTo(LX[o.lane],y);ctx.lineTo(LX[o.lane],y-46);ctx.stroke();
+  }
+  var blink=now<invT&&Math.floor(now/90)%2===0;
+  if(!blink){
+    ctx.fillStyle="#fbbf24";
+    tri(LX[lane],PY,22);
+    ctx.fillStyle="rgba(255,255,255,0.5)";
+    tri(LX[lane],PY-6,9);
+  }
+  var g=1-(now-deathFlash)/300;
+  if(g>0){
+    ctx.fillStyle="rgba(239,68,68,"+(g*0.3)+")";
+    ctx.fillRect(0,0,W,H);
+  }
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/600;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y-pr*26);
+    ctx.globalAlpha=1;
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+function onTap(cx,cy){
+  var p=toXY(cx,cy);
+  if(p.x<W*0.35)move(-1);
+  else if(p.x>W*0.65)move(1);
+  else if(lane<1)move(1);
+  else if(lane>1)move(-1);
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap(e.clientX,e.clientY);});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap(e.clientX,e.clientY);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];onTap(t.clientX,t.clientY);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.repeat)return;
+  if(e.code==="ArrowLeft"||e.code==="KeyA"){e.preventDefault();move(-1);}
+  else if(e.code==="ArrowRight"||e.code==="KeyD"){e.preventDefault();move(1);}
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

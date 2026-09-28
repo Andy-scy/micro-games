@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>纸团入篓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ffd54f;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ffd54f;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ffd54f;color:#1a1f36;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>纸团入篓</h1>
+<p class="tip">按住并向后拖拽瞄准，松手抛出 · 注意风向箭头 · 进 10 球获胜，3 次落地失败</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=cv.width,H=cv.height;
+var G=700,PX=70,PY=505,BR=10;
+var phase,score,miss,wind,binX,ball,trail,drag,resT,streak;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function newWind(){wind=Math.round(rnd(-130,130));}
+function newBin(){binX=rnd(270,430);}
+function reset(){
+  phase='aim';score=0;miss=0;ball=null;trail=[];drag=null;resT=0;streak=0;
+  newWind();newBin();
+}
+function startDrag(x,y){if(phase==='aim'){drag={sx:x,sy:y,cx:x,cy:y};}}
+function moveDrag(x,y){if(drag){drag.cx=x;drag.cy=y;}}
+function endDrag(){
+  if(!drag)return;
+  var vx=(drag.sx-drag.cx)*2.6,vy=(drag.sy-drag.cy)*2.6;
+  var sp=Math.hypot(vx,vy);
+  if(sp<80||vy>=-40){drag=null;return;}
+  if(sp>900){vx*=900/sp;vy*=900/sp;}
+  ball={x:PX,y:PY,vx:vx,vy:vy,py:PY,inb:false};
+  trail=[];phase='fly';drag=null;
+}
+function resolve(inp){
+  phase='res';resT=0;drag=null;
+  if(inp==='in'){score++;streak++;ball.inb=true;}
+  else{miss++;streak=0;}
+}
+function end(win){
+  phase='over';
+  ovT.textContent=win?'办公室神投手！':'游戏结束';
+  ovX.textContent='成功投进 '+score+' 个纸团 · 最高连中 '+streak+' 次。'+(win?'垃圾永不落地！':'抛出前多看一眼风向箭头。');
+  ov.classList.remove('hidden');
+}
+function update(dt){
+  if(phase==='res'){
+    resT+=dt;
+    if(ball&&ball.inb){ball.x+=(binX-ball.x)*8*dt;ball.y+=60*dt;ball.vy=0;}
+    else if(ball){ball.vy+=G*dt;ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;}
+    if(resT>0.8){
+      if(score>=10){end(true);return;}
+      if(miss>=3){end(false);return;}
+      ball=null;phase='aim';newWind();
+    }
+  }
+  if(phase==='fly'&&ball){
+    var steps=Math.max(1,Math.ceil(dt/0.008)),sd=dt/steps;
+    for(var i=0;i<steps;i++){
+      ball.py=ball.y;
+      ball.vy+=G*sd;ball.vx+=wind*sd;
+      ball.vx*=(1-0.10*sd);ball.vy*=(1-0.05*sd);
+      ball.x+=ball.vx*sd;ball.y+=ball.vy*sd;
+      if(ball.x<10+BR){ball.x=10+BR;ball.vx=Math.abs(ball.vx)*0.45;}
+      if(ball.x>W-10-BR){ball.x=W-10-BR;ball.vx=-Math.abs(ball.vx)*0.45;}
+      var rl=binX-30,rr=binX+30;
+      if(ball.py<=522&&ball.y>522&&ball.vy>0&&ball.x>rl+4&&ball.x<rr-4){resolve('in');break;}
+      peg(rl,522);peg(rr,522);
+      if(ball.y>588){resolve('miss');break;}
+    }
+    if(ball){trail.push({x:ball.x,y:ball.y});if(trail.length>16)trail.shift();}
+  }
+}
+function peg(px,py){
+  var dx=ball.x-px,dy=ball.y-py,d=Math.hypot(dx,dy),min=BR+5;
+  if(d<min&&d>0.001){
+    var nx=dx/d,ny=dy/d,dot=ball.vx*nx+ball.vy*ny;
+    if(dot<0){ball.vx-=1.5*dot*nx;ball.vy-=1.5*dot*ny;}
+    ball.x=px+nx*min;ball.y=py+ny*min;
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#232946';ctx.fillRect(0,590,W,H-590);
+  ctx.fillStyle='#2e3a68';ctx.fillRect(0,586,W,5);
+  ctx.fillStyle='#455a64';ctx.fillRect(40,PY+16,70,10);
+  ctx.fillStyle='#78909c';
+  ctx.beginPath();ctx.moveTo(binX-34,522);ctx.lineTo(binX+34,522);ctx.lineTo(binX+26,588);ctx.lineTo(binX-26,588);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#b0bec5';ctx.lineWidth=1.5;
+  for(var i=0;i<4;i++){ctx.beginPath();ctx.moveTo(binX-30+i*6,522);ctx.lineTo(binX-22+i*6,588);ctx.stroke();}
+  ctx.beginPath();ctx.moveTo(binX-34,522);ctx.lineTo(binX+34,522);ctx.stroke();
+  ctx.strokeStyle='#ffd54f';ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(70,520,26,-Math.PI*0.15,Math.PI*0.95);ctx.stroke();
+  for(var j=0;j<trail.length;j++){
+    ctx.fillStyle='rgba(236,239,241,'+(j/trail.length*0.4)+')';
+    ctx.beginPath();ctx.arc(trail[j].x,trail[j].y,5,0,7);ctx.fill();
+  }
+  if(ball){
+    ctx.fillStyle='#eceff1';ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,7);ctx.fill();
+    ctx.strokeStyle='#90a4ae';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,7);
+    ctx.moveTo(ball.x-BR,ball.y-3);ctx.quadraticCurveTo(ball.x,ball.y+4,ball.x+BR,ball.y-3);
+    ctx.moveTo(ball.x-4,ball.y-BR);ctx.quadraticCurveTo(ball.x+2,ball.y,ball.x-3,ball.y+BR);ctx.stroke();
+  }
+  if(drag){
+    ctx.strokeStyle='#ffd54f';ctx.setLineDash([6,6]);ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(drag.sx,drag.sy);ctx.lineTo(drag.cx,drag.cy);ctx.stroke();ctx.setLineDash([]);
+    var fx=(drag.sx-drag.cx)*2.6,fy=(drag.sy-drag.cy)*2.6,sp=Math.hypot(fx,fy);
+    if(sp>900){fx*=900/sp;fy*=900/sp;}
+    var px=PX,py=PY,pvx=fx,pvy=fy;
+    ctx.fillStyle='rgba(236,239,241,.5)';
+    for(var k=0;k<9;k++){
+      for(var m=0;m<5;m++){pvy+=G*0.012;pvx+=wind*0.012;px+=pvx*0.012;py+=pvy*0.012;}
+      ctx.beginPath();ctx.arc(px,py,4,0,7);ctx.fill();
+    }
+  }
+  var ax=(wind>0?40:-40);
+  ctx.strokeStyle='#4fc3f7';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(W/2-ax,70);ctx.lineTo(W/2+ax,70);
+  ctx.moveTo(W/2+ax,70);ctx.lineTo(W/2+ax-(wind>0?12:-12),62);ctx.moveTo(W/2+ax,70);ctx.lineTo(W/2+ax-(wind>0?12:-12),78);ctx.stroke();
+  ctx.fillStyle='#4fc3f7';ctx.font='14px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('风 '+(wind>0?'→ ':'← ')+Math.round(Math.abs(wind)/130*5)+' 级',W/2,100);
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('投进 '+score+' / 10',14,28);
+  ctx.textAlign='right';ctx.fillText('落地 '+miss+' / 3',W-14,28);
+  if(phase==='aim'&&!drag){ctx.fillStyle='#9fa8da';ctx.textAlign='center';ctx.font='14px system-ui,sans-serif';ctx.fillText('按住纸团向后拖拽，松手抛出',W/2,620);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect(),sx=W/r.width;
+  startDrag((e.clientX-r.left)*sx,(e.clientY-r.top)*sx);
+});
+window.addEventListener('pointermove',function(e){
+  var r=cv.getBoundingClientRect(),sx=W/r.width;
+  moveDrag((e.clientX-r.left)*sx,(e.clientY-r.top)*sx);
+});
+window.addEventListener('pointerup',endDrag);
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

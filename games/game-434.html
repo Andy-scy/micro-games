@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>传送带狂奔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>传送带狂奔</h1>
+  <p class="hint">空格/↑/点按 跳过木箱 · 绿带加速红带减速 · 身后的碎岩墙不会停,一旦被追上就结束!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>当前速度 <b id="spd">0</b></span>
+    <span>距墙 <b id="gap">0</b> 米</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">传送带狂奔</h2>
+      <p id="ovDesc">工厂车间里,地面全是传送带:绿色顺行带让你飞快,红色逆行带把你拖慢——而身后 crushing 而来的碎岩墙永远不停!借绿带甩开它!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSpd=$("spd"),elGap=$("gap");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s434");
+var state="menu",score,wx,wallX,speed,base,vy,py,grounded,belts,crates,lastX,nextCrate,t;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  score=0;wx=0;wallX=-560;speed=300;base=300;vy=0;py=GY-42;grounded=true;
+  belts=[{x:-100,w:700,type:0}];crates=[];lastX=600;nextCrate=520;t=0;
+}
+function sx(gx){return 160+(gx-wx);}
+function mulAt(){
+  var i;
+  for(i=0;i<belts.length;i++){
+    var b=belts[i];
+    if(wx+13>=b.x&&wx+13<=b.x+b.w)return b.type===1?1.7:(b.type===2?0.52:1);
+  }
+  return 1;
+}
+function gameOver(msg){
+  state="over";
+  var sc=Math.floor(wx/10);
+  if(sc>best){best=sc;saveBest("mg_s434",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+sc+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;}
+}
+function update(dt){
+  var s=dt/1000,i;
+  t+=s;
+  base=Math.min(430,300+wx*0.008);
+  speed=base*mulAt();
+  wx+=speed*s;
+  wallX+=(235+Math.min(120,wx*0.008))*s;
+  score=Math.floor(wx/10);
+  if(wx-wallX<132){gameOver("碎岩墙碾了过来——多蹭绿色加速带呀!");return;}
+  if(!grounded){
+    vy+=2200*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  while(lastX<wx+W+300){
+    var w=150+Math.random()*170,type;
+    var r=Math.random();
+    var prevType=belts[belts.length-1].type;
+    if(r<0.4)type=0;
+    else if(r<0.72)type=1;
+    else type=2;
+    if(type===2&&prevType===2)type=0;
+    belts.push({x:lastX,w:w,type:type});
+    if(Math.random()<0.45&&type!==0){
+      crates.push({x:lastX+40+Math.random()*(w-90),w:26,h:32});
+    }
+    lastX+=w;
+  }
+  for(i=belts.length-1;i>=0;i--){
+    if(belts[i].x+belts[i].w<wx-260)belts.splice(i,1);
+  }
+  for(i=crates.length-1;i>=0;i--){
+    var c=crates[i];
+    var csx=sx(c.x);
+    if(csx<-80){crates.splice(i,1);continue;}
+    if(csx<W+40){
+      var oy=GY-c.h;
+      if(160+26>csx+3&&160<csx+c.w-3&&py+40>oy+3){gameOver("一头撞上了木箱——该跳的时候别犹豫!");return;}
+    }
+  }
+  elScore.textContent=score;
+  elSpd.textContent=Math.round(speed);
+  elGap.textContent=Math.max(0,Math.round((wx-wallX)/10));
+}
+function drawBelt(b){
+  var x=sx(b.x),w=b.w,i;
+  if(x+w<-20||x>W+20)return;
+  var col=b.type===1?"#14532d":(b.type===2?"#5b1a12":"#26304a");
+  ctx.fillStyle=col;
+  ctx.fillRect(x,GY,w,16);
+  ctx.fillStyle=b.type===1?"#4ade80":(b.type===2?"#f87171":"#8b90b0");
+  var dir=b.type===1?1:(b.type===2?-1:0);
+  var off=(t*110*dir)%26;
+  if(dir!==0){
+    ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;
+    for(i=0;i<w/26+2;i++){
+      var cx=x+i*26+off;
+      if(cx<x-20||cx>x+w+20)continue;
+      ctx.beginPath();
+      if(dir>0){ctx.moveTo(cx-5,GY+3);ctx.lineTo(cx+2,GY+8);ctx.lineTo(cx-5,GY+13);}
+      else{ctx.moveTo(cx+5,GY+3);ctx.lineTo(cx-2,GY+8);ctx.lineTo(cx+5,GY+13);}
+      ctx.stroke();
+    }
+    ctx.lineWidth=1;
+  }else{
+    for(i=0;i<w/26;i++)ctx.fillRect(x+i*26+10,GY+7,6,3);
+  }
+}
+function draw(){
+  var i,c,grd,gap;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#131722");grd.addColorStop(1,"#1c222e");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#0e1119";
+  for(i=0;i<6;i++){
+    var px2=(i*220-(wx*0.4)%1760+1760)%1760-100;
+    ctx.fillRect(px2,GY-120,110,120);
+    ctx.fillRect(px2+150,GY-70,80,70);
+  }
+  ctx.fillStyle="#1a2030";ctx.fillRect(0,GY+16,W,H-GY-16);
+  for(i=0;i<belts.length;i++)drawBelt(belts[i]);
+  for(i=0;i<crates.length;i++){
+    c=crates[i];
+    var csx=sx(c.x);
+    if(csx<-40||csx>W+40)continue;
+    ctx.fillStyle="#7c6a4c";
+    rr(csx,GY-c.h,c.w,c.h,4);ctx.fill();
+    ctx.fillStyle="#5d4f37";
+    ctx.fillRect(csx+3,GY-c.h+4,c.w-6,3);
+    ctx.fillRect(csx+3,GY-c.h+c.h-8,c.w-6,3);
+  }
+  var wallSx=sx(wallX);
+  if(wallSx>-80){
+    grd=ctx.createLinearGradient(wallSx-70,0,wallSx,0);
+    grd.addColorStop(0,"rgba(248,113,113,0)");grd.addColorStop(1,"rgba(248,113,113,.35)");
+    ctx.fillStyle=grd;
+    ctx.fillRect(Math.max(0,wallSx-70),0,Math.min(70,wallSx),GY);
+    ctx.fillStyle="#3f1d1d";
+    ctx.beginPath();
+    ctx.moveTo(wallSx-38,0);ctx.lineTo(wallSx+6,0);ctx.lineTo(wallSx+6,GY);
+    var j;
+    for(j=0;j<6;j++){
+      ctx.lineTo(wallSx+6-18-j*8,GY-6-j*42);
+      ctx.lineTo(wallSx-8-j*8,GY-2-j*42);
+    }
+    ctx.lineTo(wallSx-38,GY);ctx.fill();
+    ctx.fillStyle="#ef4444";
+    for(j=0;j<4;j++)ctx.fillRect(wallSx-6,GY-30-j*55,6,14);
+  }
+  ctx.fillStyle="#4ade80";
+  rr(160,py+10,26,30,6);ctx.fill();
+  rr(160+7,py,19,16,5);ctx.fill();
+  ctx.fillStyle="#05230f";
+  ctx.fillRect(160+16,py+4,3,4);
+  ctx.fillStyle="#2f9e57";
+  ctx.fillRect(160+4,py+38,8,5);ctx.fillRect(160+15,py+38,8,5);
+  gap=wx-wallX;
+  if(gap<300){
+    ctx.strokeStyle="rgba(239,68,68,"+(0.6*(1-gap/300))+")";
+    ctx.lineWidth=8;
+    ctx.strokeRect(4,4,W-8,H-8);
+    ctx.lineWidth=1;
+  }
+}
+var lastT=0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=ts;
+  var dt=Math.min(50,ts-lastT);lastT=ts;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if((k===" "||k==="ArrowUp"||k==="w"||k==="W")&&!e.repeat)doJump();
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();doJump();},{passive:false});
+cv.addEventListener("mousedown",function(){doJump();});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

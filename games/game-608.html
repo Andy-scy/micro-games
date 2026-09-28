@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>巧凑24</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#38bdf8;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#38bdf8;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.timebar i{display:block;height:100%;background:#38bdf8;width:100%}
+.tiles{display:flex;justify-content:center;gap:10px;min-height:86px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.tiles button{width:84px;min-height:64px;background:#0b0e1a;border:2px solid #2a3054;color:#e8eaf6;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit;padding:4px;word-break:break-all;line-height:1.3}
+.tiles button.sel{border-color:#38bdf8;color:#38bdf8;background:#0d2438}
+.tiles button:active{transform:scale(.94)}
+.oprow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
+.oprow button{background:#232949;color:#e8eaf6;border:none;border-radius:10px;padding:12px 0;font-size:24px;font-weight:800;cursor:pointer;font-family:inherit}
+.oprow button.selop{background:#38bdf8;color:#06202e}
+.tools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.tools button{background:#1c2138;color:#aab0d0;border:none;border-radius:10px;padding:10px 0;font-size:14px;cursor:pointer;font-family:inherit}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:6px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#06202e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>巧凑24</h1>
+  <p class="hint">点两个数、选一个运算符合并它们,把四个数凑成 24 · 减法大减小,除法必须整除 · 共 5 局</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/5 局</span>
+    <span>时间 <b id="time">75</b>s</span>
+    <span>已解 <b id="solved">0</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="tiles" id="tiles"></div>
+    <div class="oprow">
+      <button data-op="+">+</button>
+      <button data-op="-">−</button>
+      <button data-op="×">×</button>
+      <button data-op="÷">÷</button>
+    </div>
+    <div class="tools">
+      <button id="btnUndo">↩ 撤销</button>
+      <button id="btnHint">💡 提示 (-20分)</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">巧凑24</h2>
+      <p id="ovD">经典 24 点!先点一个数,再选运算符,然后点第二个数,两数就合并成结果。四个数合并成一个 24 即过关。卡住了可以撤销或花 20 分买提示。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elTime=$("time"),elSolved=$("solved"),elScore=$("score"),elTbar=$("tbar");
+var elTiles=$("tiles"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var ROUND_MS=75000;
+var state,round,score,solvedNo,timeLeft,tiles,sel1,selOp,history,lastT;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function combine(a,b,op){
+  var hi=Math.max(a,b),lo=Math.min(a,b);
+  if(op==="+")return a+b;
+  if(op==="×")return a*b;
+  if(op==="-")return hi-lo;
+  if(op==="÷")return lo!==0&&hi%lo===0?hi/lo:NaN;
+  return NaN;
+}
+function solve(nums){
+  if(nums.length===1)return nums[0]===24?[]:null;
+  var i,j;
+  for(i=0;i<nums.length;i++){
+    for(j=0;j<nums.length;j++){
+      if(i===j)continue;
+      var rest=[],k;
+      for(k=0;k<nums.length;k++)if(k!==i&&k!==j)rest.push(nums[k]);
+      var a=nums[i],b=nums[j];
+      var cands=[[a+b,"+"],[Math.abs(a-b),"-"],[a*b,"×"]];
+      if(b!==0&&Math.max(a,b)%Math.min(a,b)===0)cands.push([Math.max(a,b)/Math.min(a,b),"÷"]);
+      var m;
+      for(m=0;m<cands.length;m++){
+        var r=cands[m][0],op=cands[m][1];
+        var res=solve(rest.concat([r]));
+        if(res!==null)return [{a:a,b:b,op:op,r:r}].concat(res);
+      }
+    }
+  }
+  return null;
+}
+function newRound(){
+  var nums=null,t=0;
+  while(t<400){
+    t++;
+    var cand=[rnd(1,10),rnd(1,10),rnd(1,10),rnd(1,10)];
+    if(solve(cand)!==null){nums=cand;break;}
+  }
+  if(nums===null)nums=[4,6,6,8];
+  tiles=[];
+  var i;
+  for(i=0;i<4;i++)tiles.push({v:nums[i],lab:String(nums[i])});
+  history=[];
+  sel1=-1;selOp="";
+  timeLeft=ROUND_MS;
+  setMsg("第 "+round+" 局:把这四个数凑成 24","");
+  render();
+}
+function render(){
+  elTiles.innerHTML="";
+  var i;
+  for(i=0;i<tiles.length;i++){
+    var b=document.createElement("button");
+    b.textContent=tiles[i].lab;
+    if(i===sel1)b.className="sel";
+    (function(ix){
+      b.addEventListener("click",function(){tileTap(ix);});
+    })(i);
+    elTiles.appendChild(b);
+  }
+  var ops=document.querySelectorAll(".oprow button");
+  for(i=0;i<ops.length;i++)ops[i].className=ops[i].getAttribute("data-op")===selOp?"selop":"";
+}
+function tileTap(ix){
+  if(state!=="playing")return;
+  if(sel1<0||selOp===""){
+    sel1=ix;selOp="";
+    setMsg("已选 "+tiles[ix].lab+" · 再选一个运算符","");
+    render();
+    return;
+  }
+  if(ix===sel1){sel1=-1;render();return;}
+  var r=combine(tiles[sel1].v,tiles[ix].v,selOp);
+  if(isNaN(r)){
+    setMsg("这样除不尽,换一个运算符试试","badc");
+    selOp="";
+    render();
+    return;
+  }
+  history.push(JSON.stringify(tiles));
+  var lab="("+tiles[sel1].lab+selOp+tiles[ix].lab+")";
+  var nt=[{v:r,lab:lab}];
+  var k;
+  for(k=0;k<tiles.length;k++)if(k!==sel1&&k!==ix)nt.push(tiles[k]);
+  tiles=nt;
+  sel1=-1;selOp="";
+  if(tiles.length===1){
+    if(tiles[0].v===24){roundWin();return;}
+    setMsg("得到 "+tiles[0].v+",不是 24,自动还原","badc");
+    var snap=history.pop();
+    setTimeout(function(){
+      if(state==="playing"){tiles=JSON.parse(snap);render();}
+    },600);
+  }
+  render();
+}
+function opTap(op){
+  if(state!=="playing")return;
+  if(sel1<0){setMsg("先点一个数字","badc");return;}
+  selOp=op;
+  setMsg("选择第二个数进行 "+op,"");
+  render();
+}
+function undo(){
+  if(state!=="playing"||!history.length)return;
+  tiles=JSON.parse(history.pop());
+  sel1=-1;selOp="";
+  render();
+}
+function hint(){
+  if(state!=="playing")return;
+  var vals=[],i;
+  for(i=0;i<tiles.length;i++)vals.push(tiles[i].v);
+  var sol=solve(vals);
+  score=Math.max(0,score-20);
+  elScore.textContent=score;
+  if(!sol){setMsg("提示:当前局面无解,先撤销几步","badc");return;}
+  setMsg("提示:把 "+sol[0].a+" 和 "+sol[0].b+" 合成 "+sol[0].r+"("+sol[0].op+")","");
+}
+function roundWin(){
+  state="between";
+  var bonus=Math.ceil(timeLeft/1000);
+  score+=100+bonus;
+  solvedNo++;
+  updHud();
+  setMsg("成功凑出 24!+100 · 时间奖励 +"+bonus,"good");
+  round++;
+  if(round>5)setTimeout(gameOver,1300);
+  else setTimeout(function(){if(state==="between"){newRound();state="playing";updHud();}},1300);
+}
+function roundTimeout(){
+  setMsg("时间到!本局作废,下一局继续加油","badc");
+  state="between";
+  round++;
+  if(round>5)setTimeout(gameOver,1300);
+  else setTimeout(function(){if(state==="between"){newRound();state="playing";updHud();}},1300);
+}
+function gameOver(){
+  state="over";
+  ovT.textContent="挑战结束";
+  ovD.textContent="五局之中你成功凑出 24 点 "+solvedNo+" 次。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function updHud(){
+  elNo.textContent=Math.min(round,5);
+  elSolved.textContent=solvedNo;
+  elScore.textContent=score;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function startGame(){
+  state="playing";round=1;score=0;solvedNo=0;lastT=0;
+  ovS.style.display="none";
+  updHud();
+  newRound();
+  ov.classList.add("hide");
+}
+document.querySelectorAll(".oprow button").forEach(function(b){
+  b.addEventListener("click",function(){opTap(b.getAttribute("data-op"));});
+});
+$("btnUndo").addEventListener("click",undo);
+$("btnHint").addEventListener("click",hint);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&state!=="between"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+  }
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;roundTimeout();}
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elTbar.style.width=(timeLeft/ROUND_MS*100)+"%";
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

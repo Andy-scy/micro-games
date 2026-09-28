@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黄金翻煎饼</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffb84d;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#ffb84d;font-size:16px}
+.stage{position:relative;background:#221a10;border:2px solid #3a2c1a;border-radius:12px;padding:14px;text-align:center}
+.sideTag{color:#c7cbe8;font-size:14px;margin-bottom:8px}
+.pan{width:180px;height:180px;margin:0 auto 12px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3d3225,#241c12);border:6px solid #0c0c0c;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s}
+.pan.flip{transform:rotateY(88deg)}
+.cake{width:116px;height:116px;border-radius:50%;background:#f0d9a8;box-shadow:inset 0 6px 14px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:30px}
+.meter{position:relative;height:26px;border-radius:13px;overflow:hidden;background:#111527;margin:0 4px 6px}
+.meter .zone{position:absolute;top:0;bottom:0}
+.needle{position:absolute;top:-4px;bottom:-4px;width:4px;background:#fff;border-radius:2px;box-shadow:0 0 8px #fff}
+.mlabels{display:flex;justify-content:space-between;font-size:12px;color:#8b90b0;margin:0 4px 12px}
+.acts{display:flex;gap:10px;justify-content:center}
+.acts button{background:#ffb84d;color:#3a2408;border:none;border-radius:10px;padding:11px 28px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.acts button:active{transform:scale(.96)}
+.msg{height:22px;color:#fbbf24;font-size:15px;font-weight:700;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ffb84d}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#ffb84d;color:#3a2408;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>黄金翻煎饼</h1>
+  <p class="hint">盯住熟度计,指针进入<b style="color:#ffd23f">金黄区(55~85)</b>时按 空格 / 点击煎锅翻面<br>两面都翻准即出锅,翻太早夹生,满格直接烤糊扣命!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="sideTag" id="sideTag">第 1 面</div>
+    <div class="pan" id="pan"><div class="cake" id="cake">🥞</div></div>
+    <div class="meter">
+      <div class="zone" style="left:0;width:55%;background:#7a5230"></div>
+      <div class="zone" style="left:55%;width:30%;background:#ffd23f"></div>
+      <div class="zone" style="left:85%;width:15%;background:#4a2c14"></div>
+      <div class="needle" id="needle" style="left:0"></div>
+    </div>
+    <div class="mlabels"><span>夹生</span><span>金黄 55~85</span><span>焦糊</span></div>
+    <div class="acts"><button id="btnFlip">翻 面(空格)</button></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">黄金翻煎饼</h2>
+      <p id="ovDesc">熟度计越走越快,在金黄区间(55~85)按下翻面;两面完美可叠连击奖励。熟度满格自动烤糊,糊 3 张就出局!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var pan=$("pan"),cake=$("cake"),needle=$("needle"),sideTag=$("sideTag"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo"),btnFlip=$("btnFlip");
+var best=loadBest("mg_s801");
+var state="menu",side,done,rate,quals,score,combo,lives,pancakes,lastT,msgT,cakeGone;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function newPancake(){
+  pancakes++;
+  rate=Math.min(64,26+pancakes*2.2);
+  side=0;done=0;quals=[null,null];cakeGone=false;
+  cake.style.opacity="1";
+}
+function reset(){
+  score=0;combo=0;lives=3;pancakes=0;msg.textContent="";msgT=0;
+  newPancake();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function evalSide(d){
+  if(d>=55&&d<=85)return 100;
+  if(d>=40)return 45;
+  return 10;
+}
+function cakeLook(){
+  var l=Math.max(16,76-done*0.55);
+  cake.style.background="hsl(33,62%,"+l+"%)";
+}
+function showMsg(t,c){
+  msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;
+}
+function doFlip(){
+  if(state!=="playing"||cakeGone)return;
+  pan.classList.add("flip");
+  setTimeout(function(){pan.classList.remove("flip");},130);
+  if(done>=100){burn();return;}
+  var q=evalSide(done);
+  quals[side]=q;
+  if(q===100)showMsg("完美翻面!");
+  else if(q===45)showMsg("火候差了一点…","#e8b06a");
+  else showMsg("太夹生啦!","#e8b06a");
+  if(side===0){
+    side=1;done=0;
+  }
+  else{
+    var avg=(quals[0]+quals[1])/2;
+    var pts=Math.round(avg);
+    if(avg>=95){combo++;pts+=50*combo;showMsg("两面金黄!连击 x"+combo,"#4ade80");}
+    else{combo=0;showMsg("出锅 +"+pts,"#e8eaf6");}
+    score+=pts;updateHud();
+    newPancake();
+  }
+  cakeLook();
+}
+function burn(){
+  cakeGone=true;lives--;combo=0;
+  cake.style.background="#241a10";cake.style.opacity=".85";
+  showMsg("煎饼烤糊了!","#f87171");
+  updateHud();
+  if(lives<=0){gameOver("有三张煎饼被烤糊,老板请你出局!");return;}
+  setTimeout(function(){if(state==="playing"){newPancake();cakeLook();}},700);
+}
+function gameOver(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s801",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=reason;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(msgT>0){msgT-=dt/1000;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  if(!cakeGone){
+    done+=rate*dt/1000;
+    if(done>100)done=100;
+    var base="第 "+(side+1)+" 面";
+    if(done>=92)sideTag.textContent=base+" · 快焦了!";
+    else if(done>=55&&done<=85)sideTag.textContent=base+" · 金黄中";
+    else sideTag.textContent=base;
+    needle.style.left="calc("+done+"% - 2px)";
+    cakeLook();
+    if(done>=100)burn();
+  }
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else doFlip();
+  }
+});
+pan.addEventListener("click",doFlip);
+btnFlip.addEventListener("click",doFlip);
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

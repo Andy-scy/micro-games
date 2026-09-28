@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一命马拉松</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f97316;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f97316;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f97316}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f97316;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>一命马拉松</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 拍翅膀 · 只有一条命,比拼飞行距离!</p>
+  <div class="hud">
+    <span>距离 <b id="dist">0m</b></span>
+    <span>检查点 <b id="ck">0</b></span>
+    <span>最远 <b id="best">0m</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">一命马拉松</h2>
+      <p id="ovDesc">没有金币,没有护盾,只有一条命和漫长的航线:得分就是飞行距离(米)!管道与浮石轮番上阵;每 400 米抵达一个检查点,先享受一段 2.4 秒的无障碍休息区,然后世界再提速一档。看你能跑多远!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">起跑!</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=68,GRAV=1480,FLAP=-378,BX=120,BR=13;
+function $(id){return document.getElementById(id);}
+var elDist=$("dist"),elBest=$("best"),elCk=$("ck"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,obs,popups,markers,tick,dist,speed,ck,nextCk,restT,obCount,shownDist,bestDist=0;
+function newOb(x){
+  obCount++;
+  if(obCount%2===1){
+    return{type:"pipe",x:x,gy:64+Math.random()*(GROUND-128-152),gap:152,passed:false};
+  }
+  return{type:"rocks",x:x,y1:110+Math.random()*(GROUND-260),y2:110+Math.random()*(GROUND-260),r1:19+Math.random()*8,r2:19+Math.random()*8,passed:false};
+}
+function reset(){
+  bird={y:280,vy:0,fl:0};
+  obs=[newOb(W+170)];
+  popups=[];markers=[];
+  tick=0;dist=0;speed=130;ck=0;nextCk=400;restT=1.2;obCount=0;shownDist=-1;
+  elDist.textContent="0m";
+  elCk.textContent="0";
+}
+function die(msg){
+  state="over";
+  var m=Math.floor(dist);
+  if(m>bestDist){bestDist=m;elBest.textContent=m+"m";}
+  ovTitle.textContent="马拉松结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="跑出 "+m+"m · 检查点 "+ck+" · 最远 "+bestDist+"m";
+  btnGo.textContent="再跑一次";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,o;
+  tick+=dt;
+  dist+=speed*dt/9;
+  var di=Math.floor(dist);
+  if(di!==shownDist){shownDist=di;elDist.textContent=di+"m";}
+  if(restT>0)restT-=dt;
+  else if(dist>=nextCk){
+    ck++;
+    nextCk+=400;
+    speed=Math.min(240,speed+7);
+    restT=2.4;
+    elCk.textContent=String(ck);
+    popups.push({x:W/2,y:150,txt:"检查点 "+ck+"!休息一下…",life:1.6});
+  }
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("长跑失足,坠地了!");return;}
+  if(restT<=0){
+    var lastGap=obs[obs.length-1].type==="pipe"?248:212;
+    if(obs[obs.length-1].x<W-lastGap)obs.push(newOb(W+24));
+  }
+  if(obs[0].x<-100)obs.shift();
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    o.x-=speed*dt;
+    if(o.type==="pipe"){
+      if(!o.passed&&o.x+PW<BX-BR){
+        o.passed=true;
+        popups.push({x:BX+34,y:bird.y-26,txt:"加油!",life:0.7});
+      }
+      if(circleRect(BX,bird.y,BR,o.x,0,PW,o.gy)||circleRect(BX,bird.y,BR,o.x,o.gy+o.gap,PW,GROUND-o.gy-o.gap)){
+        die("撞上了管道!");return;
+      }
+    }else{
+      if(!o.passed&&o.x+50<BX-BR){o.passed=true;}
+      var dx1=BX-o.x,dy1=bird.y-o.y1,rr1=BR+o.r1;
+      var dx2=BX-(o.x+46),dy2=bird.y-o.y2,rr2=BR+o.r2;
+      if(dx1*dx1+dy1*dy1<rr1*rr1||dx2*dx2+dy2*dy2<rr2*rr2){
+        die("一头撞上了浮石!");return;
+      }
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function draw(){
+  var i,m;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#1a1108";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,214,170,0.3)";
+  for(i=0;i<35;i++)ctx.fillRect((i*151)%W,(i*233)%GROUND,1.3,1.3);
+  var ppm=9;
+  for(m=Math.max(1,Math.ceil((dist-W/ppm)/100));m<=Math.floor((dist+W/20/ppm)/100)+1;m++){
+    var mx=W-(m*100-dist)*ppm;
+    if(mx<-50||mx>W+50)continue;
+    ctx.strokeStyle="rgba(249,115,22,0.4)";
+    ctx.lineWidth=2;
+    ctx.setLineDash([4,7]);
+    ctx.beginPath();ctx.moveTo(mx,0);ctx.lineTo(mx,GROUND);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(253,186,116,0.8)";
+    ctx.font="bold 12px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(m*100+"m",mx,26);
+  }
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    if(o.type==="pipe"){
+      ctx.fillStyle="#9a3412";
+      ctx.fillRect(o.x,0,PW,o.gy);
+      ctx.fillRect(o.x,o.gy+o.gap,PW,GROUND-o.gy-o.gap);
+      ctx.fillStyle="#fdba74";
+      ctx.fillRect(o.x+6,0,7,o.gy);
+      ctx.fillRect(o.x+6,o.gy+o.gap,7,GROUND-o.gy-o.gap);
+      ctx.fillStyle="#7c2d12";
+      ctx.fillRect(o.x-4,o.gy-13,PW+8,13);
+      ctx.fillRect(o.x-4,o.gy+o.gap,PW+8,13);
+    }else{
+      ctx.fillStyle="#78716c";
+      ctx.beginPath();ctx.arc(o.x,o.y1,o.r1,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#a8a29e";
+      ctx.beginPath();ctx.arc(o.x-o.r1*0.3,o.y1-o.r1*0.3,o.r1*0.5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#57534e";
+      ctx.beginPath();ctx.arc(o.x+46,o.y2,o.r2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#78716c";
+      ctx.beginPath();ctx.arc(o.x+46-o.r2*0.3,o.y2-o.r2*0.3,o.r2*0.5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  if(restT>0){
+    ctx.fillStyle="rgba(74,222,128,"+Math.min(0.14,restT*0.06)+")";
+    ctx.fillRect(0,0,W,GROUND);
+  }
+  ctx.fillStyle="#332211";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#4d3319";
+  var off=(tick*speed)%24;
+  for(i=-1;i<W/24+1;i++)ctx.fillRect(i*24-off,GROUND,12,6);
+  ctx.fillStyle="#fed7aa";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#ea580c";
+  ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a1108";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f97316";
+  ctx.beginPath();ctx.moveTo(BX+BR-2,bird.y);ctx.lineTo(BX+BR+8,bird.y+2);ctx.lineTo(BX+BR-2,bird.y+6);ctx.closePath();ctx.fill();
+  var wy=bird.y+Math.sin(tick*20)*3;
+  ctx.strokeStyle="rgba(254,215,170,0.7)";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(BX-6,wy);ctx.lineTo(BX-14,wy+Math.sin(tick*26)*4);ctx.stroke();
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(253,186,116,"+Math.min(1,popups[i].life)+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+  if(restT>0){
+    ctx.font="bold 20px system-ui";
+    ctx.fillStyle="rgba(134,239,172,0.9)";
+    ctx.fillText("休息区",W/2,110);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

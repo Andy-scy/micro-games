@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>百步穿杨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>百步穿杨</h1>
+  <p class="hint">↑↓ 调角度 · 按住空格蓄力松开发射 · 也可在画面拖拽瞄准 · 10 发内冲击 300 分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>炮弹 <b id="ammo">10</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">百步穿杨</h2>
+      <p id="ovDesc">经典抛物线打靶:调整角度与力度,让炮弹划出完美弧线命中靶心。
+靶环由外到内为 30 / 60 / 100 分,命中后新靶立刻出现。
+10 发炮弹内拿到 300 分即可成为神射手!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,GY=322,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elAmmo=$("ammo"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12;
+var best=loadBest("mg_s461");
+var state="menu",ang=45,pow=55,charging=false,cd=1;
+var ball=null,trail=[],ammo=10,score=0,targets=[],parts=[],settle=0;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function newTarget(){var st=[0,48,96];return{x:rnd(200,452),stand:st[(Math.random()*3)|0],dead:false,fl:0};}
+function tcy(t){return GY-t.stand-26;}
+function reset(){
+  score=0;ammo=10;ball=null;trail=[];parts=[];settle=0;
+  targets=[];for(var i=0;i<3;i++)targets.push(newTarget());
+  ang=45;pow=55;charging=false;hud();
+}
+function hud(){elScore.textContent=score;elAmmo.textContent=ammo;elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball&&ammo>0;}
+function fire(){
+  if(!canFire())return;
+  ammo--;charging=false;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2,2),vy:rnd(-3,0.5),l:rnd(18,38),c:col});
+}
+function tick(){
+  var i,t;
+  if(charging&&canFire()){pow+=cd*1.9;if(pow>=100){pow=100;cd=-1;}if(pow<=18){pow=18;cd=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.l--;if(p.l<=0)parts.splice(i,1);}
+  for(i=0;i<targets.length;i++)if(targets[i].fl>0)targets[i].fl--;
+  if(ball){
+    for(var s=0;s<2;s++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      for(i=0;i<targets.length;i++){
+        t=targets[i];
+        if(t.dead)continue;
+        var d=Math.hypot(ball.x-t.x,ball.y-tcy(t));
+        if(d<27){
+          var pts=d<9?100:(d<17?60:30);
+          score+=pts;t.dead=true;t.fl=20;
+          boom(t.x,tcy(t),pts===100?"#fbbf24":"#f87171",14);
+          ball=null;break;
+        }
+      }
+      if(!ball)break;
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+      if(ball.y>=GY-3){boom(ball.x,GY-4,"#8b93c8",8);ball=null;break;}
+      if(ball.x>W+40||ball.x<-40||ball.t>600){ball=null;break;}
+    }
+    if(!ball){for(i=0;i<targets.length;i++)if(targets[i].dead)targets[i]=newTarget();hud();}
+  }
+  if(state==="playing"&&ammo<=0&&!ball){settle++;if(settle>40)finish();}
+}
+function finish(){
+  state="over";
+  var win=score>=300;
+  if(score>best){best=score;saveBest("mg_s461",best);}
+  ovTitle.textContent=win?"神射手!":"游戏结束";
+  ovDesc.textContent=win?("10 发炮弹拿下 "+score+" 分,百步穿杨名不虚传!"):"最终得分 "+score+" 分,离神射手还差一点,再来一次!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  hud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function ring(x,y,r,col){ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();}
+function drawCannon(){
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.fillStyle="#565f96";rr(20,-6,8,12,3);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  if(charging){
+    ctx.fillStyle="#20263f";rr(CX-40,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#4ade80";
+    var bh=80*(pow-18)/82;
+    rr(CX-40,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+  ctx.fillStyle="#8b90b0";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("角度 "+Math.round(ang)+"° 力度 "+Math.round(pow),20,GY+18);
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.35)";
+  for(var i=0;i<80;i++){
+    vy+=G;x+=vx;y+=vy;
+    if(y>GY)break;
+    if(i%3===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i,t;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  for(i=0;i<targets.length;i++){
+    t=targets[i];var cy=tcy(t);
+    if(t.stand>0){ctx.strokeStyle="#3a4270";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(t.x,GY);ctx.lineTo(t.x,cy+24);ctx.stroke();}
+    ctx.globalAlpha=t.dead?0.25:1;
+    if(t.fl>0){ctx.fillStyle="rgba(251,191,36,"+(t.fl/40)+")";ctx.beginPath();ctx.arc(t.x,cy,30,0,Math.PI*2);ctx.fill();}
+    ring(t.x,cy,26,"#e8eaf6");ring(t.x,cy,17,"#f87171");ring(t.x,cy,8,"#fbbf24");
+    ctx.globalAlpha=1;
+  }
+  if(canFire())preview();
+  drawCannon();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=18;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-CX,dy=PIV-p.y;
+  if(dy<6||dx<2)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,dx)*180/Math.PI));
+  pow=Math.max(18,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

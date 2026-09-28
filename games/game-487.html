@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>西部快枪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffca28;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffca28;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffca28}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffca28;color:#3d3000;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>西部快枪</h1>
+  <p class="hint">信号出现前千万别点!看到「拔枪!」立刻点击 · 五回合决胜负</p>
+  <div class="hud">
+    <span>回合 <b id="rd">1</b>/5</span>
+    <span>生命 <b id="hv">♥♥♥</b></span>
+    <span>赏金 <b id="sc">0</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">西部快枪</h2>
+      <p id="ovD">正午的荒野镇,一切静得可怕。双方都在等信号——「拔枪!」亮出的那一瞬,看谁的手更快。抢跑会被对手直接击中;赢下对决按出手速度给赏金。输一回合掉一条命,三条命打光就倒下。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">走进决斗场</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elRd=$("rd"),elHv=$("hv"),elSc=$("sc"),elMsg=$("msg");
+const GOAL=60;
+let state="menu",round=1,hearts=3,score=0,tp=0;
+let phase="intro",phaseT=0,signalDur=2,banditMs=400,reactMs=0,verdict="";
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function startRound(){
+  phase="intro";phaseT=0;
+  banditMs=460-round*30+Math.random()*90;
+  elRd.textContent=round;
+  elMsg.textContent="第 "+round+" 回合,准备…";
+}
+function pull(){
+  if(state!=="play")return;
+  if(phase==="wait"){
+    verdict="抢跑";
+    hearts--;updateHud();
+    elMsg.textContent="太心急了!对手先开枪了";
+    phase="result";phaseT=0;
+  }else if(phase==="draw"){
+    reactMs=phaseT*1000;
+    if(reactMs<banditMs){
+      verdict="快";
+      const gain=20+Math.max(0,Math.floor((500-reactMs)/20));
+      score+=gain;
+      elMsg.textContent="胜!你出手 "+Math.round(reactMs)+" 毫秒,赏金 +"+gain;
+    }else{
+      verdict="慢";
+      hearts--;updateHud();
+      elMsg.textContent="败!你 "+Math.round(reactMs)+" 毫秒,对手 "+Math.round(banditMs)+" 毫秒";
+    }
+    phase="result";phaseT=0;
+  }
+}
+function updateHud(){
+  let h="";
+  for(let i=0;i<hearts;i++)h+="♥";
+  elHv.textContent=h||"—";
+  elSc.textContent=score;
+}
+function startGame(){
+  round=1;hearts=3;score=0;tp=0;
+  updateHud();
+  elMsg.textContent="";
+  state="play";ov.classList.add("hide");
+  startRound();
+}
+function finish(){
+  state="over";
+  const win=hearts>0&&score>=GOAL;
+  ovT.textContent=win?"镇上的传奇枪手":"倒在了黄沙里";
+  ovT.style.color=win?"#ffca28":"#ef9a9a";
+  ovD.textContent=win?"五回合下来,镇上再没人敢跟你比手速。":"快枪手的命只有三条。记住:信号没亮之前,手指不许有任何念头。";
+  ovS.textContent="赏金 "+score+" · 目标 "+GOAL+" · 剩余生命 "+hearts;
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousedown",function(e){e.preventDefault();pull();});
+cv.addEventListener("touchstart",function(e){pull();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    phaseT+=dt;
+    if(phase==="intro"&&phaseT>1.2){phase="wait";phaseT=0;signalDur=1.2+Math.random()*2;elMsg.textContent="稳住…等信号";}
+    else if(phase==="wait"&&phaseT>=signalDur){phase="draw";phaseT=0;elMsg.textContent="";}
+    else if(phase==="draw"&&phaseT*1000>=banditMs+900){
+      verdict="慢";
+      hearts--;updateHud();
+      elMsg.textContent="你迟疑了!对手 "+Math.round(banditMs)+" 毫秒抢先开枪";
+      phase="result";phaseT=0;
+    }
+    else if(phase==="result"&&phaseT>1.9){
+      if(hearts<=0){finish();}
+      else if(round>=5){finish();}
+      else{round++;startRound();}
+    }
+  }
+  draw();
+}
+function figure(x,dir,bodyCol,hatCol,fired){
+  ctx.save();ctx.translate(x,0);ctx.scale(dir,1);
+  ctx.fillStyle=bodyCol;
+  ctx.beginPath();ctx.arc(0,238,13,0,Math.PI*2);ctx.fill();
+  ctx.fillRect(-14,252,28,64);
+  ctx.fillRect(-9,316,8,58);
+  ctx.fillRect(1,316,8,58);
+  ctx.fillStyle=hatCol;
+  ctx.fillRect(-20,226,40,7);
+  ctx.beginPath();ctx.arc(0,226,12,Math.PI,Math.PI*2);ctx.fill();
+  const armA=fired?-0.9:-0.35+Math.sin(tp*3)*0.03;
+  ctx.strokeStyle=bodyCol;ctx.lineWidth=7;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(10,262);
+  ctx.lineTo(10+Math.cos(armA)*30,262+Math.sin(armA)*30);
+  ctx.stroke();
+  ctx.fillStyle="#33261a";
+  ctx.fillRect(10+Math.cos(armA)*30-2,262+Math.sin(armA)*30-2,14,5);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#5b3a56");g.addColorStop(0.5,"#c96f4a");g.addColorStop(1,"#3a2331");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#ffe082";
+  ctx.beginPath();ctx.arc(240,300,42,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(0,0,0,0.28)";ctx.fillRect(0,374,W,H-374);
+  ctx.fillStyle="#4a3350";ctx.fillRect(0,374,W,5);
+  const youFired=phase==="result"&&verdict!=="抢跑"&&verdict==="慢"?true:(phase==="result"&&verdict==="快");
+  const banditFired=phase==="result"&&(verdict==="慢"||verdict==="抢跑");
+  figure(96,1,"#33518f","#22345c",youFired);
+  figure(384,-1,"#6d3030","#4a1f1f",banditFired);
+  ctx.textAlign="center";
+  if(phase==="draw"){
+    ctx.fillStyle="rgba(0,0,0,0.5)";ctx.fillRect(0,60,W,64);
+    ctx.fillStyle="#ffea00";ctx.font="bold 40px system-ui";
+    ctx.fillText("拔 枪 !",240,108);
+  }else if(phase==="intro"){
+    ctx.fillStyle="rgba(0,0,0,0.4)";ctx.fillRect(0,60,W,50);
+    ctx.fillStyle="#ffe0b2";ctx.font="bold 24px system-ui";
+    ctx.fillText("第 "+round+" 回合",240,93);
+  }else if(phase==="wait"){
+    ctx.fillStyle="rgba(0,0,0,0.4)";ctx.fillRect(0,60,W,50);
+    ctx.fillStyle="#c7cbe8";ctx.font="bold 22px system-ui";
+    ctx.fillText("风声……先动手的先倒下",240,93);
+  }else if(phase==="result"){
+    ctx.fillStyle="rgba(0,0,0,0.5)";ctx.fillRect(0,60,W,64);
+    ctx.fillStyle=verdict==="快"?"#a5d6a7":"#ef9a9a";
+    ctx.font="bold 26px system-ui";
+    let s="";
+    if(verdict==="抢跑")s="抢跑被击中!";
+    else if(verdict==="快")s="你更快!"+Math.round(reactMs)+"ms";
+    else s="对手更快:"+Math.round(banditMs)+"ms";
+    ctx.fillText(s,240,102);
+  }
+  if(state==="menu"||state==="over")return;
+  ctx.fillStyle="rgba(255,255,255,0.7)";ctx.font="13px system-ui";
+  ctx.fillText("点击画面开枪",240,545);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

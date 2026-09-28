@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雪坡滑行</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#7dd3fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#7dd3fc;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#7dd3fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#7dd3fc;color:#0a2536;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>雪坡滑行</h1>
+  <p class="hint">空格/↑ 跳跃(速度越快跳越远)· ←/←→ 惯性微调 · 触屏:点按跳,按住左右拖 · 雪包可弹跳加分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>滑速 <b id="spd">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">雪坡滑行</h2>
+      <p id="ovDesc">滑雪少年冲下无尽雪坡:速度越滚越快,冰面上全是惯性,想刹车根本停不下来!撞树撞石头都完蛋,踩到雪包反而能弹飞加分。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSpd=$("spd"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s427");
+var state="menu",dist,score,bonusScore,speed,obs,px,py,vy,vx,grounded,nextGap,phase,moveL,moveR,heldJ,targetX,flakes,bursts;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;bonusScore=0;speed=300;obs=[];px=110;py=GY-40;vy=0;vx=0;grounded=true;
+  nextGap=420;phase=0;moveL=false;moveR=false;heldJ=false;targetX=-1;flakes=[];bursts=[];
+  var i;
+  for(i=0;i<36;i++)flakes.push({x:Math.random()*W,y:Math.random()*H,v:40+Math.random()*70});
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elSpd.textContent=Math.round(speed);}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-(390+speed*0.32);grounded=false;}
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s427",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,o,d;
+  speed=Math.min(720,300+dist*0.03);
+  dist+=speed*s;score=Math.floor(dist/10)+bonusScore;
+  phase+=s*(grounded?speed*0.06:4);
+  if(targetX>=0){
+    var diff=targetX-px;
+    if(diff>4)vx+=500*s;else if(diff<-4)vx-=500*s;
+  }
+  if(moveL)vx-=1150*s;
+  if(moveR)vx+=1150*s;
+  vx*=(1-1.5*s);
+  if(vx>340)vx=340;if(vx<-340)vx=-340;
+  px+=vx*s;
+  if(px<26){px=26;vx=Math.abs(vx)*0.4;}
+  if(px>W-52){px=W-52;vx=-Math.abs(vx)*0.4;}
+  var g=(vy<0&&heldJ)?1150:2100;
+  if(!grounded){
+    vy+=g*s;py+=vy*s;
+    if(py>=GY-40){
+      py=GY-40;vy=0;grounded=true;
+      bursts.push({x:px+8,y:GY-2,life:0.35});
+    }
+  }
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var r=Math.random();
+    if(r<0.38)obs.push({x:W+30,type:"tree",w:22,h:58});
+    else if(r<0.66)obs.push({x:W+30,type:"rock",w:30,h:26});
+    else obs.push({x:W+30,type:"mound",w:38,h:22});
+    nextGap=200+Math.random()*250+speed*0.3;
+  }
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-90){obs.splice(i,1);continue;}
+    if(o.type==="mound"){
+      if(vy>0&&py+40>=GY-o.h&&py+40<=GY-o.h+18&&px+20>o.x&&px+6<o.x+o.w){
+        vy=-(470+speed*0.1);py=GY-o.h-40;grounded=false;
+        bonusScore+=25;bursts.push({x:o.x+19,y:GY-o.h,life:0.5});
+        obs.splice(i,1);continue;
+      }
+    }else{
+      var oy=GY-o.h;
+      if(px+22>o.x+3&&px+6<o.x+o.w-3&&py+38>oy+3){gameOver(o.type==="tree"?"一头撞在雪松上!":"被岩石绊飞了!");return;}
+    }
+  }
+  for(i=flakes.length-1;i>=0;i--){
+    d=flakes[i];d.y+=d.v*s;d.x-=speed*s*0.25+Math.sin(d.y*0.05)*10*s;
+    if(d.y>H){d.y=-4;d.x=Math.random()*W;}
+    if(d.x<-5)d.x=W+4;
+  }
+  for(i=bursts.length-1;i>=0;i--){
+    bursts[i].life-=s;
+    if(bursts[i].life<=0)bursts.splice(i,1);
+  }
+  updateHud();
+}
+function drawObstacle(o){
+  var i;
+  if(o.type==="tree"){
+    ctx.fillStyle="#4a3620";
+    ctx.fillRect(o.x+7,GY-14,8,14);
+    ctx.fillStyle="#1f6b46";
+    for(i=0;i<3;i++){
+      ctx.beginPath();
+      ctx.moveTo(o.x+11,GY-58+i*15);
+      ctx.lineTo(o.x-2+i*2,GY-32+i*13);
+      ctx.lineTo(o.x+24-i*2,GY-32+i*13);
+      ctx.fill();
+    }
+    ctx.fillStyle="rgba(255,255,255,.75)";
+    ctx.beginPath();ctx.moveTo(o.x+11,GY-58);ctx.lineTo(o.x+5,GY-44);ctx.lineTo(o.x+17,GY-44);ctx.fill();
+  }else if(o.type==="rock"){
+    ctx.fillStyle="#7a879c";
+    ctx.beginPath();
+    ctx.moveTo(o.x,GY);ctx.lineTo(o.x+6,GY-o.h);ctx.lineTo(o.x+20,GY-o.h-3);ctx.lineTo(o.x+o.w,GY-6);ctx.lineTo(o.x+o.w,GY);
+    ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,.7)";
+    ctx.beginPath();ctx.moveTo(o.x+6,GY-o.h);ctx.lineTo(o.x+20,GY-o.h-3);ctx.lineTo(o.x+22,GY-o.h+7);ctx.lineTo(o.x+10,GY-o.h+5);ctx.fill();
+  }else{
+    ctx.fillStyle="#e8f4ff";
+    ctx.beginPath();
+    ctx.moveTo(o.x,GY);ctx.quadraticCurveTo(o.x+o.w/2,GY-o.h*2.1,o.x+o.w,GY);
+    ctx.fill();
+  }
+}
+function draw(){
+  var i,d,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#16233b");grd.addColorStop(1,"#27405c");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,.5)";
+  for(i=0;i<flakes.length;i++){
+    d=flakes[i];
+    ctx.globalAlpha=0.25+0.45*(d.v/110);
+    ctx.beginPath();ctx.arc(d.x,d.y,1.6,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#dceafc";
+  ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,GY+26);
+  ctx.lineTo(W,GY-6);ctx.lineTo(W,H);ctx.fill();
+  ctx.fillStyle="#b9d4f0";
+  ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#7dd3fc";ctx.globalAlpha=0.35;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%90;
+  ctx.fillStyle="rgba(90,130,180,.28)";
+  for(i=0;i<9;i++)ctx.fillRect(i*90-dsh,GY+20,42,4);
+  for(i=0;i<obs.length;i++)drawObstacle(obs[i]);
+  for(i=0;i<bursts.length;i++){
+    d=bursts[i];
+    ctx.fillStyle="rgba(255,255,255,"+(d.life*2)+")";
+    ctx.beginPath();ctx.arc(d.x,d.y,6+(0.5-d.life)*30,0,Math.PI*2);ctx.fill();
+  }
+  var lean=Math.max(-0.35,Math.min(0.35,vx*0.0011));
+  ctx.save();
+  ctx.translate(px,py);
+  ctx.rotate(lean);
+  ctx.strokeStyle="#f59e0b";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(-2,40);ctx.lineTo(24,40);ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.fillStyle="#e2593b";
+  rr(2,16,20,22,6);ctx.fill();
+  rr(9,2,17,16,5);ctx.fill();
+  ctx.fillStyle="#2a1a10";
+  ctx.fillRect(18,7,3,4);
+  ctx.strokeStyle="#fbbf24";ctx.lineWidth=2.4;
+  ctx.beginPath();ctx.moveTo(6,18);ctx.lineTo(20,14);ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.restore();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowLeft"||k==="ArrowRight")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W"){heldJ=true;if(!e.repeat)doJump();}
+  if(k==="ArrowLeft"||k==="a"||k==="A")moveL=true;
+  if(k==="ArrowRight"||k==="d"||k==="D")moveR=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W")heldJ=false;
+  if(k==="ArrowLeft"||k==="a"||k==="A")moveL=false;
+  if(k==="ArrowRight"||k==="d"||k==="D")moveR=false;
+});
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();heldJ=true;doJump();
+  var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+  targetX=(t.clientX-rect.left)/rect.width*W-18;
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+  targetX=(t.clientX-rect.left)/rect.width*W-18;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();heldJ=false;targetX=-1;},{passive:false});
+cv.addEventListener("mousedown",function(){heldJ=true;doJump();});
+document.addEventListener("mouseup",function(){heldJ=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

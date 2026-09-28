@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手电巡逻</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a3e635;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a3e635;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#05070d;border-radius:10px;touch-action:none;cursor:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#a3e635}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#a3e635;color:#1a2605;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>手电巡逻</h1>
+  <p class="hint">移动鼠标/手指照向哪里 · 光圈里才看得见、打得中</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>照到 <b id="lit">0</b></span>
+    <span>时间 <b id="time">60</b> 秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">手电巡逻</h2>
+      <p id="ovDesc">仓库停电了!整片场地漆黑,只有你手里的手电筒:移动鼠标或手指,光圈照到哪里就看到哪里。洞里共 20 个位置,照到并点中冒头地鼠 +10 分,光圈外点不中。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLit=$("lit"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var GAME_LEN=60,LIGHT_R=105;
+var best=loadBest("mg_s212");
+var state="menu",score=0,lit=0,timeLeft=GAME_LEN,spawnT=350;
+var holes=[],moles=[],floats=[],rings=[];
+var light={x:W/2,y:H/2};
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initHoles(){
+  holes=[];
+  var xs=[60,150,240,330,420],ys=[125,210,295,380],r,c;
+  for(r=0;r<4;r++)for(c=0;c<5;c++)holes.push({x:xs[c],y:ys[r]});
+}
+initHoles();
+
+function freeHole(){
+  var used={},i,cand=[];
+  for(i=0;i<moles.length;i++)used[moles[i].hole]=1;
+  for(i=0;i<holes.length;i++)if(!used[i])cand.push(i);
+  if(!cand.length)return -1;
+  return cand[(Math.random()*cand.length)|0];
+}
+function spawnMole(){
+  var h=freeHole();
+  if(h<0)return;
+  moles.push({hole:h,state:"rise",frac:0,t:0,upMs:1050+Math.random()*350});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function reset(){
+  moles=[];floats=[];rings=[];
+  score=0;lit=0;timeLeft=GAME_LEN;spawnT=350;
+  light.x=W/2;light.y=H/2;
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s212",best);}
+  ovTitle.textContent="时间到!";
+  ovDesc.textContent="你在黑暗里照到并敲中 "+lit+" 只地鼠";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLit.textContent=lit;
+  elTime.textContent=Math.ceil(timeLeft);
+  elBest.textContent=best;
+}
+
+function update(dt){
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;endGame();return;}
+  spawnT-=dt;
+  var prog=1-timeLeft/GAME_LEN;
+  if(spawnT<=0){
+    var gap=Math.max(340,560-prog*220);
+    spawnT=gap*(0.8+Math.random()*0.4);
+    spawnMole();
+    if(prog>0.5&&Math.random()<0.4)spawnMole();
+  }
+  var i,m;
+  for(i=moles.length-1;i>=0;i--){
+    m=moles[i];m.t+=dt;
+    if(m.state==="rise"){
+      m.frac=Math.min(1,m.t/130);
+      if(m.frac>=1){m.state="up";m.t=0;}
+    }else if(m.state==="up"){
+      if(m.t>=m.upMs){m.state="down";m.t=0;}
+    }else if(m.state==="down"){
+      m.frac=1-Math.min(1,m.t/150);
+      if(m.frac<=0)moles.splice(i,1);
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>800)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>300)rings.splice(i,1);}
+}
+
+function whack(p){
+  if(state!=="playing")return;
+  light.x=p.x;light.y=p.y;
+  var i,m;
+  for(i=0;i<moles.length;i++){
+    m=moles[i];
+    if(m.state!=="down"&&m.frac>0.3){
+      var hx=holes[m.hole].x,hy=holes[m.hole].y-30*m.frac;
+      var dx=p.x-hx,dy=p.y-hy;
+      var inLight=(hx-light.x)*(hx-light.x)+(hy-light.y)*(hy-light.y)<=LIGHT_R*LIGHT_R;
+      if(inLight&&dx*dx+dy*dy<52*52){
+        moles.splice(i,1);
+        score+=10;lit++;
+        addFloat(hx,hy-42,"+10","#a3e635");
+        addRing(hx,hy,44,"rgba(163,230,53,0.85)");
+        updateHud();
+        return;
+      }
+    }
+  }
+  addRing(p.x,p.y,22,"rgba(139,144,176,0.5)");
+}
+function moveLight(p){
+  light.x=p.x;light.y=p.y;
+}
+
+function drawMoleAt(h,frac){
+  var bh=62,base=h.y+8,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-54,h.y-140,108,150);ctx.clip();
+  ctx.fillStyle="#a5682a";
+  ctx.beginPath();ctx.ellipse(h.x,cy,26,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a1408";
+  ctx.beginPath();ctx.arc(h.x-8,cy-6,3,0,Math.PI*2);ctx.arc(h.x+8,cy-6,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+3,4.4,3.2,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function drawHoleBack(h){
+  ctx.fillStyle="#02040a";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,36,14,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#22303c";ctx.lineWidth=3;ctx.stroke();
+}
+function drawHoleFront(h){
+  ctx.fillStyle="#02040a";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,36,14,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  ctx.fillStyle="#04060c";
+  ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<holes.length;i++)drawHoleBack(holes[i]);
+  for(i=0;i<moles.length;i++){
+    var m=moles[i];
+    if(m.frac>0.02)drawMoleAt(holes[m.hole],m.frac);
+  }
+  for(i=0;i<holes.length;i++)drawHoleFront(holes[i]);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0,0,W,H);
+  ctx.arc(light.x,light.y,LIGHT_R,0,Math.PI*2,true);
+  ctx.fillStyle="rgba(2,3,9,0.9)";
+  ctx.fill();
+  ctx.restore();
+  var lg=ctx.createRadialGradient(light.x,light.y,LIGHT_R*0.55,light.x,light.y,LIGHT_R);
+  lg.addColorStop(0,"rgba(255,244,180,0)");
+  lg.addColorStop(1,"rgba(255,244,180,0.22)");
+  ctx.fillStyle=lg;
+  ctx.beginPath();ctx.arc(light.x,light.y,LIGHT_R,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="rgba(255,244,180,0.75)";
+  ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(light.x,light.y,LIGHT_R,0,Math.PI*2);ctx.stroke();
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/300;
+    ctx.strokeStyle=r.c;ctx.lineWidth=3*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.4+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/800;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 18px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-32*fk);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="rgba(0,0,0,0.55)";ctx.fillRect(0,0,W,26);
+  ctx.fillStyle="#a3e635";ctx.fillRect(0,0,W*timeLeft/GAME_LEN,26);
+  ctx.font="bold 14px sans-serif";ctx.textAlign="left";
+  ctx.fillStyle="#d7f8b0";
+  ctx.fillText("剩余 "+Math.ceil(timeLeft)+" 秒 · 光圈外点不中",10,14);
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousemove",function(e){moveLight(ptFromEvent(e));});
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveLight(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

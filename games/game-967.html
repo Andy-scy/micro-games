@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>孪生迷宫</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>孪生迷宫</h1>
+<div id="tip">双胞胎迷宫,谁能先撞线?玩家1:WASD 移动 · 玩家2:方向键移动 · 两座迷宫完全镜像同构,绝对公平 · 每回合重新生成迷宫,先胜 2 回合者夺冠</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">孪生迷宫</div><div id="ovS">左右两座迷宫互为镜像,路线长度完全一致<br>玩家1:WASD 移动,从左上走到右下「终」点<br>玩家2:方向键移动,从右上走到左下「终」点<br>先到者赢下回合,先胜 2 回合者夺冠</div><button id="ovB">开始竞速</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var COLS=13,ROWS=9,CS=24,MH=216;
+var keys={},st;
+function genMaze(){
+ var cells=[],j,i;
+ for(j=0;j<ROWS;j++){cells.push([]);for(i=0;i<COLS;i++)cells[j].push({t:true,r:true,b:true,l:true,v:false});}
+ var stack=[[0,0]];
+ cells[0][0].v=true;
+ var WALL=[["t","b"],["r","l"],["b","t"],["l","r"]];
+ while(stack.length){
+  var cur=stack[stack.length-1],x=cur[0],y=cur[1],ns=[];
+  if(y>0&&!cells[y-1][x].v)ns.push([0,x,y-1]);
+  if(x<COLS-1&&!cells[y][x+1].v)ns.push([1,x+1,y]);
+  if(y<ROWS-1&&!cells[y+1][x].v)ns.push([2,x,y+1]);
+  if(x>0&&!cells[y][x-1].v)ns.push([3,x-1,y]);
+  if(ns.length===0){stack.pop();continue;}
+  var c=ns[Math.floor(Math.random()*ns.length)];
+  cells[y][x][WALL[c[0]][0]]=false;
+  cells[c[2]][c[1]][WALL[c[0]][1]]=false;
+  cells[c[2]][c[1]].v=true;
+  stack.push([c[1],c[2]]);
+ }
+ return cells;
+}
+function mirror(mz){
+ var out=[],j,i;
+ for(j=0;j<ROWS;j++){
+  out.push([]);
+  for(i=0;i<COLS;i++){
+   var c=mz[j][COLS-1-i];
+   out[j].push({t:c.t,b:c.b,l:c.r,r:c.l});
+  }
+ }
+ return out;
+}
+function reset(){
+ var m=genMaze();
+ st={ph:"count",cd:80,score:[0,0],round:1,msg:"",msgT:0,m1:m,m2:mirror(m),
+  p:[{cx:0,cy:0,px:0,py:0,mt:0},{cx:COLS-1,cy:0,px:0,py:0,mt:0}]};
+ st.p[0].px=0;st.p[0].py=0;
+ st.p[1].px=(COLS-1)*CS;st.p[1].py=0;
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function canMove(pi,d){
+ var p=st.p[pi],mz=pi===0?st.m1:st.m2,cell=mz[p.cy][p.cx];
+ if(d===0)return p.cy>0&&!cell.t;
+ if(d===1)return p.cx<COLS-1&&!cell.r;
+ if(d===2)return p.cy<ROWS-1&&!cell.b;
+ return p.cx>0&&!cell.l;
+}
+var DXM=[0,1,0,-1],DYM=[-1,0,1,0];
+function tryMove(pi,d){
+ var p=st.p[pi];
+ if(st.ph!=="play")return;
+ if(!canMove(pi,d))return;
+ p.cx+=DXM[d];p.cy+=DYM[d];
+ var gx=pi===0?COLS-1:0,gy=ROWS-1;
+ if(p.cx===gx&&p.cy===gy){
+  st.score[pi]++;st.ph="rend";st.msgT=100;
+  st.msg=(pi===0?"蓝方":"橙方")+"率先撞线,拿下本回合!";
+ }
+}
+function step(dt){
+ var i,d;
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){
+  for(i=0;i<2;i++){
+   var p=st.p[i];
+   p.mt-=dt;
+   if(p.mt<=0){
+    if(i===0){
+     if(keys["w"]){tryMove(0,0);p.mt=6.5;}
+     else if(keys["s"]){tryMove(0,2);p.mt=6.5;}
+     else if(keys["a"]){tryMove(0,3);p.mt=6.5;}
+     else if(keys["d"]){tryMove(0,1);p.mt=6.5;}
+     else p.mt=0;
+    }else{
+     if(keys["arrowup"]){tryMove(1,0);p.mt=6.5;}
+     else if(keys["arrowdown"]){tryMove(1,2);p.mt=6.5;}
+     else if(keys["arrowleft"]){tryMove(1,3);p.mt=6.5;}
+     else if(keys["arrowright"]){tryMove(1,1);p.mt=6.5;}
+     else p.mt=0;
+    }
+   }
+   var tx=p.cx*CS,ty=p.cy*CS;
+   p.px+=(tx-p.px)*Math.min(1,0.3*dt);
+   p.py+=(ty-p.py)*Math.min(1,0.3*dt);
+  }
+ }else if(st.ph==="rend"){
+  st.msgT-=dt;
+  if(st.msgT<=0){
+   if(st.score[0]>=2||st.score[1]>=2){
+    st.ph="over";
+    show(st.score[0]>=2?"蓝方迷宫称王!":"橙方迷宫称王!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{
+   var s0=st.score[0],s1=st.score[1],r=st.round+1;
+   reset();st.score=[s0,s1];st.round=r;
+  }
+  }
+ }
+}
+function drawMaze(mz,ox,oy){
+ var j,i;
+ ctx.save();ctx.translate(ox,oy);
+ ctx.strokeStyle="#3d4a78";ctx.lineWidth=2;ctx.lineCap="square";
+ for(j=0;j<ROWS;j++)for(i=0;i<COLS;i++){
+  var c=mz[j][i],x=i*CS,y=j*CS;
+  if(c.t){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+CS,y);ctx.stroke();}
+  if(c.l){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+CS);ctx.stroke();}
+  if(i===COLS-1&&c.r){ctx.beginPath();ctx.moveTo(x+CS,y);ctx.lineTo(x+CS,y+CS);ctx.stroke();}
+  if(j===ROWS-1&&c.b){ctx.beginPath();ctx.moveTo(x,y+CS);ctx.lineTo(x+CS,y+CS);ctx.stroke();}
+ }
+ ctx.restore();
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ var i;
+ drawMaze(st.m1,32,128);
+ drawMaze(st.m2,378,128);
+ ctx.font="bold 15px system-ui";ctx.textBaseline="top";ctx.textAlign="center";
+ ctx.fillStyle="#4fd1c5";ctx.fillText("玩家1 · 蓝方",32+COLS*CS/2,100);
+ ctx.fillStyle="#f6ad55";ctx.fillText("橙方 · 玩家2",378+COLS*CS/2,100);
+ ctx.fillStyle="#f6c945";ctx.font="bold 12px system-ui";
+ ctx.fillText("终",(COLS-1)*CS+CS/2+32,ROWS*CS+CS/2+128-6);
+ ctx.fillText("终",CS/2+378,ROWS*CS+CS/2+128-6);
+ var ps=[[32,0],[378,COLS-1]];
+ for(i=0;i<2;i++){
+  var p=st.p[i];
+  var cx=ps[i][0]+p.px+CS/2,cy=128+p.py+CS/2;
+  ctx.beginPath();ctx.arc(cx,cy,8,0,6.2832);
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle="#0f1220";ctx.stroke();
+ }
+ ctx.font="bold 16px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";ctx.fillText("蓝方 "+st.score[0],14,10);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";ctx.fillText(st.score[1]+" 橙方",706,10);
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";ctx.font="bold 14px system-ui";
+ ctx.fillText("第 "+st.round+" 回合 · 先胜 2 回合",360,12);
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 40px system-ui";
+  ctx.fillText("迷宫生成完毕!",360,24);
+  ctx.font="bold 26px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/27)),360,74);
+ }
+ if(st.ph==="rend"){
+  ctx.fillStyle="#ff5c7a";ctx.font="bold 28px system-ui";
+  ctx.fillText(st.msg,360,60);
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ keys[k]=true;
+});
+window.addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

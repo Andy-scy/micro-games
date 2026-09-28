@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双向高速</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>双向高速</h1>
+<p class="tip">8 条车道、双向车流、还有贴地飞行的摩托!中间只有一条狭窄隔离带可以喘息。<br>连续穿越不失误可以累积连击加分,被撞则连击清零。方向键 / WASD 或按钮跳跃。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>连击 <b id="sK">0</b></span></div>
+<canvas id="cv" width="420" height="480"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=12,LOOP=560,OFF=70;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sK=document.getElementById("sK");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var CAR_COLORS=["#e05656","#e8a33d","#3fa66a","#4f8ef7","#b06ee0","#d05fa2","#4bb8c9","#d9d24a"];
+var lanes,frog,score,lives,streak,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function makeLane(r){
+  var side=r<=4?r:r-5;
+  var dir=side%2===0?1:-1;
+  if(Math.random()<0.22)dir=-dir;
+  var moto=(r===2||r===7||r===9);
+  var speed=(moto?rnd(130,175):rnd(88,150))*(1+streak*0.02);
+  var n=moto?5:4,slot=LOOP/n,cars=[],i;
+  var x0=rnd(0,LOOP);
+  for(i=0;i<n;i++)cars.push({x:(x0+i*slot+rnd(-18,18)+LOOP)%LOOP,w:moto?26:rnd(46,78),c:moto?"#f0f0f0":CAR_COLORS[(r+i)%CAR_COLORS.length]});
+  return{r:r,dir:dir,speed:speed,cars:cars,moto:moto};
+}
+function buildLanes(){
+  lanes=[];var r,rows=[1,2,3,4,6,7,8,9];
+  for(r=0;r<rows.length;r++)lanes.push(makeLane(rows[r]));
+}
+function updHud(){sS.textContent=score;sL.textContent=lives;sK.textContent=streak;}
+function resetFrog(){frog={c:5,r:11,x:5.5*CELL,y:11*CELL};moving=false;}
+function reset(){score=0;lives=3;streak=0;deadT=0;buildLanes();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.6;moving=false;streak=0;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+"。");}
+}
+function arrive(){
+  if(frog.r===0){
+    streak++;score+=150+streak*20;
+    buildLanes();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));
+  if(c===frog.c&&r===frog.r)return;
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var i,j,ln;
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j];
+      car.x=(car.x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+      var cx=car.x-OFF,cy=ln.r*CELL;
+      if(Math.abs(cx+car.w/2-frog.x)<car.w/2+10&&frog.y+34>cy+4&&frog.y+8<cy+36){die("被撞飞了!");return;}
+    }
+  }
+  if(moving){
+    mt+=dt/0.1;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }
+}
+function draw(){
+  var r,i,j,ln;
+  for(r=0;r<ROWS;r++){
+    var col=(r===0||r>=10)?"#1e3b26":(r===5?"#23442c":"#20243c");
+    ctx.fillStyle=col;ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  ctx.fillStyle="#3a4452";
+  for(i=0;i<14;i++)ctx.fillRect(6+i*30,5*CELL+16,10,8);
+  ctx.strokeStyle="#454f78";ctx.lineWidth=2;ctx.setLineDash([16,20]);
+  for(i=0;i<lanes.length;i++){ln=lanes[i];ctx.beginPath();ctx.moveTo(0,ln.r*CELL+20);ctx.lineTo(420,ln.r*CELL+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];var cy=ln.r*CELL;
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j],cx=car.x-OFF;
+      if(cx>420||cx+car.w<0)continue;
+      if(ln.moto){
+        ctx.fillStyle=car.c;
+        rr(cx+2,cy+13,car.w-4,14,6);ctx.fill();
+        ctx.fillStyle="#191d33";
+        ctx.beginPath();ctx.arc(cx+10,cy+26,5,0,Math.PI*2);ctx.arc(cx+car.w-10,cy+26,5,0,Math.PI*2);ctx.fill();
+      }else{
+        ctx.fillStyle=car.c;rr(cx+2,cy+6,car.w-4,28,7);ctx.fill();
+        ctx.fillStyle="rgba(20,24,48,.55)";rr(cx+car.w/2-7,cy+11,14,8,3);ctx.fill();
+      }
+      ctx.fillStyle="rgba(255,255,255,.8)";
+      if(ln.dir>0)ctx.fillRect(cx+car.w-6,cy+11,3,6);else ctx.fillRect(cx+3,cy+11,3,6);
+      ctx.fillStyle="rgba(255,90,70,.8)";
+      if(ln.dir>0)ctx.fillRect(cx+3,cy+11,2,6);else ctx.fillRect(cx+car.w-5,cy+11,2,6);
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,160,420,110);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」冲上高速",210,210);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("车流快且密 · 摩托更凶 · 中间隔离带可歇脚",210,240);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("双向高速","8 车道双向高速,车速快、车距小,还有高速摩托车穿插。穿越积累连击分,一次失误连击清零,看看你能连穿多少次。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

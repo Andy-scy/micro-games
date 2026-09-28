@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蹦床叠塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#facc15;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#facc15}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#facc15;color:#3a2c04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蹦床叠塔</h1>
+  <p class="hint">方向键 / 按住屏幕左右半侧控制 · 弹起的瞬间才是变向关键!</p>
+  <div class="hud">
+    <span>高度 <b id="hi">0m</b></span>
+    <span>最佳 <b id="best">0m</b></span>
+    <span>目标 <b>261m 登顶</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">蹦床叠塔</h2>
+      <p id="ovDesc">小球在蹦床塔里自动弹跳。按住左右方向(或屏幕左/右半侧),在触床反弹的瞬间给球横向冲力,一层层向上弹!带尖刺的半边床碰不得,掉出画面即失败,登上塔顶即通关!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=9,GRAV=0.0011,BOUNCE=0.62,NP=30,SPACING=90;
+function $(id){return document.getElementById(id);}
+var elHi=$("hi"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s387");
+var state,plats,ball,camY,maxHi,keyL,keyR,touchDir,squash;
+function reset(){
+  plats=[];
+  var i;
+  for(i=0;i<NP;i++){
+    var p={y:480-i*SPACING,x:i%2===0?60:290,w:130,sp:null,top:false};
+    if(i===NP-1)p.top=true;
+    else if(i>=3&&Math.random()<0.4){
+      var left=Math.random()<0.5;
+      p.sp={x:left?p.x+6:p.x+p.w/2+4,y:p.y-10,w:p.w/2-10,h:10};
+    }
+    plats.push(p);
+  }
+  ball={x:125,y:480-BR,vx:0,vy:-BOUNCE,prevY:480-BR};
+  camY=0;maxHi=0;keyL=false;keyR=false;touchDir=0;squash=0;
+  updateHud();
+}
+function updateHud(){
+  elHi.textContent=maxHi+"m";
+  elBest.textContent=best+"m";
+}
+function height(){return Math.max(0,Math.floor((480-ball.y)/10));}
+function finish(win,extra){
+  state="over";
+  var sc=maxHi+(win?200:0);
+  if(sc>best){best=sc;saveBest("mg_s387",best);}
+  ovT.textContent=win?"登顶成功!":"游戏结束";
+  ovD.textContent=extra;
+  ovS.style.display="block";ovS.textContent="高度 "+maxHi+"m · 总分 "+sc+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){keyL=true;e.preventDefault();}
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){keyR=true;e.preventDefault();}
+  if((e.key===" "||e.key==="Enter")&&state!=="playing"){e.preventDefault();startGame();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function touchDirOf(e){
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  var px=(t.clientX-r.left)*W/r.width;
+  return px<W/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing"){e.preventDefault();return;}
+  touchDir=touchDirOf(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing")return;
+  touchDir=touchDirOf(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchDir=0;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    var dir=(keyL?-1:0)+(keyR?1:0)+touchDir;
+    if(dir>1)dir=1;if(dir<-1)dir=-1;
+    ball.vy+=GRAV*dt;
+    ball.vx+=dir*0.00025*dt;
+    if(ball.vx>0.45)ball.vx=0.45;
+    if(ball.vx<-0.45)ball.vx=-0.45;
+    ball.prevY=ball.y;
+    ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+    if(ball.x<BR+10){ball.x=BR+10;ball.vx=Math.abs(ball.vx)*0.85;}
+    if(ball.x>W-BR-10){ball.x=W-BR-10;ball.vx=-Math.abs(ball.vx)*0.85;}
+    if(squash>0)squash-=dt;
+    var i;
+    for(i=0;i<plats.length;i++){
+      var p=plats[i];
+      if(ball.vy>0&&ball.prevY+BR<=p.y+6&&ball.y+BR>=p.y&&ball.x>p.x-6&&ball.x<p.x+p.w+6){
+        if(p.sp&&ball.x>p.sp.x-4&&ball.x<p.sp.x+p.sp.w+4){finish(false,"弹在了尖刺上!留意红色半边。");break;}
+        ball.y=p.y-BR;ball.vy=-BOUNCE;
+        ball.vx=ball.vx*0.7+dir*0.16;
+        squash=90;
+        if(p.top){finish(true,"你从蹦床塔一跃登顶,弹跳大师!");break;}
+        break;
+      }
+    }
+    if(state==="playing"){
+      var hi=height();
+      if(hi>maxHi){maxHi=hi;updateHud();}
+      var targetCam=ball.y-320;
+      if(targetCam<camY)camY=targetCam;
+      if(ball.y-camY>H+60)finish(false,"小球跌出了画面…下次在反弹瞬间果断变向!");
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#141a30";ctx.fillRect(10,0,4,H);
+  ctx.fillRect(W-14,0,4,H);
+  for(i=0;i<plats.length;i++){
+    var p=plats[i],sy=p.y-camY;
+    if(sy<-60||sy>H+60)continue;
+    ctx.fillStyle="#2e3a63";
+    ctx.fillRect(p.x+8,sy+6,p.w-16,8);
+    ctx.fillStyle=p.top?"#a78bfa":"#4ade80";
+    ctx.beginPath();
+    ctx.moveTo(p.x,sy);
+    ctx.lineTo(p.x+p.w,sy);
+    ctx.lineTo(p.x+p.w-10,sy+7);
+    ctx.lineTo(p.x+10,sy+7);
+    ctx.closePath();ctx.fill();
+    if(p.sp){
+      ctx.fillStyle="#f87171";
+      var j;
+      for(j=0;j<6;j++){
+        var bx2=p.sp.x+j*(p.sp.w/6);
+        ctx.beginPath();
+        ctx.moveTo(bx2,p.y-camY);
+        ctx.lineTo(bx2+p.sp.w/12,p.y-10-camY);
+        ctx.lineTo(bx2+p.sp.w/6,p.y-camY);
+        ctx.closePath();ctx.fill();
+      }
+    }
+    if(p.top){
+      ctx.strokeStyle="#a78bfa";ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(p.x+p.w/2,sy-2);ctx.lineTo(p.x+p.w/2,sy-40);ctx.stroke();
+      ctx.fillStyle="#a78bfa";
+      ctx.beginPath();ctx.moveTo(p.x+p.w/2,sy-40);ctx.lineTo(p.x+p.w/2+26,sy-32);ctx.lineTo(p.x+p.w/2,sy-24);ctx.closePath();ctx.fill();
+    }
+  }
+  var by=ball.y-camY;
+  var sq=squash>0?1+squash/90*0.35:1;
+  ctx.save();
+  ctx.translate(ball.x,by);
+  ctx.scale(2-sq,sq);
+  ctx.fillStyle="#facc15";
+  ctx.shadowColor="#facc15";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(0,0,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.restore();
+  ctx.fillStyle="rgba(139,144,176,0.7)";ctx.font="12px system-ui";
+  ctx.fillText(height()+"m",ball.x+14,by-10);
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

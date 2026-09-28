@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极限穿缝</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>极限穿缝</h1>
+  <p class="tips">重型摩托在车墙间穿缝:整排汽车横在路上,只留窄缝,有的缝还会左右漂!缝越窄,穿越奖励越高。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/1200</div></div>
+    <div class="stat"><div class="mut">极限穿越</div><div class="big" id="sx">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="400" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">极限穿缝</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 微调车头(触屏拖动)<br>· 摩托很窄,汽车墙只留 1~2 条缝<br>· 缝还会<b>左右漂移</b>,提前预判<br>· 穿缝时离车越近奖励越高,擦身=极限 +150<br>· 撞上汽车墙出局;跑完 1200 米胜利</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=560,TOTAL=1200,RL=24,RR=W-24;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var px,speed,dist,bonus,extremes,running,stripe,rowT;
+var rows=[],floats=[];
+var keys={};
+var PY=H-96;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;speed=430;dist=0;bonus=0;extremes=0;stripe=0;rowT=0.7;
+  rows.length=0;floats.length=0;
+  upd();
+}
+function upd(){
+  $i('sc').textContent=Math.floor(dist)+bonus;
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/1200';
+  $i('sx').textContent=extremes;
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function makeRow(){
+  var segs=[],tries=0,ok=false,i,g1,g2,w1,w2;
+  var hard=Math.min(1,dist/900);
+  while(tries<9&&!ok){
+    tries++;segs=[];
+    if(Math.random()<0.38){
+      w1=58+Math.random()*(70-40*hard);
+      w2=58+Math.random()*(70-40*hard);
+      g1=RL+w1/2+50+Math.random()*80;
+      g2=g1+w1/2+w2/2+85+Math.random()*60;
+      if(g2+w2/2+50<RR){
+        segs.push({x0:RL,x1:g1-w1/2});
+        segs.push({x0:g1+w1/2,x1:g2-w2/2});
+        segs.push({x0:g2+w2/2,x1:RR});
+        ok=true;
+      }
+    }else{
+      w1=58+Math.random()*(72-42*hard);
+      g1=RL+w1/2+55+Math.random()*(RR-RL-w1-110);
+      segs.push({x0:RL,x1:g1-w1/2});
+      segs.push({x0:g1+w1/2,x1:RR});
+      ok=true;
+    }
+    if(ok){
+      for(i=0;i<segs.length;i++){
+        if(segs[i].x1-segs[i].x0<34)ok=false;
+      }
+    }
+  }
+  if(!ok){
+    segs=[{x0:RL,x1:W/2-34},{x0:W/2+34,x1:RR}];
+  }
+  var dv=0;
+  if(Math.random()<0.42)dv=(Math.random()<0.5?-1:1)*(26+Math.random()*32);
+  var colors=[];
+  for(i=0;i<segs.length;i++)colors.push(['#4da3ff','#51d88a','#b07cff','#ff9f43'][Math.floor(Math.random()*4)]);
+  rows.push({y:-70,segs:segs,dv:dv,passed:false,colors:colors});
+}
+function clearanceAt(){
+  var i,d=1e9,s;
+  for(i=0;i<rows.length;i++){
+    s=rows[i];
+    d=Math.min(d,Math.abs(px-s.x0),Math.abs(px-s.x1));
+  }
+  return d;
+}
+function update(dt){
+  speed=Math.min(660,430+dist*0.09);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%70;
+  rowT-=dt;
+  if(rowT<=0){makeRow();rowT=Math.max(0.5,1.05-dist*0.0004);}
+  var st=420;
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  px=Math.max(RL+12,Math.min(RR-12,px));
+  var i,j,s;
+  for(i=rows.length-1;i>=0;i--){
+    s=rows[i];
+    s.y+=(speed-40)*dt;
+    if(s.dv!==0){
+      for(j=0;j<s.segs.length;j++){
+        s.segs[j].x0+=s.dv*dt;s.segs[j].x1+=s.dv*dt;
+      }
+      if(s.segs[0].x0<RL-4||s.segs[s.segs.length-1].x1>RR+4)s.dv=0;
+    }
+    if(!s.passed&&s.y>PY+34){
+      s.passed=true;
+      var d=1e9;
+      for(j=0;j<s.segs.length;j++){
+        d=Math.min(d,Math.abs(px-s.segs[j].x0),Math.abs(px-s.segs[j].x1));
+      }
+      var gain;
+      if(d<18){gain=150;extremes++;addFloat('极限 +150',px,PY-40);}
+      else if(d<40){gain=90;addFloat('+90',px,PY-40);}
+      else{gain=40;addFloat('+40',px,PY-40);}
+      bonus+=gain;
+    }
+    if(s.y>H+80){rows.splice(i,1);continue;}
+    for(j=0;j<s.segs.length;j++){
+      if(px+9>s.segs[j].x0&&px-9<s.segs[j].x1&&Math.abs(s.y-PY)<50){
+        endRun('撞上车墙!','得分 '+(Math.floor(dist)+bonus)+'<br>里程 '+Math.floor(dist)+' m,极限穿越 '+extremes+' 次<br>漂移的缝要提前半秒开始切!');
+        return;
+      }
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].y-=55*dt;floats[i].life-=dt;
+    if(floats[i].life<=0)floats.splice(i,1);
+  }
+  if(dist>=TOTAL){
+    endRun('穿缝大师!','里程 1200 m,奖励分 '+bonus+'<br>总得分 <b>'+(Math.floor(dist)+bonus)+'</b><br>极限穿越 '+extremes+' 次!');
+    return;
+  }
+  upd();
+}
+function addFloat(t,x,y){floats.push({txt:t,x:x,y:y,life:1});}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(RL,0,RR-RL,H);
+  ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(RL+2,0);ctx.lineTo(RL+2,H);ctx.moveTo(RR-2,0);ctx.lineTo(RR-2,H);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.16)';ctx.lineWidth=3;
+  ctx.setLineDash([18,30]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2-70,0);ctx.lineTo(W/2-70,H);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2+70,0);ctx.lineTo(W/2+70,H);ctx.stroke();
+  ctx.setLineDash([]);
+  var i,j,s;
+  for(i=0;i<rows.length;i++){
+    s=rows[i];
+    for(j=0;j<s.segs.length;j++){
+      var w=s.segs[j].x1-s.segs[j].x0;
+      if(w<=2)continue;
+      ctx.fillStyle=s.colors[j];
+      rr(s.segs[j].x0,s.y-32,w,64,8);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.22)';
+      ctx.fillRect(s.segs[j].x0+5,s.y-22,Math.max(4,w-10),16);
+      ctx.fillStyle='rgba(8,12,28,.55)';
+      ctx.fillRect(s.segs[j].x0+5,s.y+4,Math.max(4,w-10),16);
+    }
+  }
+  var lean=0;
+  if(keys.ArrowLeft||keys.a||keys.A)lean=-0.42;
+  if(keys.ArrowRight||keys.d||keys.D)lean=0.42;
+  ctx.save();
+  ctx.translate(px,PY);ctx.rotate(lean);
+  ctx.fillStyle='#ffd166';
+  ctx.beginPath();ctx.arc(0,-12,9,0,6.2832);ctx.fill();
+  ctx.fillStyle='#ff5c5c';rr(-6,-8,12,34,5);ctx.fill();
+  ctx.restore();
+  ctx.font='bold 14px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].life);
+    ctx.fillStyle='#ffd166';
+    ctx.fillText(floats[i].txt,floats[i].x,floats[i].y);
+    ctx.globalAlpha=1;
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn&&running)px=Math.max(RL+12,Math.min(RR-12,ptrX(e)));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>泡泡禅园</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#8be9c0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.bar{height:12px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:8px}
+#cbar{height:100%;width:35%;background:linear-gradient(90deg,#51d88a,#8be9c0);border-radius:6px;transition:width .12s linear}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#8be9c0}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#8be9c0;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#8be9c0;color:#0a2418;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>泡泡禅园</h1>
+  <p class="tips">没有倒计时的催促,只有缓缓上升的泡泡。轻轻点破它们,五声音阶次第响起,把「心静值」充满即入定;任其消散则心绪散落。</p>
+  <div class="card">
+    <div class="bar"><div id="cbar"></div></div>
+    <div class="row">
+      <div class="stat"><div class="mut">心静值</div><div class="big" id="calm">35%</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">戳破</div><div class="big" id="pp">0</div></div>
+      <div class="stat"><div class="mut">用时</div><div class="big" id="tm">0:00</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="540"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">泡泡禅园</h2><p id="ovp">玩法说明:<br>· 泡泡从池底缓缓升起,点破即可<br>· 泡泡越小,心静值涨得越多;金泡稀有,大涨一波<br>· 每一次点破都会奏响五声音阶的下一个音<br>· 心静值会随时间慢慢消散,越到后面消得越快<br>· 心静值充满 100% 即「入定」成功<br>· 心静值归零则「心绪散了」,禅意结束<br>· 没有失败惩罚,慢慢呼吸,慢慢点</p><button class="btn" id="obtn">进入禅园</button></div></div>
+<script>
+'use strict';
+var W=420,H=540;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#7ee8fa','#a0f0c8','#c8b6ff','#ffd6a5','#ffa8c2'];
+var bubbles=[],parts=[],floats=[],ripples=[];
+var calm=35,score=0,pops=0,elapsed=0,spawnT=0,running=false,lastT=0;
+var AC=null,noteIdx=0;
+var NOTES=[261.63,293.66,329.63,392.00,440.00,523.25,587.33,659.25,783.99,880.00];
+function $i(id){return document.getElementById(id)}
+function rnd(a,b){return a+Math.random()*(b-a)}
+function initAudio(){
+  if(AC)return;
+  try{
+    var C=window.AudioContext||window.webkitAudioContext;
+    if(C)AC=new C();
+  }catch(e){AC=null;}
+}
+function tone(f,dur,vol){
+  if(!AC)return;
+  if(AC.state==='suspended')AC.resume();
+  try{
+    var o=AC.createOscillator(),g=AC.createGain(),t0=AC.currentTime;
+    o.type='sine';o.frequency.value=f;
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(vol,t0+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g);g.connect(AC.destination);
+    o.start(t0);o.stop(t0+dur+0.05);
+  }catch(e){}
+}
+function playPop(golden){
+  var f=NOTES[noteIdx%NOTES.length];
+  noteIdx++;
+  tone(f,0.9,0.15);
+  if(golden)tone(f*1.5,1.2,0.1);
+}
+function decayRate(){return Math.min(5.5,3.0+elapsed*0.012);}
+function makeBubble(){
+  var gold=Math.random()<0.06;
+  return {
+    bx:rnd(34,W-34),y:H+34,
+    r:gold?rnd(15,19):rnd(14,30),
+    vy:rnd(26,46),amp:rnd(6,16),ph:rnd(0,6.28),fq:rnd(0.5,1.1),
+    c:gold?'#ffe08a':COLORS[Math.floor(Math.random()*COLORS.length)],
+    gold:gold
+  };
+}
+function reset(){
+  bubbles=[];parts=[];floats=[];ripples=[];
+  calm=35;score=0;pops=0;elapsed=0;spawnT=0.4;noteIdx=0;
+  upd();
+  $i('cbar').style.width='35%';
+}
+function upd(){
+  $i('calm').textContent=Math.max(0,Math.min(100,Math.round(calm)))+'%';
+  $i('sc').textContent=score;
+  $i('pp').textContent=pops;
+  var s=Math.floor(elapsed);
+  $i('tm').textContent=Math.floor(s/60)+':'+(s%60<10?'0':'')+s%60;
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:1.1})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){
+    var a=rnd(0,6.28),s=rnd(30,120);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-40,r:rnd(1.5,4),c:c,life:rnd(0.5,1.0)});
+  }
+}
+function popBubble(i){
+  var b=bubbles[i];
+  bubbles.splice(i,1);
+  pops++;
+  var add;
+  if(b.r<20)add=7;else if(b.r<26)add=5;else add=3.5;
+  var gain=10+Math.max(4,Math.round(30-b.r));
+  if(b.gold){add+=14;gain+=80;}
+  calm=Math.min(100,calm+add);
+  score+=gain;
+  playPop(b.gold);
+  burst(b.x,b.y,b.c,b.gold?16:8);
+  ripples.push({x:b.x,y:b.y,r:b.r,life:0.8,c:b.gold?'#ffe08a':'#8be9c0'});
+  addFloat(b.x,b.y-b.r-6,'+'+gain+(b.gold?' 金泡!':''),b.gold?'#ffe08a':'#a0f0c8');
+  upd();
+}
+function endGame(win){
+  running=false;
+  $i('ovt').textContent=win?'入定 · 心如止水':'心绪散了…';
+  $i('ovp').innerHTML=(win?'心静值充满,禅园为你绽放!<br>':'泡泡悄悄散尽,别急,再来一次。<br>')+'最终得分:<b>'+score+'</b><br>戳破泡泡:'+pops+' 个<br>禅意时长:'+$i('tm').textContent;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+  if(AC)tone(win?880:196,1.4,0.12);
+}
+function update(dt){
+  if(!running)return;
+  elapsed+=dt;
+  calm-=decayRate()*dt;
+  if(calm<=0){calm=0;upd();endGame(false);return;}
+  if(calm>=100){calm=100;upd();endGame(true);return;}
+  spawnT-=dt;
+  if(spawnT<=0&&bubbles.length<12){
+    bubbles.push(makeBubble());
+    spawnT=0.85;
+  }
+  var i;
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    b.y-=b.vy*dt;
+    b.x=b.bx+Math.sin(elapsed*b.fq+b.ph)*b.amp;
+    if(b.y<-b.r-12)bubbles.splice(i,1);
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=50*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  for(i=floats.length-1;i>=0;i--){
+    var f=floats[i];
+    f.y-=32*dt;f.life-=dt;
+    if(f.life<=0)floats.splice(i,1);
+  }
+  for(i=ripples.length-1;i>=0;i--){
+    var rp=ripples[i];
+    rp.r+=90*dt;rp.life-=dt;
+    if(rp.life<=0)ripples.splice(i,1);
+  }
+  $i('cbar').style.width=calm+'%';
+  upd();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#12203c');g.addColorStop(1,'#0c1024');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  ctx.font='13px system-ui';ctx.textAlign='center';
+  ctx.fillStyle='rgba(154,163,192,.5)';
+  ctx.fillText('指尖轻点泡泡 · 跟着音阶呼吸',W/2,H-14);
+  for(i=0;i<ripples.length;i++){
+    var rp=ripples[i];
+    ctx.globalAlpha=Math.max(0,rp.life);
+    ctx.beginPath();ctx.arc(rp.x,rp.y,rp.r,0,6.2832);
+    ctx.strokeStyle=rp.c;ctx.lineWidth=2;ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    var wob=Math.sin(Date.now()*0.002+b.ph)*1.5;
+    if(b.gold){
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r+7,0,6.2832);
+      ctx.fillStyle='rgba(255,224,138,.16)';ctx.fill();
+    }
+    ctx.beginPath();ctx.arc(b.x+wob*0.3,b.y+wob*0.3,b.r,0,6.2832);
+    ctx.fillStyle=b.c;ctx.globalAlpha=b.gold?0.95:0.72;ctx.fill();ctx.globalAlpha=1;
+    ctx.lineWidth=2;
+    ctx.strokeStyle=b.gold?'#ffe08a':'rgba(255,255,255,.4)';ctx.stroke();
+    ctx.beginPath();ctx.arc(b.x-b.r*0.32,b.y-b.r*0.32,b.r*0.24,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.55)';ctx.fill();
+    if(b.gold){
+      ctx.font='bold 11px system-ui';ctx.fillStyle='#5c4a10';
+      ctx.fillText('禅',b.x,b.y+4);
+      ctx.font='13px system-ui';
+    }
+  }
+  for(i=0;i<parts.length;i++){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);
+    ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;
+  }
+  ctx.font='bold 15px system-ui';
+  for(i=0;i<floats.length;i++){
+    var f=floats[i];
+    ctx.globalAlpha=Math.min(1,f.life);
+    ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;
+  }
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),bestI=-1,bestD=1e9;
+  for(var i=0;i<bubbles.length;i++){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y,d=dx*dx+dy*dy;
+    if(d<=(b.r+12)*(b.r+12)&&d<bestD){bestD=d;bestI=i;}
+  }
+  if(bestI>=0)popBubble(bestI);
+});
+$i('obtn').addEventListener('click',function(){
+  initAudio();
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

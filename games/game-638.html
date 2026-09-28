@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分色迷宫</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:430px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+canvas{display:block;margin:0 auto;width:100%;max-width:390px;border-radius:10px}
+#pad{display:grid;grid-template-columns:repeat(3,56px);gap:6px;justify-content:center;margin-top:10px}
+.btn{border:0;border-radius:10px;padding:12px 0;font-size:16px;background:#2a3154;color:#cdd6f4;font-weight:700;cursor:pointer}
+.btn.go{background:#4cc9f0;color:#081226}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>分色迷宫</h1>
+  <p class="tips">迷宫的墙分红墙与蓝墙:红墙只在红视界显现,蓝墙只在蓝视界显现,边界墙双色常显!按空格(或中间按钮)切换视界、方向键移动,90 秒内抵达右下角金环出口。步数与用时越少,得分越高。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">步数</div><div class="big" id="st">0</div></div>
+      <div class="stat"><div class="mut">用时</div><div class="big" id="tm">0s</div></div>
+      <div class="stat"><div class="mut">当前视界</div><div class="big" id="vw">红</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <canvas id="cv" width="390" height="390"></canvas>
+    <div id="pad">
+      <button class="btn" style="visibility:hidden">·</button>
+      <button class="btn" id="up">↑</button>
+      <button class="btn" style="visibility:hidden">·</button>
+      <button class="btn" id="lf">←</button>
+      <button class="btn go" id="tg">切换</button>
+      <button class="btn" id="rt">→</button>
+      <button class="btn" style="visibility:hidden">·</button>
+      <button class="btn" id="dn">↓</button>
+      <button class="btn" style="visibility:hidden">·</button>
+    </div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">分色迷宫</h2><p id="ovp">玩法:双视界探索。<br>· 墙体分为红墙、蓝墙与双色边界墙<br>· 红视界:红墙清晰、蓝墙近乎隐形;蓝视界反之<br>· 空格键(或「切换」)翻转视界;方向键/WASD 移动<br>· 90 秒内从左上走到右下金环即胜<br>· 得分 = 1200 - 步数×8 - 秒数×6;超时判负</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=13,CELL=30;
+var walls=[],wtype=[],view='r',px=1,py=1,ex=11,ey=11;
+var steps=0,elapsed=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function genMaze(){
+  var i,j;
+  walls=[];
+  for(i=0;i<W;i++){
+    walls.push([]);
+    for(j=0;j<W;j++)walls[i].push(1);
+  }
+  var vis={},st=[[0,0]];
+  vis['0,0']=1;
+  walls[1][1]=0;
+  var DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],opts=[];
+    for(i=0;i<4;i++){
+      var nx=cx+DIRS[i][0],ny=cy+DIRS[i][1];
+      if(nx>=0&&nx<6&&ny>=0&&ny<6&&!vis[nx+','+ny])opts.push(DIRS[i]);
+    }
+    if(opts.length){
+      var d=opts[Math.floor(Math.random()*opts.length)];
+      walls[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      walls[(cy+d[1])*2+1][(cx+d[0])*2+1]=0;
+      vis[(cx+d[0])+','+(cy+d[1])]=1;
+      st.push([cx+d[0],cy+d[1]]);
+    }else st.pop();
+  }
+  wtype=[];
+  for(i=0;i<W;i++){
+    wtype.push([]);
+    for(j=0;j<W;j++){
+      if(walls[i][j]===0)wtype[i].push('p');
+      else if(i===0||j===0||i===W-1||j===W-1)wtype[i].push('b');
+      else wtype[i].push(Math.random()<0.5?'r':'u');
+    }
+  }
+}
+function draw(){
+  var c=$('cv').getContext('2d');
+  for(var j=0;j<W;j++){
+    for(var i=0;i<W;i++){
+      var x=i*CELL,y=j*CELL,t=wtype[j][i];
+      if(t==='p'){
+        c.fillStyle='#161b34';
+        c.fillRect(x,y,CELL,CELL);
+      }else if(t==='r'){
+        c.fillStyle=view==='r'?'#e5484d':'rgba(229,72,77,.05)';
+        c.fillRect(x,y,CELL,CELL);
+      }else if(t==='u'){
+        c.fillStyle=view==='u'?'#4da3ff':'rgba(77,163,255,.05)';
+        c.fillRect(x,y,CELL,CELL);
+      }else{
+        c.fillStyle='#161b34';
+        c.fillRect(x,y,CELL,CELL);
+        c.fillStyle='#e5484d';
+        c.beginPath();c.moveTo(x,y);c.lineTo(x+CELL,y);c.lineTo(x,y+CELL);c.closePath();c.fill();
+        c.fillStyle='#4da3ff';
+        c.beginPath();c.moveTo(x+CELL,y);c.lineTo(x+CELL,y+CELL);c.lineTo(x,y+CELL);c.closePath();c.fill();
+      }
+    }
+  }
+  c.strokeStyle='#ffd166';c.lineWidth=3;
+  c.beginPath();c.arc(ex*CELL+15,ey*CELL+15,9,0,Math.PI*2);c.stroke();
+  c.fillStyle='#ffffff';
+  c.beginPath();c.arc(px*CELL+15,py*CELL+15,8,0,Math.PI*2);c.fill();
+  c.strokeStyle='#ffd166';c.lineWidth=2;
+  c.beginPath();c.arc(px*CELL+15,py*CELL+15,10.5,0,Math.PI*2);c.stroke();
+}
+function drawTop(){
+  $('st').textContent=steps;
+  $('tm').textContent=Math.floor(elapsed)+'s';
+  $('vw').textContent=view==='r'?'红':'蓝';
+  $('vw').style.color=view==='r'?'#ff7b7b':'#7bb8ff';
+}
+function toggleView(){
+  if(!playing||over)return;
+  view=view==='r'?'u':'r';
+  drawTop();draw();
+}
+function tryMove(dx,dy){
+  if(!playing||over)return;
+  var nx=px+dx,ny=py+dy;
+  if(nx<0||nx>=W||ny<0||ny>=W)return;
+  if(walls[ny][nx]===1)return;
+  px=nx;py=ny;steps++;
+  drawTop();draw();
+  if(px===ex&&py===ey)finish(true);
+}
+$('tg').addEventListener('click',toggleView);
+$('up').addEventListener('click',function(){tryMove(0,-1)});
+$('dn').addEventListener('click',function(){tryMove(0,1)});
+$('lf').addEventListener('click',function(){tryMove(-1,0)});
+$('rt').addEventListener('click',function(){tryMove(1,0)});
+document.addEventListener('keydown',function(e){
+  var k=e.key.toLowerCase();
+  if(k==='arrowup'||k==='w'){e.preventDefault();tryMove(0,-1);}
+  else if(k==='arrowdown'||k==='s'){e.preventDefault();tryMove(0,1);}
+  else if(k==='arrowleft'||k==='a'){e.preventDefault();tryMove(-1,0);}
+  else if(k==='arrowright'||k==='d'){e.preventDefault();tryMove(1,0);}
+  else if(k===' '){e.preventDefault();toggleView();}
+});
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  if(win){
+    var score=Math.max(60,1200-steps*8-Math.floor(elapsed)*6);
+    $('ovt').textContent='穿越双色迷宫!';
+    $('ovp').innerHTML='用时 <b>'+Math.floor(elapsed)+'</b> 秒 · 步数 <b>'+steps+'</b><br>得分 <b>'+score+'</b><br>在两个视界间来回切换找路,再来一局!';
+  }else{
+    $('ovt').textContent='时间到了…';
+    $('ovp').innerHTML='90 秒内未能抵达出口。<br>已走 <b>'+steps+'</b> 步——先切视界观察全局再动身!<br>再来一局!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  view='r';px=1;py=1;steps=0;elapsed=0;
+  playing=true;over=false;
+  genMaze();
+  drawTop();draw();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+genMaze();
+drawTop();draw();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    elapsed+=dt;
+    if(elapsed>=90){elapsed=90;drawTop();finish(false);}
+    else drawTop();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

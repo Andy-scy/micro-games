@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>沙漏抢塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#fcc419}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#fcc419;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#fcc419;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>沙漏抢塔</h1>
+<p class="hint">每块积木都有寿命,到期就风化坍塌 · 抢在时间前面叠高,点击或空格</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">沙漏抢塔</h2><p id="ovM">你放上去的每一层都在倒计时,寿命一到就风化消失,上面的层整体下沉!<br>塔被啃到只剩基座就输。寿命会随高度越来越短,手速就是高度。</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=560,BH=22;
+var tower,cur,fx,pops,score,state='ready',cam=0,maxH;
+
+function layerC(i){return 'hsl('+((i*13+45)%360)+',60%,58%)';}
+function topB(){return tower[tower.length-1];}
+function reset(){
+  tower=[{x:210,w:150,life:1e9,max:1e9}];
+  score=0;fx=[];pops=[];cam=0;maxH=0;
+  spawn();
+}
+function spawn(){
+  var t=topB(),left=Math.random()<0.5;
+  cur={x:left?36:W-36,dir:left?1:-1,w:t.w,spd:Math.min(2.3+(tower.length-1)*0.06,6.0)};
+}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#fcc419',life:1});}
+function place(){
+  var t=topB();
+  var delta=cur.x-t.x,ad=Math.abs(delta),ovw=t.w-ad;
+  var byY=GROUND-(tower.length+1)*BH+BH/2;
+  if(ovw<=0){
+    fx.push({x:cur.x,y:byY,w:cur.w,vx:cur.dir*80,vy:-60,rot:0,vr:cur.dir*2.4,life:1.5,c:layerC(tower.length)});
+    cur=null;finish();return;
+  }
+  var nx,nw;
+  if(ad<=6){
+    var pts=10+Math.floor(tower.length/3);score+=pts;
+    pop('完美 +'+pts,t.x,byY-14,'#7ee0a3');
+    nx=t.x;nw=t.w;
+  }else{
+    score+=10;
+    var cl=cur.x-cur.w/2,cr=cur.x+cur.w/2,tl=t.x-t.w/2,tr=t.x+t.w/2;
+    var ol=Math.max(cl,tl),orr=Math.min(cr,tr);
+    nx=(ol+orr)/2;nw=orr-ol;
+    var pw,px;
+    if(delta>0){pw=cr-tr;px=(tr+cr)/2;}else{pw=tl-cl;px=(cl+tl)/2;}
+    if(pw>1)fx.push({x:px,y:byY,w:pw,vx:delta>0?150:-150,vy:-40,rot:0,vr:delta>0?2.6:-2.6,life:1.5,c:layerC(tower.length)});
+  }
+  var life=Math.max(4.5,9.5-(tower.length-1)*0.18);
+  tower.push({x:nx,w:nw,life:life,max:life});
+  spawn();
+}
+function finish(){
+  state='over';
+  window.setTimeout(function(){
+    ovT.textContent='塔被时间吞噬!';
+    ovS.textContent='最高纪录 '+maxH+' 层 · 得分 '+score;
+    ovM.textContent='别停手,风化不等人';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },650);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  if(state==='play'&&cur){
+    cur.x+=cur.spd*cur.dir*dt*60;
+    var m=cur.w/2+6;
+    if(cur.x<m){cur.x=m;cur.dir=1;}
+    if(cur.x>W-m){cur.x=W-m;cur.dir=-1;}
+  }
+  var i;
+  if(state==='play'){
+    for(i=tower.length-1;i>=1;i--){
+      tower[i].life-=dt;
+      if(tower[i].life<=0){
+        var b=tower[i];
+        pop('风化坍塌!',b.x,GROUND-(tower.length-i)*BH,'#ff8787');
+        var k;
+        for(k=0;k<3;k++)fx.push({x:b.x+(k-1)*12,y:GROUND-(tower.length-i)*BH+BH/2,w:14,vx:(k-1)*70+(Math.random()*40-20),vy:-80-Math.random()*80,rot:0,vr:3,life:0.9,c:layerC(i)});
+        tower.splice(i,1);
+        if(tower.length<=1){finish();break;}
+      }
+    }
+    var h=tower.length-1;
+    if(h>maxH){maxH=h;score+=5;}
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+  cam=Math.max(0,300-(GROUND-tower.length*BH));
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#332a14');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var gy=GROUND-cam;
+  ctx.fillStyle='#1d2447';ctx.fillRect(0,gy,W,H-gy);
+  ctx.fillStyle='#2e3660';ctx.fillRect(0,gy,W,5);
+  var i,b,y;
+  for(i=0;i<tower.length;i++){
+    b=tower[i];y=GROUND-(tower.length-i)*BH-cam;
+    if(y<-BH||y>H)continue;
+    var ratio=Math.max(0,Math.min(1,b.life/b.max));
+    if(i>0&&ratio<0.25)ctx.globalAlpha=0.55+0.45*Math.sin(b.life*18);
+    ctx.fillStyle=layerC(i);rr(b.x-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+    ctx.globalAlpha=1;
+    if(i>0){
+      ctx.fillStyle='rgba(0,0,0,.4)';ctx.fillRect(b.x-b.w/2+2,y+BH-7,b.w-4,3);
+      ctx.fillStyle='hsl('+(ratio*110)+',75%,55%)';ctx.fillRect(b.x-b.w/2+2,y+BH-7,(b.w-4)*ratio,3);
+    }
+  }
+  if(cur&&state==='play'){
+    y=GROUND-(tower.length+1)*BH-cam;
+    ctx.fillStyle=layerC(tower.length);rr(cur.x-cur.w/2,y+2,cur.w,BH-4,5);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;rr(cur.x-cur.w/2,y+2,cur.w,BH-4,5);ctx.stroke();
+  }
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cam);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  ctx.textAlign='right';ctx.fillText('当前 '+ (tower.length-1)+' 层 · 最高 '+maxH+' 层',W-14,32);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cam);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+function tap(){if(state==='play'&&cur)place();}
+if(window.PointerEvent){cv.addEventListener('pointerdown',function(e){e.preventDefault();tap();});}
+else{cv.addEventListener('mousedown',function(){tap();});cv.addEventListener('touchstart',function(e){e.preventDefault();tap();});}
+window.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowDown'||e.key===' '){e.preventDefault();tap();}});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

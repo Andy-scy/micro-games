@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幻影移位</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:420px}
+#board{position:relative;width:100%}
+.card{position:absolute;top:0;left:0;cursor:pointer;perspective:700px;transition:transform .55s cubic-bezier(.4,.1,.2,1)}
+#board.noanim .card{transition:none}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s}
+.card.open .inner,.card.done .inner{transform:rotateY(180deg)}
+.card.bump .inner{animation:bump .45s}
+@keyframes bump{0%{transform:scale(1)}40%{transform:scale(.82)}100%{transform:scale(1)}}
+.face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(20px,7vw,32px)}
+.bk{background:linear-gradient(145deg,#28325f,#1c2447);border:2px solid #46508c;color:#6a76c9;font-weight:bold}
+.ft{background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;transform:rotateY(180deg)}
+.card.done{cursor:default}
+.card.done .ft{border-color:#7ee0a3;background:linear-gradient(145deg,#1f5b41,#1a4a34)}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>幻影移位</h1>
+<div class="hint">卡牌会施魔法!尚未配对的卡牌每隔几秒自动互换位置;趁它们安静时尽快记住并配对,已配对的卡牌不会被移动。</div>
+<div class="bar"><span>用时 <b id="stTime">0.0</b> 秒</span><span>已配对 <b id="stPairs">0/8</b></span><span>换位 <b id="stSwap">0</b> 次</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var SYMS=['🍎','🍋','🍉','🍇','🐶','🐱','🦊','🐼'];
+var COLS=4,ROWS=4,GAP=8,SWAP_MS=4200;
+var board=document.getElementById('board');
+var stage=document.getElementById('stage');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elTime=document.getElementById('stTime');
+var elPairs=document.getElementById('stPairs');
+var elSwap=document.getElementById('stSwap');
+var btnAgain=document.getElementById('btnAgain');
+var slots=[],cell=0,lock=true,firstEl=null,pairs=0,startAt=0,running=false,over=false,lastSwap=0,swaps=0;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);el.sym=sym;
+  board.appendChild(el);return el;
+}
+function place(el,idx){
+  var r=Math.floor(idx/COLS),c=idx%COLS;
+  el.style.width=cell+'px';el.style.height=cell+'px';
+  el.style.transform='translate('+(c*(cell+GAP))+'px,'+(r*(cell+GAP))+'px)';
+}
+function layout(){
+  var w=stage.clientWidth;if(w<=0||slots.length===0)return;
+  cell=(w-GAP*(COLS-1))/COLS;
+  board.style.height=(cell*ROWS+GAP*(ROWS-1))+'px';
+  for(var i=0;i<slots.length;i++)place(slots[i],i);
+}
+function doSwap(){
+  var idxs=[];
+  for(var i=0;i<slots.length;i++){
+    var el=slots[i];
+    if(!el.classList.contains('done')&&!el.classList.contains('open'))idxs.push(i);
+  }
+  if(idxs.length<2)return;
+  var els=[];
+  for(var k=0;k<idxs.length;k++)els.push(slots[idxs[k]]);
+  shuffle(els);
+  for(var k2=0;k2<idxs.length;k2++)slots[idxs[k2]]=els[k2];
+  for(var j=0;j<slots.length;j++)place(slots[j],j);
+  for(var m=0;m<els.length;m++){
+    var c=els[m];c.classList.remove('bump');void c.offsetWidth;c.classList.add('bump');
+  }
+  swaps++;elSwap.textContent=String(swaps);
+}
+function newGame(){
+  clearTimers();board.innerHTML='';slots=[];
+  lock=true;firstEl=null;pairs=0;running=false;over=false;swaps=0;
+  elPairs.textContent='0/8';elSwap.textContent='0';elTime.textContent='0.0';
+  overlay.classList.remove('show');
+  var syms=shuffle(SYMS.concat(SYMS));
+  board.classList.add('noanim');
+  for(var i=0;i<syms.length;i++)slots.push(makeCard(syms[i]));
+  layout();
+  requestAnimationFrame(function(){board.classList.remove('noanim');});
+  later(function(){
+    lock=false;running=true;startAt=performance.now();
+    lastSwap=performance.now()+1500;
+  },400);
+}
+function onCard(el){
+  if(lock||over||!running)return;
+  if(el.classList.contains('open')||el.classList.contains('done'))return;
+  el.classList.add('open');
+  if(!firstEl){firstEl=el;return;}
+  var a=firstEl,b=el;firstEl=null;
+  if(a.sym===b.sym){
+    pairs++;elPairs.textContent=pairs+'/8';
+    a.classList.remove('open');b.classList.remove('open');
+    a.classList.add('done');b.classList.add('done');
+    if(pairs===SYMS.length)finish();
+  }else{
+    lock=true;
+    later(function(){a.classList.remove('open');b.classList.remove('open');lock=false;},700);
+  }
+}
+function finish(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  var score=Math.max(150,1400-swaps*15-Math.round(sec)*10);
+  var grade=swaps<=3?'★★★ 目光如炬':(swaps<=6?'★★☆ 以静制动':'★☆☆ 完成挑战');
+  ovTitle.textContent='移位终结者!';
+  ovDesc.innerHTML='用时 '+sec.toFixed(1)+' 秒 · 换位 '+swaps+' 次<br>得分 <b style="color:#ffd166">'+score+'</b><br>'+grade;
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+window.addEventListener('resize',layout);
+var tick=function(){
+  var now=performance.now();
+  if(running&&!over){
+    elTime.textContent=((now-startAt)/1000).toFixed(1);
+    if(!lock&&firstEl===null&&now-lastSwap>SWAP_MS){
+      lastSwap=now;doSwap();
+    }
+  }
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

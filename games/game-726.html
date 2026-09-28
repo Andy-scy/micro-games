@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>亡命飞车</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:4px}
+#gbar{height:100%;width:60%;background:#51d88a}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>亡命飞车</h1>
+  <p class="tips">警车咬在车尾!穿行慢车流别被拖慢,撞一下警车就逼近一截;撑过 60 秒就能甩掉追兵。蓝色加速带救你一命!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">逃脱倒计时</div><div class="big" id="tm">60 s</div></div>
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0 m</div></div>
+    <div class="stat"><div class="mut">被撞次数</div><div class="big" id="sh">0</div></div>
+  </div><div class="bar"><div id="gbar"></div></div></div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">亡命飞车</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 左右移动(触屏拖动)<br>· 你的车速恒定偏高,但<b>撞上慢车会猛减速</b>,警车立刻逼近<br>· 轧过<b>蓝色加速带</b>瞬间提速,拉开距离<br>· 警车贴到车尾(距离条见底)即被逮捕<br>· 撑过 60 秒 = 逃脱成功</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=420,H=560;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var px,speed,dist,gap,hits,timeLeft,running,stripe,spawnT,padT,invuln;
+var cars=[],pads=[];
+var keys={};
+var PY=H-140;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;speed=380;dist=0;gap=300;hits=0;timeLeft=60;stripe=0;spawnT=0.5;padT=2.5;invuln=0;
+  cars.length=0;pads.length=0;
+  upd();
+}
+function upd(){
+  $i('tm').textContent=Math.ceil(timeLeft)+' s';
+  $i('sd').textContent=Math.floor(dist)+' m';
+  $i('sh').textContent=hits;
+  var bar=$i('gbar');
+  bar.style.width=Math.max(0,Math.min(100,gap/420*100))+'%';
+  bar.style.background=gap>140?'#51d88a':(gap>60?'#ffd166':'#ff5c5c');
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawnCar(){
+  var x=40+Math.random()*(W-80),i;
+  for(i=0;i<cars.length;i++){
+    if(cars[i].y<150&&Math.abs(cars[i].x-x)<95)return;
+  }
+  cars.push({x:x,y:-90,spd:200+Math.random()*60,c:['#4da3ff','#b07cff','#ff9f43'][Math.floor(Math.random()*3)]});
+}
+function spawnPad(){
+  pads.push({x:50+Math.random()*(W-100),y:-70});
+}
+function update(dt){
+  timeLeft-=dt;
+  if(timeLeft<=0){
+    endRun('逃脱成功!','被撞 '+hits+' 次,里程 '+Math.floor(dist)+' m<br>在警灯下全身而退,够胆!');
+    return;
+  }
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%80;
+  speed+=(380-speed)*Math.min(1,dt*0.55);
+  gap+=(speed-348)*dt*0.75;
+  gap=Math.max(0,Math.min(420,gap));
+  if(invuln>0)invuln-=dt;
+  spawnT-=dt;padT-=dt;
+  if(spawnT<=0){spawnCar();spawnT=1.2+Math.random()*0.8;}
+  if(padT<=0){spawnPad();padT=3.5+Math.random()*2;}
+  var st=360;
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  px=Math.max(38,Math.min(W-38,px));
+  var i,c;
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    c.y+=(speed-c.spd)*dt;
+    if(c.y>H+100){cars.splice(i,1);continue;}
+    if(invuln<=0&&Math.abs(c.x-px)<38&&Math.abs(c.y-PY)<62){
+      invuln=1;hits++;speed=200;gap-=56;
+      burst(c.x,c.y);
+    }
+  }
+  for(i=pads.length-1;i>=0;i--){
+    c=pads[i];
+    c.y+=speed*dt;
+    if(c.y>H+60){pads.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<34&&Math.abs(c.y-PY)<50){
+      pads.splice(i,1);speed=Math.min(500,speed+120);
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(gap<=32){
+    endRun('被逮捕了!','坚持 '+Math.round(60-timeLeft)+' 秒,里程 '+Math.floor(dist)+' m<br>少撞一台慢车,就多一条活路。');
+    return;
+  }
+  upd();
+}
+var parts=[];
+function burst(x,y){
+  var k;
+  for(k=0;k<10;k++){
+    var an=Math.random()*6.28,s=80+Math.random()*180;
+    parts.push({x:x,y:y,vx:Math.cos(an)*s,vy:Math.sin(an)*s,life:0.5});
+  }
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-20,y-34,40,68,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-15,y-19,30,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-15,y+6,30,17,5);ctx.fill();
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(20,0,W-40,H);
+  ctx.strokeStyle='rgba(255,255,255,.75)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(22,0);ctx.lineTo(22,H);ctx.moveTo(W-22,0);ctx.lineTo(W-22,H);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.28)';ctx.lineWidth=3;
+  ctx.setLineDash([26,34]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  var i,c;
+  for(i=0;i<pads.length;i++){
+    c=pads[i];
+    ctx.fillStyle='rgba(80,220,255,.85)';
+    ctx.beginPath();ctx.moveTo(c.x-24,c.y+14);ctx.lineTo(c.x,c.y-16);ctx.lineTo(c.x+24,c.y+14);ctx.lineTo(c.x+12,c.y+14);ctx.lineTo(c.x,c.y-2);ctx.lineTo(c.x-12,c.y+14);ctx.closePath();ctx.fill();
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].c);
+  var copY=PY+gap;
+  if(copY<H+70){
+    drawCar(W/2-70+Math.sin(dist*0.02)*40,copY,'#eef2ff');
+    var flash=Math.floor(Date.now()/160)%2===0;
+    ctx.fillStyle=flash?'#ff4040':'#4cc9f0';
+    ctx.fillRect(W/2-70+Math.sin(dist*0.02)*40-14,copY-42,12,7);
+    ctx.fillRect(W/2-70+Math.sin(dist*0.02)*40+2,copY-42,12,7);
+    ctx.fillStyle=(flash?'rgba(255,64,64,':'rgba(76,201,240,')+(0.25+0.15*Math.sin(Date.now()*0.02))+')';
+    ctx.beginPath();ctx.arc(W/2,copY,90,0,6.2832);ctx.fill();
+  }
+  if(!(invuln>0&&Math.floor(Date.now()/90)%2===0))drawCar(px,PY,'#ff5c5c');
+  ctx.fillStyle='#ff3b3b';ctx.fillRect(px-17,PY+28,10,5);ctx.fillRect(px+7,PY+28,10,5);
+  for(i=0;i<parts.length;i++){
+    ctx.globalAlpha=Math.max(0,parts[i].life*2);
+    ctx.fillStyle='#ffd166';
+    ctx.beginPath();ctx.arc(parts[i].x,parts[i].y,4,0,6.2832);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn&&running)px=Math.max(38,Math.min(W-38,ptrX(e)));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

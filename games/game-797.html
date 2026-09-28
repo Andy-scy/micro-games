@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意垂钓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>禅意垂钓</h1>
+<p class="tip">随圆呼吸:圆胀满屏息的一瞬(呼吸圈发亮)轻轻提竿。鱼靠岸后连续两次「随息」成功即钓起一尾,每次 +25 和谐。90 秒内和谐满 100,心境圆满。</p>
+<div id="hud"><span>和谐 <b id="s1">0</b>/100</span><span>时间 <b id="s2">90</b> 秒</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">禅意垂钓</h2><p id="op">不争不抢,只求同频。<br>吸气——屏息——呼气,在屏息最圆满的一瞬提竿;<br>错一拍鱼会受惊,但它还会回来。<br>和谐满 100,即是圆满。</p><button id="ob">入定垂纶</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var W=cv.width,H=cv.height;
+var state='ready',tl=90,harm=0,msg='';
+var bt=0,fish=null,fishT=2.5,bubbles=[];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function breathPos(){return bt%6}
+function breathR(){
+  var p=breathPos();
+  if(p<2.2)return 30+40*(p/2.2);
+  if(p<3.2)return 70;
+  if(p<5.4)return 70-40*((p-3.2)/2.2);
+  return 30;
+}
+function breathLabel(){
+  var p=breathPos();
+  if(p<2.2)return '吸气';
+  if(p<3.2)return '屏息';
+  if(p<5.4)return '呼气';
+  return '静息';
+}
+function synced(){var p=breathPos();return p>=2&&p<=3.2}
+function press(){
+  if(state!=='play')return;
+  if(fish&&fish.st==='wait'){
+    if(synced()){
+      fish.p++;
+      if(fish.p>=2){
+        harm+=25;
+        msg='一尾入怀,和谐 +25';
+        fish=null;fishT=rnd(3.5,6);
+      }else{
+        msg='随息提竿 1 / 2…';
+      }
+    }else{
+      msg='时机未到,鱼儿受惊游走了…';
+      fish=null;fishT=rnd(3,5);
+    }
+  }else{
+    msg='静待鱼来…跟随呼吸圆的节奏';
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再坐一炷香';
+  ot.textContent=win?'心境圆满':'渐入佳境…';
+  op.innerHTML='和谐 <b style="color:#ffd75e">'+harm+'</b> / 100<br>'+(win?'水波不惊,鱼自头来。':'不急,鱼一直都在,呼吸也在。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=90;harm=0;msg='';bt=0;fish=null;fishT=2.5;bubbles=[];
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  var i;
+  if(Math.random()<dt*1.2)bubbles.push({x:rnd(30,W-30),y:H+10,s:rnd(2,5),v:rnd(20,45)});
+  for(i=bubbles.length-1;i>=0;i--){bubbles[i].y-=bubbles[i].v*dt;if(bubbles[i].y<250)bubbles.splice(i,1)}
+  if(state!=='play')return;
+  bt+=dt;
+  tl-=dt;if(tl<=0){tl=0;finish(harm>=100);return}
+  if(!fish){
+    fishT-=dt;
+    if(fishT<=0){
+      fish={x:Math.random()<0.5?-40:W+40,y:380,st:'in',p:0};
+      msg='有鱼慢慢靠近了…';
+    }
+  }else if(fish.st==='in'){
+    var dx=240-fish.x;
+    fish.x+=Math.sign(dx)*70*dt;
+    if(Math.abs(dx)<10){fish.x=240;fish.st='wait';msg='它在饵边悬着,屏息时提竿'}
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,H);g.addColorStop(0,'#132b30');g.addColorStop(1,'#081420');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  var t=Date.now()*0.001,i;
+  X.strokeStyle='rgba(127,212,192,.12)';X.lineWidth=2;
+  for(i=0;i<3;i++){
+    X.beginPath();
+    X.ellipse(120+((i*140)%260),420+((i*53)%80),60+((i*17)%40),16,0,0,7);
+    X.stroke();
+  }
+  for(i=0;i<bubbles.length;i++){
+    X.strokeStyle='rgba(180,230,220,.18)';X.lineWidth=1.4;
+    X.beginPath();X.arc(bubbles[i].x,bubbles[i].y,bubbles[i].s,0,7);X.stroke();
+  }
+  var r=breathR(),sy=synced(),p=breathPos();
+  var glow=sy?0.45+0.2*Math.sin(t*6):0.16;
+  X.strokeStyle='rgba(127,212,192,'+glow.toFixed(2)+')';
+  X.lineWidth=sy?4:2.5;
+  X.beginPath();X.arc(240,150,r,0,7);X.stroke();
+  X.fillStyle='rgba(127,212,192,'+(sy?0.10:0.04)+')';
+  X.beginPath();X.arc(240,150,r,0,7);X.fill();
+  X.fillStyle=sy?'#aef0dd':'rgba(170,220,205,.75)';
+  X.font='bold 17px system-ui';X.textAlign='center';
+  X.fillText(breathLabel(),240,150+4);
+  X.strokeStyle='rgba(230,240,240,.5)';X.lineWidth=1.5;
+  X.beginPath();X.moveTo(240,250);X.lineTo(240,370);X.stroke();
+  X.fillStyle='#7fd4c0';X.beginPath();X.arc(240,374,4,0,7);X.fill();
+  if(fish){
+    var wob=Math.sin(t*2.2)*4;
+    X.fillStyle='rgba(140,200,185,.8)';
+    X.beginPath();X.ellipse(fish.x,380+wob*0.3,22,9,0,0,7);X.fill();
+    X.beginPath();X.moveTo(fish.x-18,380+wob*0.3);X.lineTo(fish.x-34,380-7+wob*0.3);X.lineTo(fish.x-34,380+7+wob*0.3);X.closePath();X.fill();
+    X.fillStyle='#0f1220';X.beginPath();X.arc(fish.x+11,377+wob*0.3,2,0,7);X.fill();
+    for(i=0;i<2;i++){
+      if(i<fish.p){X.fillStyle='#7fd4c0'}
+      else{X.fillStyle='rgba(127,212,192,.25)'}
+      X.beginPath();X.arc(216+i*24,432,7,0,7);X.fill();
+    }
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,540);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('呼吸圈发亮时 点屏幕 / 空格',W/2,44);
+}
+cv.addEventListener('pointerdown',press);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else press();
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=harm;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

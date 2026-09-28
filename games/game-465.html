@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>移动靶场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#3d0a24;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>移动靶场</h1>
+  <p class="hint">↑↓ 调角度 · 空格蓄力发射 · 拖拽瞄准 · 60 秒限时,越高的靶分越多</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>时间 <b id="time">60</b></span>
+    <span>命中 <b id="hits">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="380"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">移动靶场</h2>
+      <p id="ovDesc">靶标在轨道上左右穿梭,预判提前量才能命中!
+高空靶加成更高,发射间隔 0.55 秒,节奏和准度同样重要。
+60 秒倒计时结束后按总分评定射手等级。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=380,GY=344,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elTime=$("time"),elHits=$("hits"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12;
+var best=loadBest("mg_s465");
+var state="menu",ang=45,pow=55,charging=false,cd=1;
+var ball=null,trail=[],score=0,hits=0,time=60000,fireCd=0,targets=[],parts=[];
+var COLORS=["#f472b6","#60a5fa","#4ade80","#fbbf24","#a78bfa"];
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function newTarget(){
+  var rows=[70,125,180,235,285];
+  targets.push({
+    x:Math.random()<0.5?-26:W+26,
+    y:rows[(Math.random()*rows.length)|0]+rnd(-8,8),
+    dir:0,v:rnd(0.8,2.5),
+    c:COLORS[(Math.random()*COLORS.length)|0],
+    ph:rnd(0,6)
+  });
+  var t=targets[targets.length-1];
+  t.dir=t.x<0?1:-1;
+}
+function reset(){
+  score=0;hits=0;time=60000;fireCd=0;ball=null;trail=[];parts=[];targets=[];
+  for(var i=0;i<4;i++)newTarget();
+  ang=45;pow=55;charging=false;hud();
+}
+function hud(){elScore.textContent=score;elTime.textContent=Math.max(0,Math.ceil(time/1000));elHits.textContent=hits;elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball&&fireCd<=0;}
+function fire(){
+  if(!canFire())return;
+  charging=false;fireCd=33;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2.4,2.4),vy:rnd(-2.4,2.4),l:rnd(16,34),c:col});
+}
+function tick(){
+  var i;
+  if(charging&&canFire()){pow+=cd*1.9;if(pow>=100){pow=100;cd=-1;}if(pow<=18){pow=18;cd=1;}}
+  if(fireCd>0)fireCd--;
+  time-=16.6;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.l--;if(p.l<=0)parts.splice(i,1);}
+  for(i=0;i<targets.length;i++){
+    var t=targets[i];
+    t.ph+=0.05;
+    t.x+=t.dir*t.v;
+    t.y+=Math.sin(t.ph)*0.35;
+    if(t.x<-30)t.x=W+28;
+    if(t.x>W+30)t.x=-28;
+  }
+  while(targets.length<4)newTarget();
+  if(ball){
+    for(var s=0;s<2;s++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      for(i=0;i<targets.length;i++){
+        var tg=targets[i];
+        if(Math.hypot(ball.x-tg.x,ball.y-tg.y)<20){
+          var pts=60+Math.round((GY-tg.y)*0.45);
+          score+=pts;hits++;
+          boom(tg.x,tg.y,tg.c,14);
+          targets.splice(i,1);
+          ball=null;hud();break;
+        }
+      }
+      if(!ball)break;
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+      if(ball.y>=GY-3){boom(ball.x,GY-4,"#8b93c8",7);ball=null;break;}
+      if(ball.x>W+40||ball.x<-40||ball.t>700){ball=null;break;}
+    }
+  }
+  if(state==="playing"&&time<=0)finish();
+}
+function finish(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s465",best);}
+  var rank=score>=1200?"神射手":(score>=700?"精准炮手":"见习炮手");
+  ovTitle.textContent="时间到!评级:"+rank;
+  ovDesc.textContent="60 秒命中 "+hits+" 次,总分 "+score+" 分。\n"+(score>=1200?"百发百中,弹无虚发!":"预判提前量,高分靶在高空!");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  hud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCannon(){
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  if(charging){
+    ctx.fillStyle="#20263f";rr(CX-40,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#f472b6";
+    var bh=80*(pow-18)/82;
+    rr(CX-40,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.3)";
+  for(var i=0;i<80;i++){
+    vy+=G;x+=vx;y+=vy;
+    if(y>GY)break;
+    if(i%3===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(244,114,182,0.1)";ctx.lineWidth=2;
+  for(i=0;i<5;i++){var ly=[70,125,180,235,285][i];ctx.beginPath();ctx.moveTo(0,ly);ctx.lineTo(W,ly);ctx.stroke();}
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  for(i=0;i<targets.length;i++){
+    var t=targets[i];
+    ctx.strokeStyle="rgba(200,206,240,0.35)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(t.x,t.y+14);ctx.lineTo(t.x,t.y+30);ctx.stroke();
+    ctx.fillStyle=t.c;ctx.beginPath();ctx.arc(t.x,t.y,14,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#0b0e1a";ctx.beginPath();ctx.arc(t.x,t.y,7,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=t.c;ctx.beginPath();ctx.arc(t.x,t.y,3,0,Math.PI*2);ctx.fill();
+  }
+  if(canFire())preview();
+  drawCannon();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=18;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-CX,dy=PIV-p.y;
+  if(dy<6||dx<2)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,dx)*180/Math.PI));
+  pow=Math.max(18,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

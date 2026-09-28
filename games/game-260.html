@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意慢打</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#finBtn{background:#232a4a;color:#9ab1ff;border:0;border-radius:8px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer;margin-bottom:6px}
+#finBtn:hover{background:#2c3560}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#141a2e;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#a8e6cf}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>禅意慢打</h1>
+<div id="tip">无输赢的练习模式：单词缓缓漂浮，随时自由挑选打字；想停就按 Esc 或点结束按钮</div>
+<div style="display:flex;gap:10px;align-items:center">
+<div id="hud"></div>
+<button id="finBtn">结束并结算</button>
+</div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始修炼</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var WORDS=["breathe","slow","calm","river","willow","cloud","breeze","meadow","dawn","dusk","drift","float","gentle","harmony","inner","journey","kindness","lotus","mindful","nature","oasis","patience","quiet","ripple","serene","tranquil","unity","vessel","wisdom","zen","balance","clarity","delight","ease","flower","grace","hush","illuminate","joy","lake","moon","stillness","flow","soft","tide","warm","yawn","rest","sigh","pause"];
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var finBtn=document.getElementById('finBtn');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var MAXW=7;
+var words,buffer,target,kills,typed,errors,elapsed,running,raf,tPrev,parts,spawnT;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function hudUpd(){
+  var tot=typed+errors;
+  var acc=tot>0?Math.round(typed/tot*100):100;
+  hud.textContent='用时 '+Math.round(elapsed)+'s　击杀 '+kills+'　准确率 '+acc+'%　输入 '+tot+' 字';
+}
+function reset(){
+  words=[];buffer='';target=-1;kills=0;typed=0;errors=0;elapsed=0;parts=[];spawnT=0.2;
+  hudUpd();
+}
+function spawn(){
+  var t=pick(WORDS);
+  for(var k=0;k<words.length;k++){if(words[k].text===t)return;}
+  if(words.length>=MAXW)return;
+  words.push({
+    text:t,x:rnd(30,Math.max(40,cv.width-160)),y:rnd(30,cv.height-70),
+    vx:rnd(-14,14),vy:rnd(-9,9),ph:rnd(0,6.28)
+  });
+}
+function boom(x,y,col){for(var i=0;i<10;i++)parts.push({x:x,y:y,vx:rnd(-60,60),vy:rnd(-70,10),life:rnd(.4,.9),c:col});}
+function killWord(i){
+  var w=words[i];
+  kills++;
+  boom(w.x+30,w.y+12,'#a8e6cf');
+  words.splice(i,1);
+  if(target===i){target=-1;buffer='';}else if(target>i)target--;
+  hudUpd();
+}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var cand=-1;
+  if(target>=0&&words[target]&&words[target].text.charAt(buffer.length)===ch)cand=target;
+  if(cand<0){
+    for(var i=0;i<words.length;i++){
+      if(i!==target&&words[i].text.charAt(0)===ch){cand=i;break;}
+    }
+    if(cand>=0)buffer='';
+  }
+  if(cand<0){buffer='';target=-1;errors++;hudUpd();return;}
+  target=cand;buffer+=ch;typed++;
+  if(buffer===words[target].text)killWord(target);
+}
+function update(dt){
+  elapsed+=dt;
+  spawnT-=dt;
+  if(spawnT<=0&&words.length<MAXW){spawn();spawnT=1.6;}
+  for(var i=0;i<words.length;i++){
+    var w=words[i];
+    var tw=w.text.length*13+26;
+    w.ph+=dt;
+    w.x+=w.vx*dt;
+    w.y+=w.vy*dt+Math.sin(w.ph*0.8)*6*dt;
+    if(w.x<6){w.x=6;w.vx=Math.abs(w.vx);}
+    if(w.x+tw>cv.width-6){w.x=cv.width-6-tw;w.vx=-Math.abs(w.vx);}
+    if(w.y<10){w.y=10;w.vy=Math.abs(w.vy);}
+    if(w.y>cv.height-36){w.y=cv.height-36;w.vy=-Math.abs(w.vy);}
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+  hudUpd();
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  ctx.font='bold 19px ui-monospace, Consolas, monospace';
+  for(var i=0;i<words.length;i++){
+    var w=words[i];
+    var tw=w.text.length*13+26;
+    ctx.fillStyle='rgba(168,230,207,.09)';rr(w.x,w.y,tw,30,10);ctx.fill();
+    if(i===target){ctx.strokeStyle='#a8e6cf';ctx.lineWidth=1.5;rr(w.x,w.y,tw,30,10);ctx.stroke();}
+    var done=(i===target)?buffer:'';
+    var pre=w.text.slice(0,done.length);
+    ctx.fillStyle='#a8e6cf';ctx.fillText(pre,w.x+13,w.y+21);
+    ctx.fillStyle='#6a7396';ctx.fillText(w.text.slice(done.length),w.x+13+ctx.measureText(pre).width,w.y+21);
+  }
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*1.5);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,3,3);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(){
+  running=false;
+  var tot=typed+errors;
+  var acc=tot>0?Math.round(typed/tot*100):100;
+  var wpm=Math.round((typed/5)/(Math.max(elapsed,1)/60));
+  ovT.textContent='本次修炼';
+  ovX.textContent='用时 '+Math.round(elapsed)+' 秒　击杀 '+kills+' 个单词\n输入 '+tot+' 字　准确率 '+acc+'%\n约 '+wpm+' WPM\n心静手稳，随时再来。';
+  btn.textContent='再来一局';
+  finBtn.style.display='none';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();ov.classList.add('hide');running=true;tPrev=0;
+  finBtn.style.display='';
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&running){end();}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+finBtn.addEventListener('click',function(){if(running)end();});
+fit();reset();
+ovT.textContent='禅意慢打';
+ovX.textContent='没有失败、没有倒计时：单词缓缓漂浮，打完一个再换一个。\n按单词首字母开始，逐字打完即可消散。\n按 Esc 或点「结束并结算」可随时查看本次成绩。';
+btn.textContent='开始修炼';
+finBtn.style.display='none';
+})();
+</script>
+</body>
+</html>

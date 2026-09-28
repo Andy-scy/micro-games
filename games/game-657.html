@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>马赛克猜物</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);text-align:center}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+#cv{border:2px solid #2c3357;border-radius:12px;background:#12162c;animation:glow 2.4s ease-in-out infinite}
+@keyframes glow{0%,100%{box-shadow:0 0 6px rgba(255,209,102,.15)}50%{box-shadow:0 0 18px rgba(255,209,102,.4)}}
+#lead{font-size:13px;color:#9aa3c0;margin:10px 0}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:center;font-family:inherit}
+.opt:hover{border-color:#ffd166}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ffd166;color:#2a2008;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>马赛克猜物</h1>
+  <p class="tips">一张被打码的图片,只有零星几块可见——从四个选项猜出它是什么!猜错会再多揭示几块(但每多揭示一轮,本题分值 -60)。共 8 题,3 条命,比谁的眼力快!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/8</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">本题分值</div><div class="big" id="val">240</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <canvas id="cv" width="208" height="208"></canvas>
+    <div id="lead">—— 它是什么? ——</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">马赛克猜物</h2><p id="ovp">· 8 张打码图片,每张初始只露 8 小块<br>· 从四个选项点选它的名字<br>· 首猜答对得 240 分;<br>　每猜错一次,多揭示 5 块、<br>　本题分值 -60(最低 60)<br>· 猜错还扣 1 条命,3 命用完结束<br>· 揭得越少猜中,眼力越强!</p><button class="btn" id="obtn">开始猜图</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{e:'🍉',n:'西瓜'},{e:'🍍',n:'菠萝'},{e:'🐘',n:'大象'},{e:'🐬',n:'海豚'},
+{e:'🚁',n:'直升机'},{e:'⛵',n:'帆船'},{e:'🏰',n:'城堡'},{e:'☔',n:'雨伞'},
+{e:'⌚',n:'手表'},{e:'🎩',n:'礼帽'},{e:'🐙',n:'章鱼'},{e:'🦋',n:'蝴蝶'},
+{e:'🌵',n:'仙人掌'},{e:'🍄',n:'蘑菇'},{e:'🚀',n:'火箭'},{e:'🎸',n:'吉他'}
+];
+var N=8,CELLS=5,GAP=2,SZ=40;
+var quiz=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,S=0;
+var order=[],revealed=0,extraSteps=0,off=null;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function cv(){return $('cv').getContext('2d')}
+function buildOff(emoji){
+  off=document.createElement('canvas');
+  off.width=CELLS*SZ;off.height=CELLS*SZ;
+  var c=off.getContext('2d');
+  c.fillStyle='#12162c';
+  c.fillRect(0,0,off.width,off.height);
+  c.font='130px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",system-ui,sans-serif';
+  c.textAlign='center';
+  c.textBaseline='middle';
+  c.fillStyle='#e8eaf6';
+  c.fillText(emoji,CELLS*SZ/2,CELLS*SZ/2+8);
+}
+function paintMosaic(){
+  var c=cv();
+  c.fillStyle='#12162c';
+  c.fillRect(0,0,208,208);
+  var row,col,i,pos;
+  for(i=0;i<CELLS*CELLS;i++){
+    pos=order.indexOf(i);
+    row=Math.floor(i/CELLS);
+    col=i%CELLS;
+    var dx=col*(SZ+GAP),dy=row*(SZ+GAP);
+    if(pos>-1&&pos<revealed){
+      c.drawImage(off,col*SZ,row*SZ,SZ,SZ,dx,dy,SZ,SZ);
+    }else{
+      c.fillStyle='#1c2140';
+      c.fillRect(dx,dy,SZ,SZ);
+    }
+  }
+}
+function curValue(){return Math.max(60,240-extraSteps*60)}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;revealed=8;extraSteps=0;
+  order=shuffle([]);
+  var i;for(i=0;i<CELLS*CELLS;i++)order.push(i);
+  shuffle(order);
+  buildOff(it.e);
+  paintMosaic();
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('val').textContent=curValue();
+  $('lead').textContent='—— 它是什么? ——';
+  var box=$('opts');box.innerHTML='';
+  var others=[],k;
+  for(k=0;k<BANK.length;k++)if(BANK[k].n!==it.n)others.push(BANK[k].n);
+  shuffle(others);
+  var names=[it.n,others[0],others[1],others[2]];
+  shuffle(names);
+  for(k=0;k<names.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=names[k];
+    b.dataset.ok=(names[k]===it.n)?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var it=quiz[idx];
+  if(btn.dataset.ok==='1'){
+    locked=true;
+    var v=curValue();
+    score+=v;$('sc').textContent=score;
+    btn.classList.add('ok');
+    $('msg').textContent='猜中了!+'+v+' 分';
+    schedule(function(){
+      if(!playing||over)return;
+      idx++;showQ();
+    },1200);
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');btn.disabled=true;
+    extraSteps++;revealed=Math.min(CELLS*CELLS,revealed+5);
+    paintMosaic();
+    $('val').textContent=curValue();
+    $('msg').textContent=lives>0?'不对!多揭示了 5 块,分值下降':'不对!机会用尽…';
+    if(lives<=0){
+      locked=true;
+      schedule(function(){if(playing&&!over)finish(false);},1200);
+    }
+  }
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1500?'鹰眼侦探!':(score>=900?'洞察力强!':'揭幕收割机!');
+  $('ovt').textContent=win?'全部猜中 · '+rank:'机会用尽…';
+  $('ovp').innerHTML='完成 '+Math.min(idx+1,N)+'/8 张图<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 少猜错才是王道,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+</script>
+</body>
+</html>

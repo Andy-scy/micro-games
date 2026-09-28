@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暗夜点触</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#c7d2fe;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#c7d2fe;font-size:16px}
+.gbtn{background:#1e2350;color:#c7d2fe;border:1px solid #c7d2fe;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#c7d2fe;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.frame{border-radius:16px;padding:12px;transition:background .5s,box-shadow .5s;border:1px solid #2a3258;max-width:320px;margin:0 auto}
+.frame.night{background:#05060d;box-shadow:inset 0 0 40px #000;border-color:#10142a}
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;touch-action:manipulation}
+.pad{aspect-ratio:1/1;border-radius:50%;background:#1b2140;border:2px solid #2a3258;cursor:pointer;transition:box-shadow .15s,background .15s,opacity .5s;user-select:none;-webkit-user-select:none}
+.frame.night .pad{opacity:.18;background:#0c0f1e;border-color:#171c33}
+.pad.lit{background:#818cf8;border-color:#e0e7ff;box-shadow:0 0 26px rgba(129,140,248,.9)}
+.frame.night .pad.tap{opacity:.55;background:#2a3157;box-shadow:0 0 10px rgba(129,140,248,.35)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#c7d2fe;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#c7d2fe;color:#1e2350;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>暗夜点触</h1>
+  <p class="hint">熄灯版记忆序列:九个圆点先在有光时演示,然后「啪」一声全屋熄灯!你只能凭记忆在黑暗中把序列点出来。按键只有微弱回光和音高提示,别点错。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>序列长 <b id="len">0</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="frame" id="frame">
+    <div class="board" id="board"></div>
+  </div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">暗夜点触</h2>
+    <p id="ovDesc">演示有光,复述全黑。眼睛帮不上忙,靠的是脑内的空间地图。每按一下只有一点微光和一声音高——像在深夜摸黑回家,门在哪全凭感觉。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">关灯挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg357_best",FREQ=[261.63,293.66,329.63,349.23,392,440,493.88,523.25,587.33],GAP=660,FLASH=400;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var pads=[],frame=$("frame"),board=$("board"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.3;v=v==null?0.18:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){for(var i=0;i<9;i++){var d=document.createElement("div");d.className="pad";d.dataset.i=String(i);board.appendChild(d);pads.push(d);}})();
+function flash(i,ms,cls){var el=pads[i];el.classList.add(cls||"lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove(cls||"lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<9;i++)pads[i].classList.remove("lit","tap");}
+function rnd(){var n;do{n=(Math.random()*9)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";frame.classList.remove("night");setMsg("有光演示,抓紧记…");var i=0;
+timers.push(setTimeout(function step(){
+if(i>=seq.length){timers.push(setTimeout(function(){frame.classList.add("night");tone(196,0.35,0.18,"triangle");
+state="input";pos=0;setMsg("熄灯!凭记忆按出序列");},420));return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));},450));}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();frame.classList.remove("night");seq=[];pos=0;level=0;state="wait";setMsg("");updateHud();timers.push(setTimeout(nextRound,700));}
+function winStep(){level++;state="wait";setMsg("黑暗中走对了!加一步…");updateHud();timers.push(setTimeout(nextRound,850));}
+function fail(){clearTimers();clearLit();state="over";frame.classList.remove("night");tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="摸黑迷路";
+ovDesc.textContent="灯灭了,序列在第 "+seq.length+" 步走岔。诀窍:演示时别只盯亮点,用「九宫格边缘/中心」给每步定位,黑灯后照样能画出来。";
+ovScore.style.display="block";ovScore.textContent="黑暗复述成功 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flash(i,170,"tap");
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+board.addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

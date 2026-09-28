@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>山道拉力</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#4ade80;font-size:16px}
+.bar{flex:1;min-width:110px;height:10px;background:#0b0e1a;border-radius:5px;overflow:hidden}
+.bar i{display:block;height:100%;background:#4ade80;width:100%}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>山道拉力</h1>
+  <p class="hint">← → 转向 · ↑ 油门 ↓ 刹车 · 触屏按住左右半屏转向 · 空格开始</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>距离 <b id="dist">0 m</b></span>
+    <span>倒计时</span>
+    <div class="bar"><i id="timebar"></i></div>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">山道拉力</h2>
+      <p id="ovDesc">没有车流,只有无尽弯道、落石和倒计时!冲过绿色检查点横幅 +12 秒,冲出路面会陷入沙土减速,撞上落石直接爆胎。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始比赛</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elDist=$("dist"),elBest=$("best"),elTime=$("timebar");
+var HW=82,CARY=H-130;
+var state="menu",best=0;
+try{best=parseInt(localStorage.getItem("mg_734")||"0",10)||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg_734",String(best));}catch(e){}}
+function hsh(n){var s=Math.sin(n*127.1)*43758.5453;return s-Math.floor(s);}
+function roadCx(w){return 240+120*Math.sin(w*0.0028)+50*Math.sin(w*0.0009+1.7);}
+var px,vx,dist,v,timeLeft,nextCp,nextRock,rocks,floats,T,score,shake,flash,keys,touchDir;
+function reset(){
+  px=240;vx=0;dist=0;v=330;timeLeft=22;nextCp=1600;nextRock=520;
+  rocks=[];floats=[];T=0;score=0;shake=0;flash=0;keys={};touchDir=0;
+  elScore.textContent="0";elDist.textContent="0 m";elBest.textContent=best;
+}
+function addFloat(txt,c){floats.push({x:px,y:CARY-80,txt:txt,c:c,t:1.2});}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest();elBest.textContent=best;}
+  ovTitle.textContent=msg;
+  ovDesc.textContent="检查点绿色横幅 +12 秒;冲出路面陷入沙土会拖慢你,落石则是终结。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 距离 "+Math.floor(dist/30)+" m · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var i,st,tv,c;
+  T+=dt;
+  tv=330;
+  if(keys.up)tv=480;else if(keys.down)tv=170;
+  st=(keys.right?1:0)-(keys.left?1:0);
+  if(touchDir!==0)st=touchDir;
+  vx+=(st*300-vx)*Math.min(1,dt*7);
+  px+=vx*dt;
+  if(px<16){px=16;vx=0;}
+  if(px>W-16){px=W-16;vx=0;}
+  c=roadCx(dist);
+  if(Math.abs(px-c)>HW-14){
+    v+=(120-v)*Math.min(1,dt*2.5);
+    shake=0.3;
+  }else{
+    v+=(tv-v)*Math.min(1,dt*1.8);
+  }
+  while(nextRock<dist+900){
+    rocks.push({w:nextRock,off:(Math.random()*2-1)*(HW-42)});
+    nextRock+=260+Math.random()*180;
+  }
+  for(i=rocks.length-1;i>=0;i--){
+    var rel=rocks[i].w-dist;
+    var rx=roadCx(rocks[i].w)+rocks[i].off;
+    if(rel<-60){rocks.splice(i,1);continue;}
+    if(Math.abs(rel)<24&&Math.abs(rx-px)<30){gameOver("爆胎!撞上了落石");return;}
+  }
+  if(dist>=nextCp){
+    timeLeft+=12;addFloat("检查点 +12s","#4ade80");flash=0.8;
+    nextCp+=1600;
+  }
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;gameOver("时间耗尽!");return;}
+  dist+=v*dt;
+  shake=Math.max(0,shake-dt);
+  flash=Math.max(0,flash-dt);
+  score=Math.floor(dist/30);
+  elScore.textContent=score;
+  elDist.textContent=Math.floor(dist/30)+" m";
+  elTime.style.width=Math.min(100,timeLeft/25*100)+"%";
+  elTime.style.background=timeLeft<8?"#f87171":(timeLeft<14?"#fbbf24":"#4ade80");
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].t-=dt;floats[i].y-=dt*44;
+    if(floats[i].t<=0)floats.splice(i,1);
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var shx=0,shy=0,y,w,c,par,i,k,k0,k1,frac,side,tw,sy,rx;
+  if(shake>0){shx=(Math.random()-0.5)*5;shy=(Math.random()-0.5)*5;}
+  ctx.save();ctx.translate(shx,shy);
+  ctx.clearRect(-8,-8,W+16,H+16);
+  for(y=H;y>-24;y-=20){
+    w=dist+(CARY-y);
+    c=roadCx(w);par=Math.floor(w/56)%2===0;
+    ctx.fillStyle=par?"#152820":"#122117";ctx.fillRect(-8,y,W+16,21);
+    ctx.fillStyle=par?"#2c3150":"#272c48";ctx.fillRect(c-HW,y,HW*2,21);
+    if(par){ctx.fillStyle="rgba(246,211,92,0.75)";ctx.fillRect(c-3,y,6,21);}
+    ctx.fillStyle="#9aa3cf";ctx.fillRect(c-HW-5,y,4,21);ctx.fillRect(c+HW+1,y,4,21);
+  }
+  k0=Math.floor((dist-160)/140);k1=Math.ceil((dist+CARY+160)/140);
+  for(k=k0;k<=k1;k++){
+    frac=hsh(k);side=frac<0.5?-1:1;
+    tw=k*140+70;sy=CARY-(tw-dist);
+    if(sy<-40||sy>H+40)continue;
+    var tx=roadCx(tw)+side*(HW+52+hsh(k+0.3)*80);
+    ctx.fillStyle="#3f2f22";ctx.fillRect(tx-3,sy-4,6,14);
+    ctx.fillStyle="#1f4d33";ctx.beginPath();ctx.arc(tx,sy-16,15+hsh(k+0.7)*7,0,Math.PI*2);ctx.fill();
+  }
+  for(i=0;i<rocks.length;i++){
+    sy=CARY-(rocks[i].w-dist);
+    if(sy<-40||sy>H+40)continue;
+    rx=roadCx(rocks[i].w)+rocks[i].off;
+    ctx.fillStyle="#6b7280";ctx.beginPath();ctx.arc(rx,sy,16,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#8b93a8";ctx.beginPath();ctx.arc(rx-5,sy-5,7,0,Math.PI*2);ctx.fill();
+  }
+  sy=CARY-(nextCp-dist);
+  if(sy>-40&&sy<H+40){
+    c=roadCx(nextCp);
+    ctx.fillStyle="#4ade80";ctx.fillRect(c-HW-8,sy-9,(HW+8)*2,7);
+    ctx.fillStyle="#2f7a4f";ctx.fillRect(c-HW-10,sy-9,5,26);ctx.fillRect(c+HW+5,sy-9,5,26);
+    ctx.fillStyle="#05230f";ctx.font="bold 11px system-ui";ctx.textAlign="center";
+    ctx.fillText("检查点",c,sy-13);
+  }
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].t);
+    ctx.fillStyle=floats[i].c;ctx.font="bold 16px system-ui";ctx.textAlign="center";
+    ctx.fillText(floats[i].txt,floats[i].x,floats[i].y);
+  }
+  ctx.globalAlpha=1;
+  ctx.save();ctx.translate(px,CARY);ctx.rotate(vx*0.0009);
+  ctx.fillStyle="rgba(10,12,22,0.9)";
+  ctx.fillRect(-22,-26,7,14);ctx.fillRect(15,-26,7,14);
+  ctx.fillRect(-22,14,7,14);ctx.fillRect(15,14,7,14);
+  rr(-18,-34,36,68,9);ctx.fillStyle="#fbbf24";ctx.fill();
+  rr(-11,-14,22,20,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(255,120,80,0.85)";ctx.fillRect(-12,30,8,4);ctx.fillRect(4,30,8,4);
+  ctx.restore();
+  if(flash>0){
+    ctx.strokeStyle="rgba(74,222,128,"+flash+")";ctx.lineWidth=6;
+    ctx.strokeRect(3,3,W-6,H-6);ctx.lineWidth=1;
+  }
+  ctx.restore();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();keys.left=true;}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();keys.right=true;}
+  else if(e.key==="ArrowUp"||e.key==="w"||e.key==="W"){e.preventDefault();keys.up=true;}
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S"){e.preventDefault();keys.down=true;}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keys.left=false;
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keys.right=false;
+  else if(e.key==="ArrowUp"||e.key==="w"||e.key==="W")keys.up=false;
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S")keys.down=false;
+});
+function touchDirFrom(t){
+  var r=cv.getBoundingClientRect();
+  return (t.clientX-r.left)<r.width/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state==="playing")touchDir=touchDirFrom(e.changedTouches[0]);
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state==="playing")touchDir=touchDirFrom(e.changedTouches[0]);
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){touchDir=0;e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>头球攻门</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#f48fb1;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#f48fb1;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#f48fb1;color:#4a1023;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>头球攻门</h1>
+<p class="tip">左右移动（←/→ 或手指）接应传中，按空格或点击起跳甩头 · 移动方向决定头球走向，躲开门将的十指关 · 10 次传中进 5 球获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,GOALY=58,GL=150,GR=330,GY0=540,G=1400;
+var score,shots,phase,ball,px,pvx,py,vy,onG,keeper,msg,msgT,keys,crossNo,headed;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  score=0;shots=0;phase='cross';px=240;pvx=0;py=GY0;vy=0;onG=true;
+  keeper={x:240};msg='';msgT=0;keys={};headed=false;crossNo=0;
+  newCross();
+}
+function newCross(){
+  shots++;crossNo++;
+  var left=Math.random()<0.5;
+  ball={x:left?-24:W+24,y:rnd(230,330),vx:(left?1:-1)*rnd(225,295),vy:rnd(30,105)};
+  headed=false;phase='cross';
+}
+function endTurn(t){
+  msg=t;msgT=1.3;phase='res';
+}
+function afterRes(){
+  if(shots>=10){
+    phase='over';
+    ovT.textContent=score>=5?'空霸中锋！':'比赛结束';
+    ovX.textContent='10 次传中打进 '+score+' 球'+(score>=5?'，禁区内你的脑袋就是炮弹！':'（目标 5 球）。先移动到球的落点，在球到头顶前起跳，向球门反方向移动甩头。');
+    ov.classList.remove('hidden');
+  }else{
+    px=240;pvx=0;py=GY0;vy=0;onG=true;
+    newCross();
+  }
+}
+function update(dt){
+  msgT-=dt;
+  var kv=0;
+  if(keys.ArrowLeft)kv-=360;
+  if(keys.ArrowRight)kv+=360;
+  if(kv!==0){pvx=kv;px+=kv*dt;}
+  else pvx*=0.86;
+  if(px<26){px=26;pvx=Math.max(0,pvx);}
+  if(px>W-26){px=W-26;pvx=Math.min(0,pvx);}
+  if(!onG){
+    vy+=G*dt;py+=vy*dt;
+    if(py>=GY0){py=GY0;vy=0;onG=true;}
+  }
+  if(phase==='cross'&&ball){
+    var steps=Math.max(1,Math.ceil(dt/0.005)),sd=dt/steps;
+    for(var s=0;s<steps;s++){
+      ball.vy+=380*sd;ball.x+=ball.vx*sd;ball.y+=ball.vy*sd;
+      var hy=py-58;
+      if(!headed&&Math.hypot(ball.x-px,ball.y-hy)<36){
+        headed=true;
+        var dx=Math.max(-430,Math.min(430,pvx*2.6));
+        ball.vy=-950;ball.vx=dx+rnd(-25,25);
+        msg='';phase='shot';
+        break;
+      }
+      if(ball.y>622){endTurn('没顶到…');break;}
+      if(ball.x<-30||ball.x>W+30){endTurn('球出了底线');break;}
+    }
+  }
+  if((phase==='cross'||phase==='shot')&&ball){
+    var tx;
+    if(ball.vy<0){
+      var t2=(GOALY-ball.y)/ball.vy;
+      tx=ball.x+ball.vx*Math.max(0,t2);
+    }else tx=ball.x;
+    tx=Math.max(GL+14,Math.min(GR-14,tx));
+    var mv=tx-keeper.x;
+    keeper.x+=Math.max(-200*dt,Math.min(200*dt,mv));
+    keeper.x=Math.max(GL+16,Math.min(GR-16,keeper.x));
+  }
+  if(phase==='shot'&&ball){
+    var steps2=Math.max(1,Math.ceil(dt/0.005)),sd2=dt/steps2,done=false;
+    for(var q=0;q<steps2&&!done;q++){
+      ball.vy+=1000*sd2;ball.x+=ball.vx*sd2;ball.y+=ball.vy*sd2;
+      if(ball.y<=GOALY){
+        if(ball.x>GL&&ball.x<GR){
+          if(Math.abs(ball.x-keeper.x)<32){endTurn('被扑出来了！');}
+          else{score++;endTurn('球进啦！');}
+        }else endTurn('打偏了！');
+        done=true;
+      }
+      if(!done&&ball.y>640){endTurn('顶飞了…');done=true;}
+    }
+  }
+  if(phase==='res'&&msgT<=0)afterRes();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#182242');sky.addColorStop(1,'#20304f');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.05)';
+  for(var st=0;st<8;st++)ctx.fillRect(20+st*60,80,44,60);
+  ctx.fillStyle='#1e3f22';ctx.fillRect(0,380,W,H-380);
+  ctx.fillStyle='rgba(255,255,255,.06)';
+  for(var ln=0;ln<6;ln++)ctx.fillRect(0,400+ln*44,W,2);
+  ctx.strokeStyle='#e8eaf6';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(GL,GOALY+130);ctx.lineTo(GL,GOALY);ctx.lineTo(GR,GOALY);ctx.lineTo(GR,GOALY+130);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;
+  for(var nv=0;nv<7;nv++){ctx.beginPath();ctx.moveTo(GL+nv*(GR-GL)/6,GOALY);ctx.lineTo(GL+nv*(GR-GL)/6,GOALY+128);ctx.stroke();}
+  for(var nh=0;nh<4;nh++){ctx.beginPath();ctx.moveTo(GL,GOALY+nh*40);ctx.lineTo(GR,GOALY+nh*40);ctx.stroke();}
+  ctx.fillStyle='#90a4ae';ctx.fillRect(keeper.x-14,GOALY+16,28,34);
+  ctx.fillStyle='#ffca28';ctx.beginPath();ctx.arc(keeper.x,GOALY+8,9,0,7);ctx.fill();
+  ctx.strokeStyle='#ffca28';ctx.lineWidth=3;
+  var kx=keeper.x;
+  ctx.beginPath();ctx.moveTo(kx-14,GOALY+22);ctx.lineTo(kx-24,GOALY+12);ctx.moveTo(kx+14,GOALY+22);ctx.lineTo(kx+24,GOALY+12);ctx.stroke();
+  ctx.strokeStyle='#f48fb1';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(px-9,py-22);ctx.lineTo(px-14,py);ctx.moveTo(px+9,py-22);ctx.lineTo(px+14,py);ctx.stroke();
+  ctx.fillStyle='#f48fb1';ctx.fillRect(px-11,py-48,22,28);
+  ctx.fillStyle='#ffccbc';ctx.beginPath();ctx.arc(px,py-58,9,0,7);ctx.fill();
+  ctx.fillStyle='#212121';ctx.fillRect(px-9,py-62,18,5);
+  if(ball){
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ball.x,ball.y,9,0,7);ctx.fill();
+    ctx.fillStyle='#37474f';
+    ctx.beginPath();ctx.arc(ball.x,ball.y,3.4,0,7);ctx.fill();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('进球 '+score+' / 5',14,28);
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';
+  ctx.fillText('第 '+Math.min(10,shots)+' / 10 次传中',14,50);
+  if(msgT>0){ctx.fillStyle='#ffd54f';ctx.font='22px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,W/2,300);}
+  if(phase==='cross'&&!headed){ctx.fillStyle='#c5cae9';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('跑到球下方 · 空格 / 点击 起跳甩头',W/2,620);}
+}
+function jump(){
+  if(phase!=='cross'||!onG)return;
+  onG=false;vy=-620;
+}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();jump();});
+cv.addEventListener('pointermove',function(e){
+  var r=cv.getBoundingClientRect();
+  var x=(e.clientX-r.left)*(W/r.width);
+  pvx=(x-px)*13;
+  px=x;
+  if(px<26)px=26;if(px>W-26)px=W-26;
+});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();}
+  if(e.code==='ArrowLeft'||e.code==='ArrowRight')keys[e.code]=true;
+});
+window.addEventListener('keyup',function(e){if(e.code==='ArrowLeft'||e.code==='ArrowRight')keys[e.code]=false;});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

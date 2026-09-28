@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冲天吊塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#b197fc}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#b197fc;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#b197fc;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>冲天吊塔</h1>
+<p class="hint">左右移动发射台瞄准,点击/松手把方块从地面发射到塔顶 · 每层落定后塔身会随机沉降挪位</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">冲天吊塔</h2><p id="ovM">自底向上的反向吊装!移动发射台把方块抛上塔顶。<br>上升途中有气流让方块漂移,每次成功落定后塔顶还会随机沉降挪位,<br>共 3 次机会,瞄准再发射!</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=560,BH=22;
+var tower,rb,fly,fx,pops,score,state='ready',cam=0,hearts,pad,flyPh,keys;
+var WS=[90,105,120,135];
+
+function layerC(i){return 'hsl('+((i*14+265)%360)+',55%,62%)';}
+function topB(){return tower[tower.length-1];}
+function reset(){
+  tower=[{x:210,w:150}];score=0;fx=[];pops=[];cam=0;hearts=3;fly=null;flyPh=0;
+  pad={x:210};keys={l:false,r:false};
+  newReady();
+}
+function newReady(){rb={w:WS[Math.floor(Math.random()*WS.length)]};flyPh=0;}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#b197fc',life:1});}
+function clamp(x,a,b){return x<a?a:(x>b?b:x);}
+function fire(){
+  if(state!=='play'||!rb||fly)return;
+  fly={x:pad.x,y:GROUND-BH-6,w:rb.w,vy:-940,vy0:-940,past:false};
+  rb=null;
+}
+function land(t,topY){
+  var err=Math.abs(fly.x-t.x),ovw=(t.w+fly.w)/2-err;
+  if(ovw>0){
+    fly.y=topY-11;
+    var pts=err<10?20:10;
+    score+=pts;
+    if(err<10)pop('正中靶心 +20',fly.x,topY-16,'#7ee0a3');
+    tower.push({x:fly.x,w:fly.w});
+    var nt=topB();
+    nt.x=clamp(nt.x+(Math.random()*52-26),50,W-50);
+    pop('塔身沉降!',nt.x,topY-34,'#ffa94d');
+    fly=null;newReady();
+    return true;
+  }
+  return false;
+}
+function finish(){
+  state='over';
+  var h=tower.length-1;
+  window.setTimeout(function(){
+    ovT.textContent='机会用完!';
+    ovS.textContent='最终高度 '+h+' 层 · 得分 '+score;
+    ovM.textContent='方块落定后塔顶会挪位,记得重新瞄准';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },700);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  var i;
+  if(state==='play'){
+    if(keys.l)pad.x-=300*dt;
+    if(keys.r)pad.x+=300*dt;
+    pad.x=clamp(pad.x,40,W-40);
+    if(fly){
+      flyPh+=dt;
+      fly.vy+=1250*dt;
+      fly.y+=fly.vy*dt;
+      fly.x=clamp(fly.x+Math.sin(flyPh*7)*26*dt,16,W-16);
+      var t=topB(),topY=GROUND-tower.length*BH;
+      if(fly.vy<0&&fly.y+11<=topY){if(!land(t,topY))fly.past=true;}
+      else if(fly.past&&fly.vy>0&&fly.y+11>=topY){land(t,topY);}
+      if(fly&&fly.y+11>=GROUND){
+        fx.push({x:fly.x,y:GROUND-10,w:fly.w,vx:(Math.random()*100-50),vy:-140,rot:0.6,vr:2.4,life:1.2,c:layerC(tower.length)});
+        fly=null;hearts--;
+        if(hearts<=0){finish();}
+        else newReady();
+      }
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+  cam=Math.max(0,300-(GROUND-tower.length*BH));
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#191433');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var gy=GROUND-cam;
+  ctx.fillStyle='#1d2447';ctx.fillRect(0,gy,W,H-gy);
+  ctx.fillStyle='#2e3660';ctx.fillRect(0,gy,W,5);
+  var i,b,y,t=topB(),topY=GROUND-tower.length*BH;
+  ctx.strokeStyle='rgba(177,151,252,.25)';ctx.lineWidth=2;ctx.setLineDash([6,8]);
+  ctx.beginPath();ctx.moveTo(pad.x,gy);ctx.lineTo(pad.x,topY-cam);ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,255,255,.35)';rr(t.x-t.w/2,topY-cam+2,t.w,BH-4,5);ctx.stroke();
+  for(i=0;i<tower.length;i++){
+    b=tower[i];y=GROUND-(tower.length-i)*BH-cam;
+    if(y<-BH||y>H)continue;
+    ctx.fillStyle=layerC(i);rr(b.x-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(b.x-b.w/2+4,y+5,Math.max(0,b.w-8),4);
+  }
+  if(rb&&state==='play'){
+    ctx.fillStyle='#fff';rr(pad.x-rb.w/2,gy-BH-4,rb.w,BH-4,5);ctx.fill();
+  }
+  ctx.fillStyle='#5f569e';
+  ctx.beginPath();ctx.moveTo(pad.x-34,gy);ctx.lineTo(pad.x+34,gy);ctx.lineTo(pad.x+24,gy+16);ctx.lineTo(pad.x-24,gy+16);ctx.closePath();ctx.fill();
+  if(fly){ctx.fillStyle=layerC(tower.length);rr(fly.x-fly.w/2,fly.y-11-cam,fly.w,BH-4,5);ctx.fill();}
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cam);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  for(i=0;i<3;i++){
+    ctx.beginPath();ctx.arc(W-24-i*24,26,8,0,6.283);
+    if(i>=3-hearts){ctx.fillStyle='#ff6b6b';ctx.fill();}
+    else{ctx.strokeStyle='#3a4370';ctx.lineWidth=2;ctx.stroke();}
+  }
+  ctx.textAlign='right';ctx.fillStyle='#fff';ctx.fillText('高度 '+(tower.length-1)+' 层',W-90,32);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cam);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+function aim(e){
+  var r=cv.getBoundingClientRect();
+  var px=(e.clientX-r.left)*(W/r.width);
+  pad.x=clamp(px,40,W-40);
+}
+if(window.PointerEvent){
+  cv.addEventListener('pointerdown',function(e){e.preventDefault();aim(e);});
+  cv.addEventListener('pointermove',function(e){if(e.buttons>0||e.pointerType==='touch')aim(e);});
+  cv.addEventListener('pointerup',function(e){e.preventDefault();aim(e);fire();});
+}else{
+  cv.addEventListener('mousemove',function(e){aim(e);});
+  cv.addEventListener('mouseup',function(){fire();});
+  cv.addEventListener('touchmove',function(e){e.preventDefault();aim(e.touches[0]);},{passive:false});
+  cv.addEventListener('touchend',function(e){e.preventDefault();fire();},{passive:false});
+}
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft')keys.l=true;
+  if(e.code==='ArrowRight')keys.r=true;
+  if(e.code==='Space'||e.key===' '){e.preventDefault();fire();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft')keys.l=false;
+  if(e.code==='ArrowRight')keys.r=false;
+});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

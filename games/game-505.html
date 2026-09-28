@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蚂蚁王国</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#f59e0b;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+.roles{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.role{display:flex;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:7px 10px}
+.role .ic{font-size:20px}
+.role .info{flex:1}
+.role .nm{font-size:13px;font-weight:600}
+.role .ds{font-size:11px;color:#8b90b0}
+.role .ct{font-size:16px;font-weight:700;color:#f59e0b;min-width:34px;text-align:center}
+.mini{width:30px;height:30px;border-radius:8px;border:1px solid #3d4670;background:#2c3352;color:#e8eaf6;font-size:15px;cursor:pointer;font-family:inherit}
+.mini:active{transform:scale(.92)}
+.mini:disabled{opacity:.35;cursor:default}
+.bars{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.brow{display:flex;align-items:center;gap:8px;font-size:12px;color:#c7cbe8}
+.brow .bl{width:64px}
+.bar{flex:1;height:14px;background:#0b0e1a;border-radius:7px;overflow:hidden}
+.bar>div{height:100%;width:0}
+#foodFill{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+#eggFill{background:linear-gradient(90deg,#ec4899,#f472b6)}
+.acts{display:flex;gap:8px;justify-content:center}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蚂蚁王国</h1>
+  <p class="hint">调岗:觅食产粮、挖掘扩仓、保育把 8 食物孵成 1 卵 · 巢穴是粮仓上限 · 蚁群达到 <b>80</b> 只获胜</p>
+  <div class="hud">
+    <span>蚂蚁 <b id="hAnts">6</b>/80</span>
+    <span>食物 <b id="hFood">10</b></span>
+    <span>粮仓上限 <b id="hCap">25</b></span>
+    <span>产粮 <b id="hRate">3.6</b>/秒</span>
+  </div>
+  <div id="msg"></div>
+  <div class="bars">
+    <div class="brow"><span class="bl">粮仓</span><div class="bar"><div id="foodFill"></div></div></div>
+    <div class="brow"><span class="bl">孵卵</span><div class="bar"><div id="eggFill"></div></div></div>
+  </div>
+  <div class="roles">
+    <div class="role"><span class="ic">🍞</span><div class="info"><div class="nm">觅食蚁 <b id="cF">6</b></div><div class="ds">每只每秒采 0.6 食物(其余岗位的蚂蚁都从这里调出)</div></div></div>
+    <div class="role"><span class="ic">⛏️</span><div class="info"><div class="nm">挖掘蚁 <b id="cD">0</b></div><div class="ds">每只每秒扩 0.5 巢穴空间(=粮仓上限)</div></div>
+      <button class="mini" id="dMin">−</button><button class="mini" id="dPlus">+</button></div>
+    <div class="role"><span class="ic">🥚</span><div class="info"><div class="nm">保育蚁 <b id="cC">0</b></div><div class="ds">合力攒满 8 点孵化力,消耗 8 食物产一枚卵</div></div>
+      <button class="mini" id="cMin">−</button><button class="mini" id="cPlus">+</button></div>
+  </div>
+  <div class="acts">
+    <button class="btn" id="btnQueen">安抚女王 +3 食物</button>
+  </div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">蚂蚁王国</h2>
+    <p id="ovDesc">六只蚂蚁白手起家:觅食蚁采粮,挖掘蚁扩建粮仓,保育蚁消耗食物孵出新生蚂蚁。用 − / + 按钮调配岗位比例,让粮仓永远不空、孵化从不停摆,把王国壮大到 80 只!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">建立蚁群</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elAnts=$("hAnts"),elFood=$("hFood"),elCap=$("hCap"),elRate=$("hRate"),elMsg=$("msg");
+var elF=$("cF"),elD=$("cD"),elC=$("cC"),foodFill=$("foodFill"),eggFill=$("eggFill");
+var dMin=$("dMin"),dPlus=$("dPlus"),cMin=$("cMin"),cPlus=$("cPlus"),btnQueen=$("btnQueen");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=80;
+var ants,dig,care,food,nestWork,eggT,eggs,warnT,state,msgT;
+function foragers(){return ants-dig-care;}
+function cap(){return 25+Math.floor(nestWork);}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function moveRole(kind,delta){
+  if(state!=="play")return;
+  if(kind==="dig"){
+    if(delta>0&&foragers()>0)dig++;
+    else if(delta<0&&dig>0)dig--;
+  }else{
+    if(delta>0&&foragers()>0)care++;
+    else if(delta<0&&care>0)care--;
+  }
+}
+dPlus.addEventListener("click",function(){moveRole("dig",1);});
+dMin.addEventListener("click",function(){moveRole("dig",-1);});
+cPlus.addEventListener("click",function(){moveRole("care",1);});
+cMin.addEventListener("click",function(){moveRole("care",-1);});
+btnQueen.addEventListener("click",function(){
+  if(state!=="play")return;
+  food=Math.min(cap(),food+3);
+});
+function startGame(){
+  ants=6;dig=0;care=0;food=10;nestWork=0;eggT=0;eggs=[];warnT=0;msgT=0;
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  elAnts.textContent=ants;elFood.textContent=Math.floor(food);elCap.textContent=cap();
+  elRate.textContent=(0.6*foragers()).toFixed(1);
+  elF.textContent=foragers();elD.textContent=dig;elC.textContent=care;
+  foodFill.style.width=Math.min(100,food/cap()*100)+"%";
+  eggFill.style.width=Math.min(100,eggT/8*100)+"%";
+  dMin.disabled=dig<=0;dPlus.disabled=foragers()<=0;
+  cMin.disabled=care<=0;cPlus.disabled=foragers()<=0;
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,i;
+  food=Math.min(cap(),food+0.6*foragers()*ds);
+  nestWork+=0.5*dig*ds;
+  if(eggT<8)eggT+=care*ds;
+  if(eggT>=8){
+    if(food>=8){food-=8;eggT-=8;eggs.push(5);}
+  }
+  for(i=eggs.length-1;i>=0;i--){
+    eggs[i]-=ds;
+    if(eggs[i]<=0){eggs.splice(i,1);ants++;say("一只新生蚂蚁破卵而出,加入觅食队!");}
+  }
+  if(food>=cap()-0.01){warnT-=ds;if(warnT<=0){warnT=8;say("粮仓满了!多派蚂蚁去挖巢穴,或快让保育蚁孵卵消耗粮食!");}}
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(ants>=WIN){
+    state="over";
+    showOv("蚁冠天下!","八万大军的前身,八十只蚂蚁的王国已然成型!","蚁群 "+ants+" 只 · 巢穴 "+cap()+" 容量","再来一局");
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+ants=6;dig=0;care=0;food=10;nestWork=0;eggT=0;eggs=[];warnT=0;state="menu";msgT=0;
+render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

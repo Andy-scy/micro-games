@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蜡烛行情</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fda4af;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#market{background:#131728;border:1px solid #2e3554;border-radius:12px;padding:12px;text-align:center;margin-bottom:8px}
+#price{font-size:36px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
+#price.up{color:#4ade80}
+#price.down{color:#f87171}
+#ptrend{font-size:12px;color:#8b90b0;margin-top:2px;min-height:16px}
+#chart{height:52px;background:#0b0e1a;border-radius:8px;margin-top:8px;position:relative;overflow:hidden;border:1px solid #2e3554}
+#chart canvas{display:block}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+.btn.sell{background:#16a34a;color:#eafff2;border-color:#22c55e;font-weight:700}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蜡烛行情</h1>
+  <p class="hint">蜡匠自动产蜡,点击浇成蜡烛 · 市价忽高忽低还常有大事件,低囤高卖 · 资产达到 <b>8000</b> 金币</p>
+  <div class="hud">
+    <span>资金 <b id="hMoney">120</b></span>
+    <span>蜡料 <b id="hWax">10</b></span>
+    <span>蜡烛库存 <b id="hStock">0</b>(会慢慢缩水)</span>
+    <span>每秒产蜡 <b id="hWps">0.8</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="market">
+    <div id="price">10.0</div>
+    <div id="ptrend">市场平静…</div>
+    <div id="chart"><canvas id="cv" width="460" height="52"></canvas></div>
+  </div>
+  <div class="acts">
+    <button class="btn" id="btnPour">浇制蜡烛 (5蜡→1支)</button>
+    <button class="btn sell" id="btnSell">全部抛售!</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">蜡烛行情</h2>
+    <p id="ovDesc">工坊里蜡匠日夜产蜡,你把蜡浇成蜡烛、盯准市价抛售。价格随市场起伏,还时不时传来「行会大单」「海关查税」之类的小道消息——高买低卖会亏到哭,低囤高卖才是蜡烛大亨!小心:蜡烛存货会慢慢缩水。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开市营业</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elWax=$("hWax"),elStock=$("hStock"),elWps=$("hWps"),elMsg=$("msg");
+var priceEl=$("price"),trendEl=$("ptrend"),cv=$("cv"),ctx=cv.getContext("2d");
+var btnPour=$("btnPour"),btnSell=$("btnSell"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=8000;
+var ups=[
+ {nm:"再雇蜡匠",ds:"产蜡速度 +0.8/秒",base:90,mult:2,max:10},
+ {nm:"改良模具",ds:"每次浇制 +2 支",base:120,mult:2,max:8},
+ {nm:"情报网",ds:"提前预知事件方向,崩盘减半",base:260,mult:2.4,max:2}
+];
+var money,wax,stock,t,evNext,evPhase,evDir,evT2,evMod,lastPrice,hist,upLv,state,msgT,rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function waxRate(){return 0.8*(1+upLv[0]);}
+function pourN(){return 3+2*upLv[1];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function priceNow(){
+  var p=10*(0.55+0.45*Math.sin(t/9)+0.2*Math.sin(t/3.7)+evMod);
+  return Math.max(2,Math.min(30,p));
+}
+function say(t2){elMsg.textContent=t2;msgT=3;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("资金不够!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+btnPour.addEventListener("click",function(){
+  if(state!=="play")return;
+  var n=Math.min(pourN(),Math.floor(wax/5));
+  if(n<=0){say("蜡料不足 5,等蜡匠产一产~");return;}
+  wax-=5*n;stock+=n;
+  say("浇好了 "+n+" 支蜡烛!");
+});
+btnSell.addEventListener("click",function(){
+  if(state!=="play")return;
+  if(stock<=0){say("没有库存可卖!");return;}
+  var gain=Math.floor(stock*priceNow());
+  money+=gain;
+  say("抛售 "+stock+" 支,进账 "+fmt(gain)+" 金!");
+  stock=0;
+});
+function startGame(){
+  money=120;wax=10;stock=0;t=0;
+  evNext=14+Math.random()*10;evPhase=0;evDir=1;evT2=0;evMod=0;
+  lastPrice=10;hist=[];upLv=[0,0,0];msgT=0;
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function drawChart(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  var i;
+  ctx.strokeStyle="rgba(255,255,255,0.08)";
+  ctx.beginPath();ctx.moveTo(0,26);ctx.lineTo(cv.width,26);ctx.stroke();
+  ctx.strokeStyle="#fda4af";ctx.lineWidth=2;ctx.beginPath();
+  for(i=0;i<hist.length;i++){
+    var x=i/(60-1)*cv.width;
+    var y=cv.height-(hist[i]/30*cv.height);
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+function render(){
+  var i,p=priceNow();
+  elMoney.textContent=fmt(money);elWax.textContent=Math.floor(wax);
+  elStock.textContent=stock;elWps.textContent=waxRate().toFixed(1);
+  priceEl.textContent=p.toFixed(1);
+  priceEl.className=p>lastPrice?"up":(p<lastPrice?"down":"");
+  trendEl.textContent=p>lastPrice?"▲ 行情上涨":(p<lastPrice?"▼ 行情下跌":"— 价格持平");
+  drawChart();
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+var last=0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!last)last=ts;
+  var dt=Math.min(50,ts-last);last=ts;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  t+=ds;
+  wax+=waxRate()*ds;
+  if(stock>0)stock=Math.max(0,stock*(1-0.002*ds));
+  if(evPhase===0){
+    evNext-=ds;
+    if(evNext<=0){
+      evPhase=1;evT2=3;
+      evDir=Math.random()<0.5?1:-1;
+      say(upLv[2]>0?("情报网:3秒后将"+(evDir>0?"暴涨":"暴跌")+"!"):("小道消息:行情要有大动静了…"));
+    }
+  }else if(evPhase===1){
+    evT2-=ds;
+    if(evT2<=0){
+      evPhase=2;evT2=6;
+      var amp=(0.5+Math.random()*0.4)*(evDir>0?1:(upLv[2]>0?0.5:1));
+      evMod=evDir*amp;
+      say(evDir>0?"行会大单砸来,价格起飞!":"海关查税,市场哀嚎!");
+    }
+  }else{
+    evT2-=ds;
+    if(evT2<=0){evPhase=0;evMod=0;evNext=16+Math.random()*10;say("市场恢复平静。");}
+  }
+  lastPrice=priceNow();
+  hist.push(lastPrice);
+  if(hist.length>60)hist.shift();
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(money>=WIN){
+    state="over";
+    showOv("蜡烛界巴菲特!","低买高卖炉火纯青,八千金资产闪闪发光!","资产 "+fmt(money)+" 金 · 库存 "+stock+" 支");
+  }
+}
+money=120;wax=10;stock=0;t=0;evNext=14;evPhase=0;evDir=1;evT2=0;evMod=0;lastPrice=10;hist=[];upLv=[0,0,0];state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆洞窟</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#c084fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#c084fc;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#160f24;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#c084fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#c084fc;color:#241038;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>记忆洞窟</h1>
+  <p class="hint">记住地鼠冒头的顺序 · 再按原样敲一遍</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>回合 <b id="round">1</b></span>
+    <span>生命 <b id="lives">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">记忆洞窟</h2>
+      <p id="ovDesc">洞里的地鼠会按顺序一只只冒头演示,看完后你按同样的顺序敲一遍!每答对一个 +20 分,整轮全对再奖励回合数×10 分;敲错扣一颗心并重新演示。序列会越来越长、越来越快!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elRound=$("round"),elLives=$("lives"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s220");
+var state="menu",score=0,round=1,lives=3;
+var holes=[],seq=[],phase="wait",showT=0,showIdx=0,inputIdx=0,waitT=0;
+var pops=[],floats=[],flashT=0;
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function hearts(){
+  var s="",i;
+  for(i=0;i<lives;i++)s+="♥";
+  return s;
+}
+function stepMs(){return Math.max(340,660-(round-1)*30);}
+function initHoles(){
+  holes=[];
+  for(var r=0;r<3;r++)for(var c=0;c<3;c++)holes.push({x:90+c*150,y:170+r*130});
+}
+initHoles();
+
+function popMole(idx,good){
+  pops.push({hole:idx,t:0,good:good});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+
+function newRoundHole(){
+  var last=seq.length?seq[seq.length-1]:-1;
+  var n=(Math.random()*9)|0;
+  while(n===last)n=(Math.random()*9)|0;
+  return n;
+}
+function reset(){
+  score=0;round=1;lives=3;flashT=0;
+  seq=[];
+  var i;
+  for(i=0;i<3;i++)seq.push(newRoundHole());
+  phase="show";showT=0;showIdx=-1;inputIdx=0;waitT=0;
+  pops=[];floats=[];
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s220",best);}
+  ovTitle.textContent="记忆中断…";
+  ovDesc.textContent="坚持到第 "+round+" 回合,序列长度 "+seq.length;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elRound.textContent=round;
+  elLives.textContent=hearts();
+  elLives.style.color=lives>1?"#c084fc":"#f87171";
+  elBest.textContent=best;
+}
+
+function update(dt){
+  var i;
+  if(flashT>0)flashT-=dt;
+  for(i=pops.length-1;i>=0;i--){pops[i].t+=dt;if(pops[i].t>460)pops.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>800)floats.splice(i,1);}
+  if(phase==="show"){
+    showT+=dt;
+    var idx=Math.floor(showT/stepMs());
+    if(idx!==showIdx&&idx<seq.length){
+      showIdx=idx;
+      popMole(seq[idx],true);
+    }
+    if(showT>=seq.length*stepMs()+240){
+      phase="input";
+      inputIdx=0;
+      addFloat(W/2,86,"轮到你了!","#c084fc");
+    }
+  }else if(phase==="wait"){
+    waitT-=dt;
+    if(waitT<=0){
+      phase="show";
+      showT=0;
+      showIdx=-1;
+    }
+  }
+}
+
+function pick(idx){
+  if(state!=="playing"||phase!=="input")return;
+  if(idx===seq[inputIdx]){
+    popMole(idx,true);
+    score+=20;
+    inputIdx++;
+    addFloat(holes[idx].x,holes[idx].y-52,"+20","#4ade80");
+    if(inputIdx>=seq.length){
+      score+=round*10;
+      addFloat(W/2,120,"回合完成 +"+(round*10),"#fbbf24");
+      round++;
+      seq.push(newRoundHole());
+      phase="wait";
+      waitT=850;
+    }
+  }else{
+    popMole(idx,false);
+    lives--;
+    flashT=450;
+    addFloat(holes[idx].x,holes[idx].y-52,"记错了!","#f87171");
+    if(lives<=0){endGame();return;}
+    phase="wait";
+    waitT=1000;
+  }
+  updateHud();
+}
+function whack(p){
+  if(state!=="playing"||phase!=="input")return;
+  var i;
+  for(i=0;i<9;i++){
+    var h=holes[i];
+    var dx=p.x-h.x,dy=p.y-(h.y-26);
+    if(dx*dx+dy*dy<54*54){pick(i);return;}
+  }
+}
+
+function popFrac(t){
+  if(t<130)return t/130;
+  if(t<330)return 1;
+  return Math.max(0,1-(t-330)/130);
+}
+function drawMoleAt(h,frac,good){
+  var bh=70,base=h.y+8,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-64,h.y-160,128,170);ctx.clip();
+  ctx.fillStyle=good?"#8a5fb0":"#7a3030";
+  ctx.beginPath();ctx.ellipse(h.x,cy,30,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#14101a";
+  ctx.beginPath();ctx.arc(h.x-10,cy-6,3.2,0,Math.PI*2);ctx.arc(h.x+10,cy-6,3.2,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+4,5,3.6,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function drawHole(i){
+  var h=holes[i];
+  ctx.fillStyle="#0d0716";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,46,17,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#432a6e";ctx.lineWidth=4;ctx.stroke();
+  ctx.fillStyle="rgba(192,132,252,0.35)";
+  ctx.font="bold 15px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText(String(i+1),h.x,h.y+30);
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#1c1228");g.addColorStop(1,"#0e0818");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<9;i++)drawHole(i);
+  for(i=0;i<pops.length;i++){
+    var pp=pops[i],frac=popFrac(pp.t);
+    if(frac>0.02)drawMoleAt(holes[pp.hole],frac,pp.good);
+  }
+  if(state==="playing"&&phase==="input"&&inputIdx<seq.length){
+    var h=holes[seq[inputIdx]];
+    ctx.strokeStyle="rgba(251,191,36,0.6)";
+    ctx.lineWidth=3;
+    ctx.setLineDash([6,6]);
+    ctx.beginPath();ctx.arc(h.x,h.y-16,52,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/800;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 19px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-34*fk);
+    ctx.globalAlpha=1;
+  }
+  if(flashT>0){
+    ctx.strokeStyle="rgba(248,113,113,"+(flashT/450*0.9)+")";
+    ctx.lineWidth=14;
+    ctx.strokeRect(7,7,W-14,H-14);
+  }
+  ctx.fillStyle="rgba(0,0,0,0.45)";ctx.fillRect(0,0,W,26);
+  ctx.font="bold 14px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle";
+  if(state==="playing"){
+    if(phase==="show"){
+      ctx.fillStyle="#c084fc";
+      ctx.fillText("看仔细… 第 "+(Math.min(showIdx+1,seq.length))+"/"+seq.length+" 只",10,14);
+    }else if(phase==="input"){
+      ctx.fillStyle="#fbbf24";
+      ctx.fillText("你的回合 · 已敲对 "+inputIdx+"/"+seq.length,10,14);
+    }else{
+      ctx.fillStyle="#8b90b0";
+      ctx.fillText("准备…",10,14);
+    }
+  }else{
+    ctx.fillStyle="#8b90b0";
+    ctx.fillText("记忆洞窟",10,14);
+  }
+  ctx.textAlign="right";
+  ctx.fillStyle="#c084fc";
+  ctx.fillText("回合 "+round,470,14);
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var n=parseInt(e.key,10);
+  if(n>=1&&n<=9)pick(n-1);
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

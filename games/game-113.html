@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双子同操</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双子同操</h1>
+  <p class="hint">方向键 / WASD 同时控制双子 · 触屏拖动 · 任何一位被击中即败</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双子同操</h2>
+      <p id="ovDesc">青色与橙色双子共享同一套操作:你按左,两人一起向左!任何一位被弹幕击中都会结束游戏。绿色能量球任一双子拾取均可 +15 分。找到让两人都安全的走位吧!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var KEY="mg_s113";
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest(KEY);
+var state="menu",score=0,timeMs=0,lastT=0;
+var pa={x:W*0.3,y:H-70},pb={x:W*0.7,y:H-70};
+var bullets=[],orbs=[],parts=[];
+var orbT=1,crossT=0.4,ringT=5;
+var keys={};
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function d2f(ax,ay,bx,by){var dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;}
+function rand(a,b){return a+Math.random()*(b-a);}
+function updHud(){elScore.textContent=Math.floor(score);elBest.textContent=best;}
+function reset(){
+  score=0;timeMs=0;bullets=[];orbs=[];parts=[];keys={};
+  pa.x=W*0.3;pa.y=H-70;
+  pb.x=W*0.7;pb.y=H-70;
+  orbT=1;crossT=0.4;ringT=5;
+  updHud();
+}
+function burst(x,y,c,n){
+  var i;
+  for(i=0;i<n;i++){parts.push({x:x,y:y,vx:rand(-130,130),vy:rand(-130,130),t:0.5,c:c});}
+}
+function edgePoint(){
+  var side=Math.floor(rand(0,4)),m=-12;
+  if(side===0)return {x:rand(0,W),y:m};
+  if(side===1)return {x:rand(0,W),y:H-m};
+  if(side===2)return {x:m,y:rand(0,H)};
+  return {x:W-m,y:rand(0,H)};
+}
+function hitAny(b){
+  return d2f(b.x,b.y,pa.x,pa.y)<(b.r+8)*(b.r+8)||d2f(b.x,b.y,pb.x,pb.y)<(b.r+8)*(b.r+8);
+}
+function moveInput(){
+  var mx=0,my=0;
+  if(keys.ArrowLeft||keys.a)mx-=1;
+  if(keys.ArrowRight||keys.d)mx+=1;
+  if(keys.ArrowUp||keys.w)my-=1;
+  if(keys.ArrowDown||keys.s)my+=1;
+  var l=Math.sqrt(mx*mx+my*my);
+  if(l>0){mx/=l;my/=l;}
+  return {x:mx,y:my};
+}
+function update(dt){
+  var s=dt/1000,i,b;
+  timeMs+=dt;score+=s*10;
+  var mv=moveInput();
+  pa.x=clamp(pa.x+mv.x*190*s,10,W-10);
+  pa.y=clamp(pa.y+mv.y*190*s,10,H-10);
+  pb.x=clamp(pb.x+mv.x*190*s,10,W-10);
+  pb.y=clamp(pb.y+mv.y*190*s,10,H-10);
+  orbT-=s;
+  if(orbT<=0){
+    orbT=2.0;
+    var o={x:0,y:0,ok:false,tries:0};
+    while(!o.ok&&o.tries<20){
+      o.x=rand(40,W-40);o.y=rand(40,H-40);
+      o.ok=d2f(o.x,o.y,pa.x,pa.y)>60*60&&d2f(o.x,o.y,pb.x,pb.y)>60*60;
+      o.tries++;
+    }
+    if(o.ok)orbs.push({x:o.x,y:o.y});
+  }
+  crossT-=s;
+  if(crossT<=0){
+    crossT=Math.max(0.24,0.45-timeMs*0.0000015);
+    var e=edgePoint();
+    var tx=(pa.x+pb.x)/2+rand(-80,80);
+    var ty=(pa.y+pb.y)/2+rand(-80,80);
+    var a=Math.atan2(ty-e.y,tx-e.x);
+    var sp=115+Math.min(60,timeMs/1400);
+    bullets.push({x:e.x,y:e.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:4.5});
+  }
+  ringT-=s;
+  if(ringT<=0){
+    ringT=5.5;
+    var n=13,j;
+    for(j=0;j<n;j++){
+      var aa=j*Math.PI*2/n;
+      bullets.push({x:W/2,y:H/2,vx:Math.cos(aa)*72,vy:Math.sin(aa)*72,r:4});
+    }
+  }
+  for(i=orbs.length-1;i>=0;i--){
+    var ob=orbs[i];
+    if(d2f(ob.x,ob.y,pa.x,pa.y)<17*17||d2f(ob.x,ob.y,pb.x,pb.y)<17*17){
+      score+=15;
+      burst(ob.x,ob.y,"#4ade80",10);
+      orbs.splice(i,1);
+    }
+  }
+  for(i=bullets.length-1;i>=0;i--){
+    b=bullets[i];
+    b.x+=b.vx*s;b.y+=b.vy*s;
+    if(b.x<-30||b.x>W+30||b.y<-30||b.y>H+30){bullets.splice(i,1);continue;}
+    if(hitAny(b)){die("一位双子被弹幕击中了!");return;}
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];p.t-=s;p.x+=p.vx*s;p.y+=p.vy*s;
+    if(p.t<=0)parts.splice(i,1);
+  }
+  updHud();
+}
+function die(msg){
+  state="over";
+  burst(pa.x,pa.y,"#22d3ee",18);
+  burst(pb.x,pb.y,"#fb923c",18);
+  if(Math.floor(score)>best){best=Math.floor(score);saveBest(KEY,best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+Math.floor(score)+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function drawGrid(){
+  var x,y;
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<W;x+=40)for(y=0;y<H;y+=40)ctx.fillRect(x+1,y+1,38,38);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawGrid();
+  var i;
+  ctx.strokeStyle="rgba(148,163,184,0.25)";
+  ctx.setLineDash([4,7]);
+  ctx.beginPath();ctx.moveTo(pa.x,pa.y);ctx.lineTo(pb.x,pb.y);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle="#4ade80";
+  ctx.shadowColor="#4ade80";ctx.shadowBlur=10;
+  for(i=0;i<orbs.length;i++){
+    var ob=orbs[i];
+    ctx.beginPath();ctx.arc(ob.x,ob.y,7,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#f472b6";
+  for(i=0;i<bullets.length;i++){
+    var b=bullets[i];
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+  for(i=0;i<parts.length;i++){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.t*2);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#22d3ee";
+  ctx.shadowColor="#22d3ee";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(pa.x,pa.y,8,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#fb923c";
+  ctx.shadowColor="#fb923c";
+  ctx.beginPath();ctx.arc(pb.x,pb.y,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle="rgba(255,255,255,0.5)";
+  ctx.beginPath();ctx.arc(pa.x,pa.y,12,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.arc(pb.x,pb.y,12,0,Math.PI*2);ctx.stroke();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function kn(e){var k=e.key;return k.length===1?k.toLowerCase():k;}
+document.addEventListener("keydown",function(e){
+  var k=kn(e);
+  if(k==="ArrowUp"||k==="ArrowDown"||k==="ArrowLeft"||k==="ArrowRight"||k===" ")e.preventDefault();
+  if(state!=="playing"){
+    if(k===" "||k==="Enter")startGame();
+    return;
+  }
+  keys[k]=true;
+});
+document.addEventListener("keyup",function(e){keys[kn(e)]=false;});
+var tId=null,lx=0,ly=0;
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];tId=t.identifier;
+  var r=cv.getBoundingClientRect();
+  lx=(t.clientX-r.left)*(W/r.width);ly=(t.clientY-r.top)*(H/r.height);
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect(),i,t;
+  for(i=0;i<e.changedTouches.length;i++){
+    t=e.changedTouches[i];
+    if(t.identifier===tId){
+      var x=(t.clientX-r.left)*(W/r.width),y=(t.clientY-r.top)*(H/r.height);
+      var dx=x-lx,dy=y-ly;
+      pa.x=clamp(pa.x+dx,10,W-10);
+      pa.y=clamp(pa.y+dy,10,H-10);
+      pb.x=clamp(pb.x+dx,10,W-10);
+      pb.y=clamp(pb.y+dy,10,H-10);
+      lx=x;ly=y;
+    }
+  }
+},{passive:false});
+function tEnd(e){
+  var i;
+  for(i=0;i<e.changedTouches.length;i++){if(e.changedTouches[i].identifier===tId)tId=null;}
+}
+cv.addEventListener("touchend",tEnd,{passive:false});
+cv.addEventListener("touchcancel",tEnd,{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

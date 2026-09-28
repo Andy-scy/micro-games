@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>火箭点火</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb7185;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb7185;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb7185}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb7185;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>火箭点火</h1>
+  <p class="hint">按住空格 / 鼠标 / 触屏 = 点火推进 · 喷太久引擎会过热熄火!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">火箭点火</h2>
+      <p id="ovDesc">点火的推进是持续的:按住引擎猛喷上冲,松开后箭体下坠,推力远大于重力,手感很冲!但热量表涨满时引擎强制熄火 1 秒半,只能滑翔。穿过小行星群 +1 分,撞上陨石或坠地即毁。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">点火起飞</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,BX=110,BR=14,SPEED=160,SPACE=268;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,clusters,parts,popups,score,best=0,tick,hold,heat,stall;
+function reset(){
+  bird={y:300,vy:0};
+  clusters=[];parts=[];popups=[];
+  score=0;tick=0;hold=false;heat=0;stall=0;
+  clusters.push(genCluster(W+180));
+  elScore.textContent="0";
+}
+function genCluster(x){
+  var cy=160+Math.random()*(GROUND-320),gap=152;
+  var rocks=[
+    {dx:(Math.random()*24-12),dy:-gap/2-30,r:24+Math.random()*11},
+    {dx:(Math.random()*30-15),dy:-gap/2-76,r:22+Math.random()*11},
+    {dx:(Math.random()*24-12),dy:gap/2+30,r:24+Math.random()*11},
+    {dx:(Math.random()*30-15),dy:gap/2+76,r:22+Math.random()*11}
+  ];
+  return{x:x,cy:cy,rocks:rocks,passed:false};
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var i,j,c,thrusting;
+  tick+=dt;
+  thrusting=hold&&stall<=0;
+  if(thrusting){
+    bird.vy-=1250*dt;
+    heat+=62*dt;
+    for(j=0;j<2;j++)parts.push({x:BX-6+Math.random()*12,y:bird.y+16,vx:-60-Math.random()*60,vy:130+Math.random()*90,life:0.4,col:"#fb923c",r:3+Math.random()*3});
+    if(heat>=100){heat=100;stall=1.25;popups.push({x:W/2,y:120,txt:"引擎过热!熄火中…",life:1.1});}
+  }else{
+    heat=Math.max(0,heat-44*dt);
+  }
+  if(stall>0){
+    stall-=dt;
+    heat=Math.max(0,heat-70*dt);
+    if(Math.random()<0.6)parts.push({x:BX+(Math.random()*14-7),y:bird.y+14,vx:-40+Math.random()*80,vy:60+Math.random()*60,life:0.9,col:"#64748b",r:4+Math.random()*4});
+  }
+  bird.vy+=1020*dt;
+  if(bird.vy<-470)bird.vy=-470;
+  if(bird.vy>470)bird.vy=470;
+  bird.y+=bird.vy*dt;
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("火箭坠地爆炸了!");return;}
+  for(i=0;i<clusters.length;i++)clusters[i].x-=SPEED*dt;
+  if(clusters[clusters.length-1].x<W-SPACE)clusters.push(genCluster(W+24));
+  if(clusters[0].x<-110)clusters.shift();
+  for(i=0;i<clusters.length;i++){
+    c=clusters[i];
+    if(!c.passed&&c.x<BX-BR-60){
+      c.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+36,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    for(j=0;j<c.rocks.length;j++){
+      var rk=c.rocks[j];
+      var rx=c.x+rk.dx,ry=c.cy+rk.dy;
+      var dx=BX-rx,dy=bird.y-ry,rr=BR+rk.r-4;
+      if(dx*dx+dy*dy<rr*rr){die("轰!撞上了小行星!");return;}
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var pt=parts[i];
+    pt.x+=pt.vx*dt;pt.y+=pt.vy*dt;pt.life-=dt;
+    if(pt.life<=0)parts.splice(i,1);
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=40*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function draw(){
+  var i,j;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#120d18";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,235,220,0.4)";
+  for(i=0;i<45;i++)ctx.fillRect((i*127)%W,(i*311)%GROUND,1.3,1.3);
+  for(i=0;i<clusters.length;i++){
+    var c=clusters[i];
+    for(j=0;j<c.rocks.length;j++){
+      var rk=c.rocks[j];
+      ctx.fillStyle="#57534e";
+      ctx.beginPath();ctx.arc(c.x+rk.dx,c.cy+rk.dy,rk.r,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#6b6560";
+      ctx.beginPath();ctx.arc(c.x+rk.dx-rk.r*0.3,c.cy+rk.dy-rk.r*0.3,rk.r*0.45,0,Math.PI*2);ctx.fill();
+    }
+  }
+  for(i=0;i<parts.length;i++){
+    var pt=parts[i];
+    ctx.globalAlpha=Math.max(0,pt.life*2.2);
+    ctx.fillStyle=pt.col;
+    ctx.beginPath();ctx.arc(pt.x,pt.y,pt.r,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="#1f2030";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#2c2d42";
+  var off=(tick*160)%26;
+  for(i=-1;i<W/26+1;i++)ctx.fillRect(i*26-off,GROUND,13,6);
+  ctx.save();
+  ctx.translate(BX,bird.y);
+  ctx.rotate(Math.max(-0.35,Math.min(0.35,bird.vy*0.0008)));
+  if(hold&&stall<=0){
+    ctx.fillStyle="#fde047";
+    var fl=14+Math.random()*10;
+    ctx.beginPath();ctx.moveTo(-10,-6);ctx.lineTo(-10-fl,0);ctx.lineTo(-10,6);ctx.closePath();ctx.fill();
+  }
+  ctx.fillStyle="#fb7185";
+  ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-10,-12);ctx.lineTo(-10,12);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#e11d48";
+  ctx.beginPath();ctx.moveTo(-6,-11);ctx.lineTo(-16,-17);ctx.lineTo(-10,-4);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(-6,11);ctx.lineTo(-16,17);ctx.lineTo(-10,4);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#fecdd3";
+  ctx.beginPath();ctx.arc(6,0,3.5,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="rgba(8,10,22,0.7)";
+  ctx.fillRect(14,14,158,18);
+  ctx.strokeStyle="#94a3b8";ctx.lineWidth=1.5;
+  ctx.strokeRect(14,14,158,18);
+  ctx.fillStyle=stall>0?"#f87171":(heat>70?"#fb923c":(heat>35?"#fde047":"#4ade80"));
+  ctx.fillRect(17,17,152*(heat/100),12);
+  ctx.fillStyle="#e8eaf6";
+  ctx.font="bold 11px system-ui";ctx.textAlign="left";ctx.textBaseline="middle";
+  ctx.fillText("热量",20,41);
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(253,164,175,"+Math.min(1,popups[i].life)+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function setHold(v){
+  if(state==="playing")hold=v;
+  else hold=false;
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)setHold(true);}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "||e.key==="ArrowUp")setHold(false);
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();setHold(true);});
+document.addEventListener("mouseup",function(){setHold(false);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();setHold(true);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();setHold(false);},{passive:false});
+cv.addEventListener("touchcancel",function(){setHold(false);});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>咖啡物语</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fb923c;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#cust{background:#131728;border:1px solid #2e3554;border-radius:12px;padding:10px;text-align:center;margin-bottom:8px}
+#ordSeq{display:flex;gap:6px;justify-content:center;min-height:38px;align-items:center;flex-wrap:wrap}
+.chip{padding:6px 12px;border-radius:9px;font-size:14px;font-weight:700;border:1px solid rgba(255,255,255,.25);opacity:.95}
+.chip.done{outline:3px solid #4ade80;opacity:1}
+#patBar{height:10px;background:#0b0e1a;border-radius:5px;overflow:hidden;margin-top:8px}
+#patFill{height:100%;width:100%;background:linear-gradient(90deg,#16a34a,#4ade80)}
+#patFill.late{background:linear-gradient(90deg,#dc2626,#f87171)}
+#ing{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:8px}
+.ingbtn{border:1px solid #3d4670;border-radius:10px;padding:12px 0;font-size:15px;font-weight:700;cursor:pointer;color:#10131f;font-family:inherit}
+.ingbtn:active{transform:scale(.94)}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>咖啡物语</h1>
+  <p class="hint">按顾客点单顺序依次点击原料键 · 做对涨连击与熟客度,熟客自动躺赚 · 累计营收 <b>800</b> 金币</p>
+  <div class="hud">
+    <span>营收 <b id="hMoney">0</b>/800</span>
+    <span>连击 <b id="hCombo">0</b></span>
+    <span>熟客 <b id="hReg">0</b></span>
+    <span>已服务 <b id="hServed">0</b> 人</span>
+  </div>
+  <div id="msg"></div>
+  <div id="cust">
+    <div id="ordSeq"></div>
+    <div id="patBar"><div id="patFill"></div></div>
+  </div>
+  <div id="ing"></div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">咖啡物语</h2>
+    <p id="ovDesc">顾客报出原料顺序(如 糖→奶→咖),照顺序点击下方原料键做咖啡。全对即出杯:连击越高小费越猛,熟客度上涨后老顾客会源源不断送来被动收入。做错一步从头再来还扣耐心,趁热乎攒 800 金币!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开门迎客</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elCombo=$("hCombo"),elReg=$("hReg"),elServed=$("hServed"),elMsg=$("msg");
+var ordSeq=$("ordSeq"),patFill=$("patFill"),ingEl=$("ing"),shopEl=$("shop");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=800;
+var ings=[
+ {nm:"咖啡豆",tag:"咖",col:"#b45309"},
+ {nm:"牛奶",tag:"奶",col:"#d1d5db"},
+ {nm:"糖浆",tag:"糖",col:"#fbbf24"},
+ {nm:"冰块",tag:"冰",col:"#38bdf8"},
+ {nm:"可可",tag:"可",col:"#92400e"}
+];
+var ups=[
+ {nm:"拉花培训",ds:"每单收入 +20%",base:90,mult:2,max:6},
+ {nm:"大磨豆机",ds:"顾客耐心 +4 秒",base:120,mult:2,max:3},
+ {nm:"会员卡",ds:"熟客被动收入 +50%",base:200,mult:2.2,max:4}
+];
+var money,combo,regulars,served,seq,progress,patience,patMax,gapT,hasCust,upLv,state,msgT,rows=[],ingBtns=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.4;}
+function newCust(){
+  var len=3+Math.min(2,Math.floor(served/8));
+  seq=[];progress=0;
+  var i;
+  for(i=0;i<len;i++)seq.push(Math.floor(Math.random()*5));
+  patMax=16+4*upLv[1];patience=patMax;
+  hasCust=true;renderSeq();
+}
+function renderSeq(){
+  ordSeq.innerHTML="";
+  var i;
+  for(i=0;i<seq.length;i++){
+    var d=document.createElement("span");
+    d.className="chip"+(i<progress?" done":"");
+    d.style.background=ings[seq[i]].col;
+    if(seq[i]===1)d.style.color="#10131f";
+    d.textContent=ings[seq[i]].tag;
+    ordSeq.appendChild(d);
+  }
+}
+function buildUI(){
+  var i;
+  ingEl.innerHTML="";ingBtns=[];
+  for(i=0;i<ings.length;i++){
+    var b=document.createElement("button");
+    b.className="ingbtn";
+    b.style.background=ings[i].col;
+    if(i===1)b.style.color="#10131f";
+    b.textContent=ings[i].tag;
+    (function(idx){b.addEventListener("click",function(){tap(idx);});})(i);
+    ingEl.appendChild(b);ingBtns.push(b);
+  }
+  shopEl.innerHTML="";rows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function tap(idx){
+  if(state!=="play"||!hasCust)return;
+  if(idx===seq[progress]){
+    progress++;
+    if(progress>=seq.length){
+      var pay=Math.floor((10+2*combo)*(1+0.2*upLv[0]));
+      money+=pay;combo=Math.min(10,combo+1);
+      regulars=Math.min(60,regulars+2);served++;
+      hasCust=false;gapT=1.1;
+      say("完美出杯!+"+pay+" 金(连击 x"+combo+")");
+    }
+    renderSeq();
+  }else{
+    progress=0;patience-=3;
+    say("做错了!顾客皱起眉头…");
+    renderSeq();
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够!");return;}
+  money-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function startGame(){
+  money=0;combo=0;regulars=0;served=0;upLv=[0,0,0];gapT=0;msgT=0;
+  hasCust=false;seq=[];progress=0;
+  ordSeq.innerHTML="";patFill.style.width="100%";
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var i;
+  elMoney.textContent=fmt(money);elCombo.textContent=combo;
+  elReg.textContent=regulars;elServed.textContent=served;
+  if(hasCust){
+    var pc=patience/patMax*100;
+    patFill.style.width=Math.max(0,pc)+"%";
+    patFill.classList.toggle("late",pc<33);
+  }
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  money+=regulars*0.15*(1+0.5*upLv[2])*ds;
+  if(hasCust){
+    patience-=ds;
+    if(patience<=0){
+      combo=0;regulars=Math.max(0,regulars-2);
+      hasCust=false;gapT=1.2;
+      say("顾客等太久走掉了…连击清空!");
+    }
+  }else{
+    gapT-=ds;
+    if(gapT<=0)newCust();
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(money>=WIN){
+    state="over";
+    showOv("咖啡街之光!","熟客排到街角,你的拿铁被写进了城市美食地图!","累计营收 "+fmt(money)+" 金 · 服务 "+served+" 位客人");
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+money=0;combo=0;regulars=0;served=0;upLv=[0,0,0];gapT=0;state="menu";msgT=0;
+seq=[];progress=0;patience=16;patMax=16;hasCust=false;
+buildUI();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

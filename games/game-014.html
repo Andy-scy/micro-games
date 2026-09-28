@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>惯性漂移</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>惯性漂移</h1>
+  <p class="hint">← → 或 A/D 转向 · 触屏按住左 / 右半屏 · 无格子自由滑行</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>身长 <b id="len">90</b></span>
+    <span>速度 <b id="spd">150</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">惯性漂移</h2>
+      <p id="ovDesc">这不是格子蛇!灵蛇带惯性持续滑行,只能左右打方向。拾取能量核让身体变长提速,但长长的轨迹就是你的死穴——别擦到自己!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var W=480,H=360,MARGIN=9;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLen=$("len"),elSpd=$("spd");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s014");
+var state="menu";
+var hx,hy,ang,speed,bodyLen,trail,food,score,acc,lastT,pulse,fx;
+var keyL=false,keyR=false,touchSteer=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function reset(){
+  hx=W/2;hy=H/2;ang=0;
+  speed=150;bodyLen=90;
+  trail=[{x:hx,y:hy}];
+  score=0;acc=0;pulse=0;fx=null;
+  spawnFood();
+  updateHud();
+}
+function spawnFood(){
+  var tries=0;
+  while(tries<80){
+    tries++;
+    var x=MARGIN+26+Math.random()*(W-2*(MARGIN+26));
+    var y=MARGIN+26+Math.random()*(H-2*(MARGIN+26));
+    if(Math.hypot(x-hx,y-hy)<80)continue;
+    food={x:x,y:y};
+    return;
+  }
+  food={x:W/2,y:60};
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLen.textContent=Math.round(bodyLen);
+  elSpd.textContent=Math.round(speed);
+}
+function steer(){
+  if(touchSteer!==0)return touchSteer;
+  return (keyR?1:0)-(keyL?1:0);
+}
+function update(dt){
+  var st=steer();
+  ang+=st*3.4*dt;
+  hx+=Math.cos(ang)*speed*dt;
+  hy+=Math.sin(ang)*speed*dt;
+  if(hx<MARGIN||hy<MARGIN||hx>W-MARGIN||hy>H-MARGIN){gameOver("滑出了场地边界!");return;}
+  trail.unshift({x:hx,y:hy});
+  var total=0,i;
+  for(i=1;i<trail.length;i++){
+    total+=Math.hypot(trail[i].x-trail[i-1].x,trail[i].y-trail[i-1].y);
+    if(total>bodyLen){trail.length=i+1;break;}
+  }
+  var walked=0;
+  for(i=1;i<trail.length;i++){
+    walked+=Math.hypot(trail[i].x-trail[i-1].x,trail[i].y-trail[i-1].y);
+    if(walked<30)continue;
+    if(Math.hypot(trail[i].x-hx,trail[i].y-hy)<7.5){gameOver("擦到了自己的轨迹!");return;}
+  }
+  if(Math.hypot(food.x-hx,food.y-hy)<16){
+    score+=10;
+    bodyLen=Math.min(340,bodyLen+20);
+    speed=Math.min(260,speed+4);
+    fx={x:food.x,y:food.y,t:400};
+    spawnFood();
+    updateHud();
+  }
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s014",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function draw(){
+  var i,n;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.04)";
+  for(i=20;i<W;i+=40)for(n=20;n<H;n+=40){
+    ctx.beginPath();ctx.arc(i,n,1.2,0,Math.PI*2);ctx.fill();
+  }
+  ctx.strokeStyle="rgba(74,222,128,0.25)";
+  ctx.lineWidth=2;
+  ctx.strokeRect(MARGIN,MARGIN,W-2*MARGIN,H-2*MARGIN);
+  ctx.lineWidth=1;
+  if(fx){
+    fx.t-=16;
+    if(fx.t<=0)fx=null;
+    else{
+      ctx.globalAlpha=fx.t/400;
+      ctx.strokeStyle="#fbbf24";
+      ctx.beginPath();ctx.arc(fx.x,fx.y,8+(1-fx.t/400)*14,0,Math.PI*2);ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+  }
+  n=trail.length;
+  for(i=n-1;i>=1;i--){
+    var t=i/n;
+    ctx.globalAlpha=0.85-0.35*t;
+    ctx.fillStyle="#22c55e";
+    ctx.beginPath();
+    ctx.arc(trail[i].x,trail[i].y,4.5+4*(1-t),0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#f87171";
+  ctx.shadowColor="#f87171";ctx.shadowBlur=16;
+  ctx.beginPath();
+  ctx.arc(food.x,food.y,8+Math.sin(pulse)*1.8,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#86efac";
+  ctx.beginPath();ctx.arc(hx,hy,9,0,Math.PI*2);ctx.fill();
+  var px=Math.cos(ang+Math.PI/2),py=Math.sin(ang+Math.PI/2);
+  var fx1=hx+Math.cos(ang)*4,fy1=hy+Math.sin(ang)*4;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(fx1+px*3.4,fy1+py*3.4,2.2,0,Math.PI*2);
+  ctx.arc(fx1-px*3.4,fy1-py*3.4,2.2,0,Math.PI*2);
+  ctx.fill();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT)/1000;lastT=t;
+  pulse+=dt*4;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowLeft"||k==="a"||k==="A"){keyL=true;e.preventDefault();}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){keyR=true;e.preventDefault();}
+  else if(k===" ")e.preventDefault();
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k==="ArrowLeft"||k==="a"||k==="A")keyL=false;
+  else if(k==="ArrowRight"||k==="d"||k==="D")keyR=false;
+});
+function touchRead(e){
+  var t=e.touches[0];
+  if(!t){touchSteer=0;return;}
+  var rect=cv.getBoundingClientRect();
+  touchSteer=(t.clientX-rect.left)<rect.width/2?-1:1;
+  e.preventDefault();
+}
+cv.addEventListener("touchstart",touchRead,{passive:false});
+cv.addEventListener("touchmove",touchRead,{passive:false});
+cv.addEventListener("touchend",function(e){touchSteer=0;e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

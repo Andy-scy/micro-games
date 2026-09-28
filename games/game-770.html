@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>瘟毒蔓延</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none;cursor:crosshair}
+.sbtn{border:0;border-radius:8px;padding:10px 6px;font-size:13px;background:#232a4a;color:#e8eaf6;cursor:pointer;flex:1;font-weight:700}
+.sbtn.on{background:#4cc9f0;color:#081226}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>瘟毒蔓延</h1>
+  <p class="tips">毒塔命中让敌人持续掉血;中毒的敌人死亡时,瘟疫会传染给附近同伴,一传十、十传百!让瘟疫替你清场。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">金币</div><div class="big" id="gd">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="lf">0</div></div>
+    <div class="stat"><div class="mut">波次</div><div class="big" id="wv">0/12</div></div>
+    <div class="stat"><div class="mut">感染</div><div class="big" id="if0">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="sbtn on" id="bA">毒塔 70金</button>
+    <button class="sbtn" id="bB">箭塔 50金</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">瘟毒蔓延</h2><p id="ovp">玩法说明:<br>· 毒塔(70金):命中附加中毒,每秒 5 点持续 4 秒<br>· 中毒单位死亡时,瘟疫传染给 75 范围内所有敌人(续 3 秒)<br>· 传染可连锁:一片密集敌群会被瘟疫融化<br>· 箭塔(50金):单体直伤,负责收割残血<br>· 先点选塔型,再点击空地建造<br>· 撑过 12 波获得胜利!传染击杀越多越赚!</p><button class="btn" id="obtn">投放病原</button></div></div>
+<script>
+'use strict';
+var W=480,H=360,CS=40;
+function $i(id){return document.getElementById(id)}
+var cv=$i('cv'),ctx=cv.getContext('2d');
+var WPTS=[[-20,300],[140,300],[140,120],[340,120],[340,240],[500,240]];
+var segs=[],PLEN=0;
+function buildPath(){segs=[];PLEN=0;var i;for(i=0;i<WPTS.length-1;i++){var ax=WPTS[i][0],ay=WPTS[i][1],bx=WPTS[i+1][0],by=WPTS[i+1][1];var dx=bx-ax,dy=by-ay,len=Math.sqrt(dx*dx+dy*dy);segs.push({ax:ax,ay:ay,dx:dx/len,dy:dy/len,len:len});PLEN+=len;}}
+function posAt(d){var i=0;while(i<segs.length&&d>segs[i].len){d-=segs[i].len;i++;}if(i>=segs.length)i=segs.length-1;var s=segs[i],t=Math.min(d,s.len);return{x:s.ax+s.dx*t,y:s.ay+s.dy*t};}
+function dist2(x,y,s){var px=x-s.ax,py=y-s.ay,t=px*s.dx+py*s.dy;t=Math.max(0,Math.min(s.len,t));var ex=s.ax+s.dx*t-x,ey=s.ay+s.dy*t-y;return ex*ex+ey*ey;}
+function blocked(c,r){var x=c*CS+CS/2,y=r*CS+CS/2,i;for(i=0;i<segs.length;i++){if(dist2(x,y,segs[i])<529)return true;}return false;}
+var money=0,lives=0,kills=0,infect=0,wave=0,running=false,over=false;
+var enemies=[],towers=[],shots=[],parts=[],rings=[];
+var toSpawn=[],spawnT=0,interT=0,phase='wait',banner=0,buildType='a';
+function makeWave(n){var arr=[],i;if(n===12){arr.push({hp:1800,mhp:1800,spd:24,rw:200,r:16,leak:4,boss:true});return arr;}
+var cnt=6+n,hp=32+17*n,spd=42+1.8*n,rw=7+n;for(i=0;i<cnt;i++)arr.push({hp:hp,mhp:hp,spd:spd,rw:rw,r:9,leak:1,boss:false});return arr;}
+function burst(x,y,c,n){var k;for(k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*110;parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:1.5+Math.random()*2.5,c:c,life:0.35+Math.random()*0.3});}}
+function applyPoison(e,t){if(e.hp<=0)return;e.pois=Math.max(e.pois||0,t);e.pdmg=5;}
+function reset(){money=140;lives=10;kills=0;infect=0;wave=0;enemies=[];towers=[];shots=[];parts=[];rings=[];toSpawn=[];spawnT=0;interT=1.5;phase='wait';banner=0;over=false;hud();}
+function hud(){$i('gd').textContent=money;$i('lf').textContent=lives;$i('wv').textContent=wave+'/12';$i('if0').textContent=infect;}
+function acquire(t){var best=null,bd=-1,i;for(i=0;i<enemies.length;i++){var e=enemies[i];if(e.hp<=0||e.d>=PLEN)continue;var p=posAt(e.d);var dx=p.x-t.x,dy=p.y-t.y;if(dx*dx+dy*dy<=t.range*t.range&&e.d>bd){bd=e.d;best=e;}}return best;}
+function killEnemy(e){var p=posAt(Math.min(e.d,PLEN));kills++;money+=e.rw;
+if(e.pois>0){infect++;rings.push({x:p.x,y:p.y,r:12,max:75,life:0.4});
+var j;for(j=0;j<enemies.length;j++){var o=enemies[j];if(o===e||o.hp<=0)continue;var op=posAt(Math.min(o.d,PLEN));var dx=op.x-p.x,dy=op.y-p.y;if(dx*dx+dy*dy<=75*75)applyPoison(o,3);}
+burst(p.x,p.y,'#7ee08a',10);}
+else burst(p.x,p.y,'#ffd166',8);}
+function gameOver(win){over=true;running=false;
+if(win){$i('ovt').textContent='瘟疫大师!';$i('ovp').innerHTML='十二波敌军全部击退!<br>传染击杀:<b>'+infect+'</b> · 总击杀:<b>'+kills+'</b> · 剩余生命:<b>'+lives+'</b>';}
+else{$i('ovt').textContent='疫情失控…';$i('ovp').innerHTML='止步于第 '+wave+' 波<br>传染击杀:<b>'+infect+'</b> · 总击杀:<b>'+kills+'</b><br>提示:把毒塔建在敌人扎堆的弯道,传染链最凶!';}
+$i('obtn').textContent='再来一局';$i('overlay').classList.remove('hide');}
+function update(dt){var i;
+for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+for(i=rings.length-1;i>=0;i--){rings[i].life-=dt;if(rings[i].life<=0)rings.splice(i,1);}
+if(banner>0)banner-=dt;
+if(!running)return;
+if(phase==='wait'){interT-=dt;if(interT<=0){wave++;toSpawn=makeWave(wave);spawnT=0.4;phase='spawn';banner=1.2;hud();}}
+else{if(toSpawn.length>0){spawnT-=dt;if(spawnT<=0){var nx=toSpawn.shift();enemies.push(nx);spawnT=nx.boss?1.4:0.7;}}}
+for(i=enemies.length-1;i>=0;i--){var e=enemies[i];
+if(e.pois>0){e.pois-=dt;e.hp-=e.pdmg*dt;}
+e.d+=e.spd*dt;
+if(e.d>=PLEN){var lp=posAt(PLEN-4);lives-=e.leak;burst(lp.x,lp.y,'#ff6b6b',12);enemies.splice(i,1);hud();if(lives<=0){lives=0;hud();gameOver(false);return;}continue;}}
+for(i=0;i<towers.length;i++){var t=towers[i];t.cool-=dt;
+if(t.cool<=0){var tg=acquire(t);if(tg){var pp=posAt(tg.d);t.ang=Math.atan2(pp.y-t.y,pp.x-t.x);t.cool=t.rate;shots.push({x:t.x,y:t.y,tg:tg,lx:pp.x,ly:pp.y,spd:340,dmg:t.dmg,ps:t.type==='a'});}else t.cool=0.06;}}
+for(i=shots.length-1;i>=0;i--){var s=shots[i];var tx=s.lx,ty=s.ly;
+if(s.tg&&s.tg.hp>0){var p2=posAt(Math.min(s.tg.d,PLEN));s.lx=p2.x;s.ly=p2.y;tx=p2.x;ty=p2.y;}
+var dx=tx-s.x,dy=ty-s.y,d=Math.sqrt(dx*dx+dy*dy),st=s.spd*dt;
+if(d<=st+3){if(s.tg&&s.tg.hp>0){s.tg.hp-=s.dmg;if(s.ps)applyPoison(s.tg,4);}shots.splice(i,1);}
+else{s.x+=dx/d*st;s.y+=dy/d*st;}}
+for(i=enemies.length-1;i>=0;i--){if(enemies[i].hp<=0){killEnemy(enemies[i]);enemies.splice(i,1);}}
+if(phase==='spawn'&&toSpawn.length===0&&enemies.length===0){money+=30;hud();if(wave>=12){gameOver(true);return;}phase='wait';interT=3;}}
+function draw(){var i;
+var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#12251e');g.addColorStop(1,'#0d1024');
+ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ctx.fillStyle='rgba(120,130,180,0.10)';
+for(var c=0;c<12;c++)for(var r=0;r<9;r++){if(blocked(c,r))continue;ctx.fillRect(c*CS+CS/2-1,r*CS+CS/2-1,2,2);}
+ctx.lineCap='round';ctx.lineJoin='round';
+ctx.strokeStyle='#233530';ctx.lineWidth=28;ctx.beginPath();ctx.moveTo(WPTS[0][0],WPTS[0][1]);for(i=1;i<WPTS.length;i++)ctx.lineTo(WPTS[i][0],WPTS[i][1]);ctx.stroke();
+ctx.strokeStyle='#2d4a3e';ctx.lineWidth=20;ctx.stroke();
+ctx.fillStyle='#4cc9f0';ctx.beginPath();ctx.moveTo(-2,288);ctx.lineTo(14,300);ctx.lineTo(-2,312);ctx.closePath();ctx.fill();
+var gp=posAt(PLEN-26);
+ctx.fillStyle='#7ee08a';ctx.fillRect(gp.x-13,gp.y-16,26,32);
+ctx.fillStyle='#0f1220';ctx.fillRect(gp.x-5,gp.y-4,10,20);
+for(i=0;i<rings.length;i++){var rg=rings[i];rg.r+=(rg.max-12)/0.4*0.016;ctx.globalAlpha=Math.max(0,rg.life*2);ctx.strokeStyle='#7ee08a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(rg.x,rg.y,rg.r,0,6.28);ctx.stroke();ctx.globalAlpha=1;}
+for(i=0;i<towers.length;i++){var t=towers[i];
+ctx.fillStyle='#2b3358';ctx.beginPath();ctx.arc(t.x,t.y,13,0,6.28);ctx.fill();
+ctx.strokeStyle=t.type==='a'?'#7ee08a':'#4cc9f0';ctx.lineWidth=2;ctx.beginPath();ctx.arc(t.x,t.y,13,0,6.28);ctx.stroke();
+ctx.strokeStyle='#ffe9a8';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(t.x,t.y);ctx.lineTo(t.x+Math.cos(t.ang)*12,t.y+Math.sin(t.ang)*12);ctx.stroke();}
+for(i=0;i<enemies.length;i++){var e=enemies[i];var ep=posAt(Math.min(e.d,PLEN));
+if(e.pois>0){ctx.fillStyle='rgba(126,224,138,.25)';ctx.beginPath();ctx.arc(ep.x,ep.y,e.r+6+2*Math.sin(Date.now()*0.01),0,6.28);ctx.fill();}
+ctx.fillStyle=e.boss?'#ff6b6b':(e.pois>0?'#9fda8a':'#ff9f68');ctx.beginPath();ctx.arc(ep.x,ep.y,e.r,0,6.28);ctx.fill();
+ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=2;ctx.stroke();
+if(e.pois>0){ctx.fillStyle='#7ee08a';ctx.font='9px system-ui';ctx.textAlign='center';ctx.fillText(Math.ceil(e.pois),ep.x,ep.y-e.r-4);ctx.textAlign='left';}
+ctx.fillStyle='#402030';ctx.fillRect(ep.x-11,ep.y-e.r-9,22,4);
+ctx.fillStyle=e.pois>0?'#b7e8a0':'#7ee08a';ctx.fillRect(ep.x-11,ep.y-e.r-9,22*Math.max(0,e.hp/e.mhp),4);}
+for(i=0;i<shots.length;i++){var s2=shots[i];ctx.fillStyle=s2.ps?'#a0e8a8':'#ffe9a8';ctx.beginPath();ctx.arc(s2.x,s2.y,3,0,6.28);ctx.fill();}
+for(i=0;i<parts.length;i++){var p4=parts[i];ctx.globalAlpha=Math.max(0,p4.life*2.4);ctx.fillStyle=p4.c;ctx.beginPath();ctx.arc(p4.x,p4.y,p4.r,0,6.28);ctx.fill();}
+ctx.globalAlpha=1;
+ctx.fillStyle='#9aa3c0';ctx.font='11px system-ui';ctx.textAlign='left';
+if(running&&!over){if(phase==='wait')ctx.fillText('下一波 '+Math.ceil(interT)+' 秒…',12,18);
+if(banner>0){ctx.globalAlpha=Math.min(1,banner);ctx.fillStyle='#ffd166';ctx.font='bold 20px system-ui';ctx.textAlign='center';ctx.fillText('第 '+wave+' 波来袭!',W/2,60);ctx.globalAlpha=1;ctx.font='11px system-ui';ctx.textAlign='left';}}}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();
+var rc=cv.getBoundingClientRect();var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+if(!running||over)return;
+var c=Math.floor(x/CS),r=Math.floor(y/CS);if(c<0||c>=12||r<0||r>=9)return;
+var i;for(i=0;i<towers.length;i++){if(towers[i].c===c&&towers[i].r===r)return;}
+if(blocked(c,r))return;
+if(buildType==='a'){if(money<70)return;money-=70;towers.push({c:c,r:r,x:c*CS+CS/2,y:r*CS+CS/2,cool:0,type:'a',rate:1.1,range:100,dmg:6,ang:0});}
+else{if(money<50)return;money-=50;towers.push({c:c,r:r,x:c*CS+CS/2,y:r*CS+CS/2,cool:0,type:'b',rate:0.7,range:95,dmg:12,ang:0});}
+hud();});
+function selType(ty){buildType=ty;$i('bA').classList.toggle('on',ty==='a');$i('bB').classList.toggle('on',ty==='b');}
+$i('bA').addEventListener('click',function(){selType('a')});
+$i('bB').addEventListener('click',function(){selType('b')});
+$i('obtn').addEventListener('click',function(){$i('overlay').classList.add('hide');reset();running=true;});
+buildPath();reset();
+var lastT=0;
+function loop(t){var dt=(t-lastT)/1000;lastT=t;if(!(dt>0)||dt>0.05)dt=0.016;update(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

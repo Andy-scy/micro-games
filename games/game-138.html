@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>疾风骤降</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#67e8f9;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#67e8f9;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#67e8f9;color:#063038;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>疾风骤降</h1>
+  <p class="hint">← → 移动 · ↑ 旋转 · 空格 硬降 · C 暂存<br>阵风随时横推下落中的方块,盯紧风向标!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>行数 <b id="lines">0</b></span>
+    <span>风向 <b id="wind">平静</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="336" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">疾风骤降</h2>
+      <p id="ovDesc">井口之上暗流涌动:每隔几秒刮起一阵横风,持续把下落中的方块吹向一侧,直到它撞墙为止。抢在阵风之前落位,或借风把方块送进刁钻的缝隙——看风向标行事!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">顶风开战</button>
+    </div>
+  </div>
+  <div class="pads" id="pads">
+    <button data-a="left">◀</button>
+    <button data-a="down">▼</button>
+    <button data-a="rot">⟳</button>
+    <button data-a="right">▶</button>
+    <button data-a="drop">⤓</button>
+    <button data-a="hold">存</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var CELL=24,COLS=10,ROWS=20,BX=48;
+var W=BX*2+COLS*CELL,H=ROWS*CELL;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLines=$("lines"),elWind=$("wind"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var COLORS=[null,"#22d3ee","#facc15","#c084fc","#4ade80","#f87171","#60a5fa","#fb923c"];
+var TYPES=["I","O","T","S","Z","J","L"];
+var TYPEID={I:1,O:2,T:3,S:4,Z:5,J:6,L:7};
+var SHAPES={
+ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+ O:[[1,1],[1,1]],
+ T:[[0,1,0],[1,1,1],[0,0,0]],
+ S:[[0,1,1],[1,1,0],[0,0,0]],
+ Z:[[1,1,0],[0,1,1],[0,0,0]],
+ J:[[1,0,0],[1,1,1],[0,0,0]],
+ L:[[0,0,1],[1,1,1],[0,0,0]]
+};
+var KICKS=[[0,0],[-1,0],[1,0],[-2,0],[2,0],[0,-1],[-1,-1],[1,-1]];
+var board,cur,hold,canHold,bag,score,lines,level;
+var wT,wNext,gust,wDir,wLeft,wStep;
+var state="menu",lastT=0,acc=0,soft=false;
+var msg="",msgC="#fff",msgT=0;
+var best=loadBest("mg_b138");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function flash(t,c){msg=t;msgC=c;msgT=1100;}
+function emptyRow(){var r=[],i;for(i=0;i<COLS;i++)r.push(0);return r;}
+function refillBag(){
+  var t=TYPES.slice(),i,j,tmp;
+  for(i=t.length-1;i>0;i--){j=(Math.random()*(i+1))|0;tmp=t[i];t[i]=t[j];t[j]=tmp;}
+  bag=bag.concat(t);
+}
+function nextType(){if(bag.length<2)refillBag();return bag.shift();}
+function clone(m){return m.map(function(r){return r.slice();});}
+function collide(m,px,py){
+  var x,y,bx,by;
+  for(y=0;y<m.length;y++)for(x=0;x<m[y].length;x++){
+    if(!m[y][x])continue;
+    bx=px+x;by=py+y;
+    if(bx<0||bx>=COLS||by>=ROWS||(by>=0&&board[by][bx]))return true;
+  }
+  return false;
+}
+function spawn(t){
+  var m=clone(SHAPES[t]);
+  cur={t:t,m:m,c:TYPEID[t],x:((COLS-m[0].length)/2)|0,y:0};
+  if(collide(cur.m,cur.x,cur.y)){cur=null;gameOver("方块堆到了井顶!");return false;}
+  return true;
+}
+function spawnNext(){spawn(nextType());}
+function move(dx){
+  if(state!=="playing"||!cur)return;
+  if(!collide(cur.m,cur.x+dx,cur.y))cur.x+=dx;
+}
+function rotMat(m,dir){
+  var h=m.length,w=m[0].length,r=[],x,y;
+  for(y=0;y<w;y++)r.push([]);
+  for(y=0;y<w;y++)for(x=0;x<h;x++)r[y][x]=dir>0?m[h-1-x][y]:m[x][w-1-y];
+  return r;
+}
+function rotate(dir){
+  if(state!=="playing"||!cur)return;
+  var nm=rotMat(cur.m,dir),i,k;
+  for(i=0;i<KICKS.length;i++){
+    k=KICKS[i];
+    if(!collide(nm,cur.x+k[0],cur.y+k[1])){cur.m=nm;cur.x+=k[0];cur.y+=k[1];return;}
+  }
+}
+function gravMs(){var s=520-(level-1)*40;return s<80?80:s;}
+function tick(){
+  if(!cur)return;
+  if(!collide(cur.m,cur.x,cur.y+1)){cur.y++;if(soft)score++;}
+  else lockPiece();
+}
+function hardDrop(){
+  if(state!=="playing"||!cur)return;
+  var d=0;
+  while(!collide(cur.m,cur.x,cur.y+1)){cur.y++;d++;}
+  score+=d*2;
+  lockPiece();
+}
+function doHold(){
+  if(state!=="playing"||!cur||!canHold)return;
+  canHold=false;
+  var t=cur.t;
+  if(hold){var h=hold;hold=t;spawn(h);}
+  else{hold=t;spawnNext();}
+}
+function lockPiece(){
+  var x,y,bx,by,topOut=false;
+  for(y=0;y<cur.m.length;y++)for(x=0;x<cur.m[y].length;x++){
+    if(!cur.m[y][x])continue;
+    bx=cur.x+x;by=cur.y+y;
+    if(by<0){topOut=true;continue;}
+    board[by][bx]=cur.c;
+  }
+  if(topOut){cur=null;gameOver("方块锁在了井口之上!");return;}
+  cur=null;canHold=true;clearLines();
+  if(state==="playing")spawnNext();
+}
+function rowFull(r){var x;for(x=0;x<COLS;x++){if(!r[x])return false;}return true;}
+function clearLines(){
+  var keep=[],n=0,y;
+  for(y=0;y<ROWS;y++){if(rowFull(board[y]))n++;else keep.push(board[y]);}
+  if(n===0)return;
+  while(keep.length<ROWS)keep.unshift(emptyRow());
+  board=keep;
+  score+=[0,100,300,500,800][n]*level;lines+=n;level=1+((lines/10)|0);
+  if(n===4)flash("顶风四连消!","#67e8f9");
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLines.textContent=lines;
+  elWind.textContent=gust?(wDir>0?"狂风 →":"← 狂风"):("平静 "+(Math.max(0,wNext-wT)/1000).toFixed(0)+"s");
+  elBest.textContent=best;
+}
+function gameOver(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_b138",best);}
+  ovTitle.textContent="风停了";
+  ovDesc.textContent=reason+"\n风中消行 "+lines+" 行";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function reset(){
+  var y;
+  board=[];
+  for(y=0;y<ROWS;y++)board.push(emptyRow());
+  bag=[];refillBag();
+  hold=null;canHold=true;
+  score=0;lines=0;level=1;
+  wT=0;wNext=3200;gust=false;wDir=1;wLeft=0;wStep=0;
+  acc=0;soft=false;msgT=0;
+  spawnNext();
+}
+function block(px,py,color){
+  ctx.fillStyle=color;ctx.fillRect(px+1,py+1,CELL-2,CELL-2);
+  ctx.fillStyle="rgba(255,255,255,0.22)";ctx.fillRect(px+1,py+1,CELL-2,4);
+  ctx.fillStyle="rgba(0,0,0,0.25)";ctx.fillRect(px+1,py+CELL-5,CELL-2,4);
+}
+function drawMini(t,cx,cy,s){
+  var m=SHAPES[t],x,y,w=m[0].length,h=m.length,ox=cx-w*s/2,oy=cy-h*s/2;
+  for(y=0;y<h;y++)for(x=0;x<w;x++)if(m[y][x]){ctx.fillStyle=COLORS[TYPEID[t]];ctx.fillRect(ox+x*s+1,oy+y*s+1,s-2,s-2);}
+}
+function drawSide(){
+  ctx.fillStyle="#8b90b0";
+  ctx.font="12px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText("暂存",BX/2,18);
+  if(hold)drawMini(hold,BX/2,46,13);
+  else{ctx.strokeStyle="#2a3054";ctx.lineWidth=1;ctx.strokeRect(BX/2-20,30,40,32);}
+  ctx.fillStyle="#8b90b0";
+  ctx.fillText("下一个",W-BX/2,18);
+  if(bag.length)drawMini(bag[0],W-BX/2,46,13);
+}
+function draw(){
+  var x,y,c,i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#10142a";
+  ctx.fillRect(BX,0,COLS*CELL,ROWS*CELL);
+  ctx.strokeStyle="rgba(255,255,255,0.05)";
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  for(x=1;x<COLS;x++){ctx.moveTo(BX+x*CELL,0);ctx.lineTo(BX+x*CELL,ROWS*CELL);}
+  for(y=1;y<ROWS;y++){ctx.moveTo(BX,y*CELL);ctx.lineTo(BX+COLS*CELL,y*CELL);}
+  ctx.stroke();
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    c=board[y][x];
+    if(c)block(BX+x*CELL,y*CELL,COLORS[c]);
+  }
+  if(state==="playing"&&cur){
+    var gy=cur.y;
+    while(!collide(cur.m,cur.x,gy+1))gy++;
+    ctx.strokeStyle="rgba(255,255,255,0.35)";ctx.lineWidth=1.5;
+    for(y=0;y<cur.m.length;y++)for(x=0;x<cur.m[y].length;x++){
+      if(cur.m[y][x]&&gy+y>=0)ctx.strokeRect(BX+(cur.x+x)*CELL+2,(gy+y)*CELL+2,CELL-4,CELL-4);
+    }
+    for(y=0;y<cur.m.length;y++)for(x=0;x<cur.m[y].length;x++){
+      if(cur.m[y][x]&&cur.y+y>=0)block(BX+(cur.x+x)*CELL,(cur.y+y)*CELL,COLORS[cur.c]);
+    }
+  }
+  if(gust){
+    ctx.save();
+    ctx.globalAlpha=0.45;
+    ctx.strokeStyle="#67e8f9";
+    ctx.lineWidth=2;
+    for(i=0;i<5;i++){
+      var ly=90+i*26+((lastT*0.06)%26);
+      ctx.beginPath();
+      if(wDir>0){
+        ctx.moveTo(BX+8,ly);
+        ctx.lineTo(BX+COLS*CELL-30,ly);
+        ctx.lineTo(BX+COLS*CELL-42,ly-5);
+        ctx.moveTo(BX+COLS*CELL-30,ly);
+        ctx.lineTo(BX+COLS*CELL-42,ly+5);
+      }else{
+        ctx.moveTo(BX+COLS*CELL-8,ly);
+        ctx.lineTo(BX+30,ly);
+        ctx.lineTo(BX+42,ly-5);
+        ctx.moveTo(BX+30,ly);
+        ctx.lineTo(BX+42,ly+5);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  drawSide();
+  if(msgT>0){
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,msgT/400);
+    ctx.fillStyle=msgC;
+    ctx.font="bold 16px system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText(msg,BX+COLS*CELL/2,64);
+    ctx.restore();
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);
+  lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    wT+=dt;
+    if(!gust&&wT>=wNext){
+      gust=true;
+      wDir=Math.random()<0.5?-1:1;
+      wLeft=1300;wStep=0;
+      flash("起风了!","#67e8f9");
+    }
+    if(gust){
+      wLeft-=dt;wStep+=dt;
+      if(wStep>=170){wStep=0;move(wDir);}
+      if(wLeft<=0){gust=false;wT=0;wNext=3200+Math.random()*2600;}
+    }
+    acc+=dt;
+    var iv=soft?40:gravMs();
+    var guard=0;
+    while(acc>=iv&&state==="playing"&&guard<6){acc-=iv;tick();guard++;}
+  }
+  updateHud();
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(state!=="playing"){
+    if(k===" "||k==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(k==="ArrowLeft"){e.preventDefault();move(-1);}
+  else if(k==="ArrowRight"){e.preventDefault();move(1);}
+  else if(k==="ArrowDown"){e.preventDefault();soft=true;}
+  else if(k==="ArrowUp"||k==="x"||k==="X"){e.preventDefault();if(!e.repeat)rotate(1);}
+  else if(k==="z"||k==="Z"){e.preventDefault();if(!e.repeat)rotate(-1);}
+  else if(k===" "){e.preventDefault();if(!e.repeat)hardDrop();}
+  else if(k==="c"||k==="C"||k==="Shift"){if(!e.repeat)doHold();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowDown")soft=false;
+});
+document.getElementById("pads").addEventListener("click",function(e){
+  var a=e.target.getAttribute&&e.target.getAttribute("data-a");
+  if(!a||state!=="playing")return;
+  if(a==="left")move(-1);
+  else if(a==="right")move(1);
+  else if(a==="rot")rotate(1);
+  else if(a==="down")tick();
+  else if(a==="drop")hardDrop();
+  else if(a==="hold")doHold();
+});
+btnGo.addEventListener("click",startGame);
+reset();
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无尽接弹</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>无尽接弹</h1>
+  <p class="hint">移动鼠标 / 触屏拖动 / 方向键 操控托板 · 接住每颗回落的小球,回合越高下落越快</p>
+  <div class="hud">
+    <span>回合 <b id="rd">0</b></span>
+    <span>金币 <b id="coin">0</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">无尽接弹</h2>
+      <p id="ovDesc">托板接住小球后,它会被弹向高空再落下来——每接一次,下落速度与弹力都会提升一档,托板也会慢慢变窄!空中还有金币可以顺路收集。漏接三次,挑战结束。你能接到多少回合?</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=9,PY=486,GY=520;
+function $(id){return document.getElementById(id);}
+var elRd=$("rd"),elCoin=$("coin"),elLives=$("lives"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s400");
+var state,paddle,ball,rounds,coins,lives,keyL,keyR,touchX,respawnT,trail,pw;
+function grav(){return 0.00062+rounds*0.000006;}
+function paddleW(){return Math.max(56,90-rounds*2);}
+function reset(){
+  paddle={x:W/2-45};
+  pw=90;rounds=0;lives=3;coins=[];
+  trail=[];keyL=false;keyR=false;touchX=null;respawnT=0;
+  newBall();spawnCoins();
+  updateHud();
+}
+function newBall(){
+  ball={x:120+Math.random()*240,y:40,vx:(Math.random()*0.16-0.08),vy:0.22,live:true};
+}
+function spawnCoins(){
+  coins=[];
+  var i;
+  for(i=0;i<3;i++)coins.push({x:60+Math.random()*360,y:110+Math.random()*250,got:false});
+}
+function updateHud(){
+  elRd.textContent=rounds;elCoin.textContent=coinN();elLives.textContent=lives;elBest.textContent=best;
+}
+function coinN(){return coinsGot;}
+var coinsGot=0;
+function miss(){
+  lives--;updateHud();
+  if(lives<=0){
+    state="over";
+    if(rounds>best){best=rounds;saveBest("mg_s400",best);}
+    ovT.textContent="游戏结束";
+    ovD.textContent="小球坠入了深渊。手再稳一点,下一局接出新高!";
+    ovS.style.display="block";ovS.textContent="回合 "+rounds+" · 金币 "+coinsGot+" · 最佳 "+best;
+    btn.textContent="再来一局";updateHud();
+    ov.classList.remove("hide");
+    return;
+  }
+  ball.live=false;respawnT=600;
+}
+function catchBall(){
+  rounds++;updateHud();
+  var off=(ball.x-(paddle.x+pw/2))/(pw/2);
+  ball.vy=-(0.3+Math.min(0.26,rounds*0.012));
+  ball.vx+=off*0.12;
+  if(ball.vx>0.34)ball.vx=0.34;
+  if(ball.vx<-0.34)ball.vx=-0.34;
+  ball.y=PY-BR;
+  pw=paddleW();
+  if(rounds%2===0)spawnCoins();
+}
+function setPaddle(px){paddle.x=Math.max(0,Math.min(W-pw,px-pw/2));}
+cv.addEventListener("mousemove",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect();
+  setPaddle((e.clientX-r.left)*W/r.width);
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchX=(t.clientX-r.left)*W/r.width;
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchX=(t.clientX-r.left)*W/r.width;
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchX=null;});
+document.addEventListener("keydown",function(e){
+  if(e.key.indexOf("Arrow")===0)e.preventDefault();
+  if((e.key===" "||e.key==="Enter")&&(state==="menu"||state==="over")){startGame();return;}
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=true;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=true;
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function startGame(){coinsGot=0;reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    if(keyL)paddle.x-=0.42*dt;
+    if(keyR)paddle.x+=0.42*dt;
+    if(touchX!==null)setPaddle(touchX);
+    paddle.x=Math.max(0,Math.min(W-pw,paddle.x));
+    if(!ball.live){
+      respawnT-=dt;
+      if(respawnT<=0)newBall();
+    }else{
+      ball.vy+=grav()*dt;
+      ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+      if(ball.x<BR){ball.x=BR;ball.vx=Math.abs(ball.vx)*0.9;}
+      if(ball.x>W-BR){ball.x=W-BR;ball.vx=-Math.abs(ball.vx)*0.9;}
+      if(ball.y<BR+26){ball.y=BR+26;ball.vy=Math.abs(ball.vy)*0.9;}
+      if(ball.vy>0&&ball.y+BR>=PY&&ball.y+BR<=PY+16&&ball.x>paddle.x-BR&&ball.x<paddle.x+pw+BR)catchBall();
+      if(ball.y>H+BR)miss();
+      var i;
+      for(i=0;i<coins.length;i++){
+        var c=coins[i];
+        if(!c.got){
+          var dx=c.x-ball.x,dy=c.y-ball.y;
+          if(dx*dx+dy*dy<16*16){c.got=true;coinsGot+=5;updateHud();}
+        }
+      }
+      trail.push({x:ball.x,y:ball.y,life:300});
+      if(trail.length>26)trail.shift();
+      for(i=0;i<trail.length;i++)trail[i].life-=dt;
+    }
+  }
+  draw();
+}
+function drawHeart(x,y,s,fill){
+  ctx.fillStyle=fill;
+  ctx.beginPath();
+  ctx.moveTo(x,y+s*0.3);
+  ctx.bezierCurveTo(x,y-s*0.3,x-s,y-s*0.3,x-s,y+s*0.15);
+  ctx.bezierCurveTo(x-s,y+s*0.7,x,y+s*0.9,x,y+s*1.1);
+  ctx.bezierCurveTo(x,y+s*0.9,x+s,y+s*0.7,x+s,y+s*0.15);
+  ctx.bezierCurveTo(x+s,y-s*0.3,x,y-s*0.3,x,y+s*0.3);
+  ctx.closePath();ctx.fill();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#141a30";ctx.fillRect(0,0,W,26);
+  for(i=0;i<lives;i++)drawHeart(20+i*24,10,7,"#f87171");
+  ctx.fillStyle="rgba(139,144,176,0.6)";ctx.font="11px system-ui";
+  ctx.fillText("速度档位 "+(rounds+1),W-100,17);
+  for(i=0;i<trail.length;i++){
+    var tr=trail[i];
+    ctx.globalAlpha=tr.life/300*0.35;
+    ctx.fillStyle="#4ade80";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,BR*0.7,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  for(i=0;i<coins.length;i++){
+    var c=coins[i];
+    if(c.got)continue;
+    ctx.strokeStyle="#fbbf24";ctx.lineWidth=3;
+    ctx.shadowColor="#fbbf24";ctx.shadowBlur=8;
+    ctx.beginPath();ctx.arc(c.x,c.y,8,0,Math.PI*2);ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.fillStyle="#fbbf24";ctx.font="bold 9px system-ui";ctx.textAlign="center";
+    ctx.fillText("金",c.x,c.y+3);
+    ctx.textAlign="left";
+  }
+  if(ball.live){
+    ctx.fillStyle="#4ade80";
+    ctx.shadowColor="#4ade80";ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle="rgba(255,255,255,0.55)";
+    ctx.beginPath();ctx.arc(ball.x-3,ball.y-3,2.5,0,Math.PI*2);ctx.fill();
+  }else if(state==="playing"){
+    ctx.fillStyle="rgba(248,113,113,0.8)";ctx.font="bold 14px system-ui";ctx.textAlign="center";
+    ctx.fillText("漏接!小球重新装填…",W/2,240);
+    ctx.textAlign="left";
+  }
+  ctx.fillStyle="#4ade80";
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(paddle.x,PY,pw,12,6);else ctx.rect(paddle.x,PY,pw,12);
+  ctx.fill();
+  ctx.fillStyle="#05230f";
+  ctx.fillRect(paddle.x+pw/2-12,PY+4,24,4);
+}
+reset();
+coinsGot=0;
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幽廊初探</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>幽廊初探</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏滑动 · 抵达绿色出口符文</p>
+  <div class="hud">
+    <span>步数 <b id="steps">0</b></span>
+    <span>用时 <b id="time">0.0s</b></span>
+    <span>最少步纪录 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">幽廊初探</h2>
+      <p id="ovDesc">一座每次进入都会重新生成的古老迷宫。从左上角出发,找到右下角的绿色出口符文即可逃脱。你走过的路会留下淡青足迹。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始探索</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elSteps=$("steps"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s261");
+var state="menu";
+var grid,player,exitCell,visited,steps,elapsed,pulse;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function reset(){
+  grid=genMaze(10,10);
+  player={x:1,y:1};
+  exitCell={x:COLS-2,y:ROWS-2};
+  visited=[];
+  var y;
+  for(y=0;y<ROWS;y++)visited.push(new Array(COLS));
+  visited[1][1]=true;
+  steps=0;elapsed=0;pulse=0;
+  updateHud();
+}
+function updateHud(){
+  elSteps.textContent=steps;
+  elBest.textContent=best>0?best+" 步":"--";
+}
+function tryMove(dx,dy){
+  if(state!=="playing")return;
+  var nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return;
+  if(grid[ny][nx]===1)return;
+  player.x=nx;player.y=ny;
+  visited[ny][nx]=true;
+  steps++;
+  if(nx===exitCell.x&&ny===exitCell.y)win();
+  updateHud();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||steps<best){best=steps;saveBest("mg_s261",best);isNew=true;}
+  ovTitle.textContent="逃脱成功!";
+  ovDesc.textContent=isNew?"新纪录!你用最少步数走出了幽廊。":"干得漂亮,这座迷宫已被你征服。";
+  ovScore.style.display="block";
+  ovScore.textContent="步数 "+steps+" · 用时 "+elapsed.toFixed(1)+"s";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#232a4d";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#2c3560";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function draw(){
+  var x,y;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1)drawWall(x,y);
+  }
+  ctx.fillStyle="rgba(34,211,238,0.14)";
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(visited[y][x])ctx.fillRect(x*CELL+6,y*CELL+6,CELL-12,CELL-12);
+  }
+  var ex=exitCell.x*CELL+CELL/2,ey=exitCell.y*CELL+CELL/2;
+  var pr=8+Math.sin(pulse)*2;
+  ctx.fillStyle="#4ade80";
+  ctx.shadowColor="#4ade80";ctx.shadowBlur=16;
+  ctx.beginPath();ctx.arc(ex,ey,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#05230f";
+  ctx.font="bold 10px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText("出",ex,ey);
+  var px=player.x*CELL+CELL/2,py=player.y*CELL+CELL/2;
+  ctx.fillStyle="#67e8f9";
+  ctx.shadowColor="#22d3ee";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(px,py,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(state==="playing"){
+    elapsed+=dt/1000;
+    elTime.textContent=elapsed.toFixed(1)+"s";
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))tryMove(dx>0?1:-1,0);
+  else tryMove(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

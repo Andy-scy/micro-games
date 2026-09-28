@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>跳远踏板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#4dd0e1;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#4dd0e1;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#4dd0e1;color:#00363c;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>跳远踏板</h1>
+<p class="tip">连点屏幕或 ←/→ 键加速助跑 · 到踏板前按空格（或点「起跳」钮）腾空 · 越线犯规 · 3 跳取最佳，7.5 米获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div>
+</div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,GY=530,G=1150,MPX=60;
+var BOARD=620,FOUL=660,PIT=664;
+var phase,att,results,speed,x,y,vy,rot,cam,timer,msg,landX,runT;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  phase='run';att=0;results=[];speed=0;x=30;y=GY;vy=0;cam=0;msg='';runT=0;landX=0;
+}
+function startRun(){
+  phase='run';speed=150;x=30;y=GY;runT=0;
+}
+function jump(){
+  if(phase!=='run')return;
+  if(x>=FOUL){foul('踩线犯规！');return;}
+  if(x<BOARD-90){foul('没跑起来…');return;}
+  vy=-(330+speed*0.35);
+  phase='air';
+}
+function foul(t){
+  msg=t;results.push(0);att++;
+  phase='res';timer=1.1;
+}
+function land(){
+  landX=x;
+  var d=landX>PIT?Math.max(0,(landX-FOUL)/MPX):0;
+  results.push(d);att++;
+  msg=d>0?d.toFixed(2)+' 米'+(d>results[bestIdx()]?'  新最佳！':''):'落点太近…';
+  phase='res';timer=1.4;
+}
+function bestIdx(){
+  var b=0;
+  for(var i=1;i<results.length;i++)if(results[i]>results[b])b=i;
+  return b;
+}
+function update(dt){
+  if(phase==='run'){
+    runT+=dt;
+    speed-=72*dt;if(speed<0)speed=0;
+    x+=speed*dt;
+    if(x>BOARD-90&&speed<40){foul('助跑失败…');return;}
+    if(x>FOUL+4){foul('冲过踏板！');return;}
+  }
+  if(phase==='air'){
+    vy+=G*dt;x+=speed*dt;y+=vy*dt;
+    if(y>=GY){
+      y=GY;
+      for(var i=0;i<12;i++)sand.push({x:x+rnd(-16,16),y:GY+rnd(-4,4),vx:rnd(-120,120),vy:rnd(-260,-60),t:0.6});
+      land();
+    }
+  }
+  if(phase==='res'){
+    timer-=dt;
+    for(var j=sand.length-1;j>=0;j--){var p=sand[j];p.t-=dt;p.vy+=900*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.t<=0)sand.splice(j,1);}
+    if(timer<=0){
+      if(att>=3){
+        phase='over';
+        var best=results[bestIdx()];
+        ovT.textContent=best>=7.5?'腾空飞人！':'比赛结束';
+        ovX.textContent='三跳成绩 '+results.map(function(d){return d>0?d.toFixed(2)+'m':'犯规';}).join(' / ')+'，最佳 '+best.toFixed(2)+' 米'+(best>=7.5?'，领奖台属于你！':'（获胜需 7.5 米）。助跑点得越密速度越快，越贴近踏板起跳越远。');
+        ov.classList.remove('hidden');
+      }else startRun();
+    }
+  }
+}
+var sand=[];
+function drawRunner(){
+  ctx.save();ctx.translate(x-cam,y);
+  if(phase==='air'){
+    ctx.strokeStyle='#4dd0e1';ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(0,-34);ctx.lineTo(-14,-20);ctx.moveTo(0,-34);ctx.lineTo(10,-6);ctx.stroke();
+  }else{
+    var sw=Math.sin(runT*22)*(speed>10?1:0.1);
+    ctx.strokeStyle='#4dd0e1';ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(sw*12,0);ctx.moveTo(0,-20);ctx.lineTo(-sw*12,0);ctx.stroke();
+  }
+  ctx.fillStyle='#4dd0e1';ctx.beginPath();ctx.arc(0,-40,7,0,7);ctx.fill();
+  ctx.strokeStyle='#b2ebf2';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(0,-32);ctx.lineTo(phase==='air'?-6:sw*5,-20);ctx.stroke();
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var gr=ctx.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,'#1a1f3a');gr.addColorStop(1,'#161b30');
+  ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.05)';
+  for(var i=0;i<6;i++)ctx.fillRect(40+i*70-cam*0.15%420,150,50,120);
+  ctx.fillStyle='#26314f';ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle='#2e3a68';ctx.fillRect(0,GY,W,5);
+  for(var m=-1;m<20;m++){
+    var wx=m*MPX-cam%MPX;
+    ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(wx,GY+6);ctx.lineTo(wx,GY+14);ctx.stroke();
+  }
+  ctx.fillStyle='#eceff1';ctx.fillRect(BOARD-cam,GY,FOUL-BOARD,4);
+  ctx.fillStyle='#e53935';ctx.fillRect(FOUL-2-cam,GY,4,10);
+  ctx.fillStyle='#c2a25a';ctx.fillRect(PIT-cam,GY,420,26);
+  ctx.fillStyle='#b08d44';ctx.fillRect(PIT-cam,GY+26,420,4);
+  ctx.fillStyle='rgba(255,255,255,.25)';ctx.font='11px system-ui,sans-serif';
+  for(var d2=1;d2<=9;d2++){
+    var tx=FOUL+d2*MPX-cam;
+    if(tx>0&&tx<W)ctx.fillText(d2+'m',tx,GY+40);
+  }
+  for(var s2=0;s2<sand.length;s2++){
+    ctx.fillStyle='rgba(226,200,130,'+sand[s2].t+')';
+    ctx.beginPath();ctx.arc(sand[s2].x-cam,sand[s2].y,3,0,7);ctx.fill();
+  }
+  drawRunner();
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+(att+1>3?3:att+1)+' / 3 跳',14,28);
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';
+  ctx.fillText('速度 '+Math.round(speed/6)+' m/s',14,50);
+  ctx.textAlign='right';
+  ctx.fillText('最佳 '+(results.length?results[bestIdx()].toFixed(2):'0.00')+' m',W-14,28);
+  ctx.fillStyle='#26314f';ctx.fillRect(300,556,170,64);
+  ctx.fillStyle='#4dd0e1';ctx.font='22px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('起 跳',385,596);
+  if(phase==='run'&&x>BOARD-160){ctx.fillStyle='#ffd54f';ctx.font='14px system-ui,sans-serif';ctx.fillText(x<FOUL?'快起跳！':'！',x-cam,GY-60);}
+  if(msg&&phase==='res'){ctx.fillStyle='#ffd54f';ctx.font='22px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,W/2,120);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect();
+  var px=(e.clientX-r.left)*(W/r.width),py=(e.clientY-r.top)*(H/r.height);
+  if(px>290&&py>546){jump();return;}
+  if(phase==='run')speed=Math.min(620,speed+48);
+});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();if(!e.repeat)jump();return;}
+  if((e.code==='ArrowLeft'||e.code==='ArrowRight')&&!e.repeat&&phase==='run')speed=Math.min(620,speed+48);
+});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);cam=Math.max(0,x-190);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

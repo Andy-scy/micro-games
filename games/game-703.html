@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>井底攀升</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>井底攀升</h1>
+  <p class="tips">←→ 朝井壁移动可贴墙缓降,此时按跳跃向反方向蹬出。水位不断上涨,攀到井口脱身!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">高度</div><div class="big" id="ht">0m</div></div>
+    <div class="stat"><div class="mut">宝石</div><div class="big" id="gm">0</div></div>
+    <div class="stat"><div class="mut">水压逼近</div><div class="big" id="dg">0%</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">蹬跳</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">井底攀升</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃<br>· 空中贴着井壁按住方向键会缓缓下滑<br>· 下滑或贴墙时按跳跃 = 蹬墙跳,飞向另一侧<br>· 水位持续上涨且越涨越快,碰到水 -1 生命<br>· 落井重来时水会退回井底,宝石保留<br>· 顺路收集宝石 +30,攀出井口 +600</p><button class="btn" id="obtn">开始攀井</button></div></div>
+<script>
+'use strict';
+var W=420,H=560,WORLD=2400,LW=132,RW=288;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var walls,ledges,gems,base;
+var px=199,py=2284,vx=0,vy=0,pw=22,ph=26,onG=false;
+var waterY=2400,waterT=0,camY=WORLD-H;
+var score=0,gemsGot=0,lives=3,bestY=2284;
+var running=false,lastT=0,parts=[],won=false,winT=0;
+var keys={L:false,R:false,J:false},jHeld=false;
+function build(){
+  walls=[{x:0,y:0,w:LW,h:WORLD},{x:RW,y:0,w:W-RW,h:WORLD}];
+  base={x:LW,y:2310,w:RW-LW,h:14};
+  ledges=[];gems=[];
+  var y=2150,i=0;
+  while(y>=250){
+    if(i%2===0)ledges.push({x:LW,y:y,w:52,h:12});
+    else ledges.push({x:RW-52,y:y,w:52,h:12});
+    if(i%2===0)gems.push({x:RW-46,y:y-120,got:false});
+    else gems.push({x:LW+46,y:y-120,got:false});
+    y-=190;i++;
+  }
+  gems.push({x:210,y:170,got:false});
+}
+function reset(){
+  build();
+  px=199;py=2284;vx=0;vy=0;onG=false;
+  waterY=2400;waterT=0;camY=WORLD-H;
+  score=0;gemsGot=0;lives=3;bestY=2284;
+  parts=[];won=false;winT=0;
+  hud();
+}
+function hud(){
+  $i('ht').textContent=Math.max(0,Math.round((2310-py-ph)/8))+'m';
+  $i('gm').textContent=gemsGot;
+  var d=waterY-(py+ph);
+  var pct=Math.round(Math.max(0,Math.min(1,1-d/420))*100);
+  $i('dg').textContent=pct+'%';
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function solidsAll(){
+  var a=walls.slice();
+  a.push(base);
+  for(var i=0;i<ledges.length;i++)a.push(ledges[i]);
+  return a;
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function endGame(){
+  running=false;
+  if(won){$i('ovt').textContent='逃出深井!';$i('ovp').innerHTML='你蹬着井壁爬了出来!<br>最终得分:<b>'+score+'</b><br>攀爬高度:<b>'+Math.max(0,Math.round((2310-bestY)/8))+'m</b>';}
+  else{$i('ovt').textContent='被水淹没…';$i('ovp').innerHTML='井水太急了,再来一次。<br>最终得分:<b>'+score+'</b><br>攀爬高度:<b>'+Math.max(0,Math.round((2310-bestY)/8))+'m</b>';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function physics(dt){
+  var solids=solidsAll();
+  var wallDir=0;
+  if(!onG){
+    if(keys.L&&px<=LW+1)wallDir=-1;
+    else if(keys.R&&px+pw>=RW-1)wallDir=1;
+  }
+  var acc=1400,mx=205;
+  if(keys.L)vx-=acc*dt;
+  if(keys.R)vx+=acc*dt;
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,6*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  vy+=1500*dt;
+  if(wallDir!==0&&vy>95)vy=95;
+  if(keys.J&&!jHeld){
+    if(onG){vy=-560;burst(px+pw/2,py+ph,'#7f8ab0',3)}
+    else if(wallDir!==0){
+      vy=-545;vx=-wallDir*315;
+      burst(wallDir<0?LW:RW,py+ph/2,'#8fd3ff',7);
+    }
+  }
+  px+=vx*dt;
+  var i,s;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){if(vx>0)px=s.x-pw;else if(vx<0)px=s.x+s.w;vx=0;}
+  }
+  py+=vy*dt;onG=false;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(vy>0){py=s.y-ph;vy=0;onG=true;}
+      else if(vy<0){py=s.y+s.h;vy=0;}
+    }}
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(!running)return;
+  if(won){winT+=dt;if(winT>1.3){score+=600;endGame();}return;}
+  physics(dt);
+  if(py<bestY)bestY=py;
+  waterT+=dt;
+  var ws=Math.min(105,24+waterT*1.25);
+  waterY-=ws*dt;
+  var target=py-300;
+  if(target<camY)camY=target;
+  if(camY<0)camY=0;
+  for(i=0;i<gems.length;i++){var g=gems[i];
+    if(g.got)continue;
+    var dx=g.x-(px+pw/2),dy=g.y-(py+ph/2);
+    if(dx*dx+dy*dy<24*24){g.got=true;gemsGot++;score+=30;burst(g.x,g.y,'#7bf1d8',7);}
+  }
+  if(py<64){won=true;burst(px+pw/2,70,'#ffe9a3',20);}
+  if(py+ph>waterY+6){
+    lives--;burst(px+pw/2,py,'#4cc9f0',14);
+    if(lives<=0){lives=0;hud();endGame();return;}
+    px=199;py=2284;vx=0;vy=0;
+    waterY=2400;waterT=0;
+    camY=WORLD-H;
+  }
+  hud();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#181425');g.addColorStop(1,'#0b0e1c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.translate(0,-Math.round(camY));
+  var i,s;
+  for(i=0;i<walls.length;i++){s=walls[i];
+    ctx.fillStyle='#242b47';ctx.fillRect(s.x,s.y,s.w,s.h);
+    ctx.fillStyle='#313a5e';
+    var yy=Math.floor(camY/46)*46;
+    for(;yy<camY+H+46;yy+=46){
+      ctx.fillRect(s.x,yy,s.w,3);
+    }
+  }
+  ctx.fillStyle='#7ec8e3';
+  for(i=0;i<ledges.length;i++){var l=ledges[i];
+    ctx.fillStyle='#2e3a63';ctx.fillRect(l.x,l.y,l.w,l.h);
+    ctx.fillStyle='#6d7fc0';ctx.fillRect(l.x,l.y,l.w,3);
+  }
+  ctx.fillStyle='#2a3358';ctx.fillRect(base.x,base.y,base.w,base.h);
+  ctx.fillStyle='#5d6ba8';ctx.fillRect(base.x,base.y,base.w,3);
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    var tw=0.8+0.25*Math.sin(Date.now()*0.004+i*2);
+    ctx.save();ctx.translate(gm.x,gm.y);ctx.rotate(Date.now()*0.0015+i);
+    ctx.fillStyle='#7bf1d8';
+    ctx.beginPath();
+    ctx.moveTo(0,-8*tw);ctx.lineTo(6*tw,0);ctx.lineTo(0,8*tw);ctx.lineTo(-6*tw,0);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle='#ffe9a3';
+  ctx.fillRect(LW,20,RW-LW,6);
+  ctx.fillStyle='rgba(255,233,163,.14)';
+  ctx.fillRect(LW,26,RW-LW,50);
+  var wy=waterY;
+  var wg=ctx.createLinearGradient(0,wy,0,wy+300);
+  wg.addColorStop(0,'rgba(64,180,220,.5)');
+  wg.addColorStop(1,'rgba(30,90,150,.75)');
+  ctx.fillStyle=wg;
+  ctx.beginPath();
+  ctx.moveTo(0,wy);
+  for(var xx=0;xx<=W;xx+=12){
+    ctx.lineTo(xx,wy+Math.sin(xx*0.07+Date.now()*0.005)*4);
+  }
+  ctx.lineTo(W,wy+400);ctx.lineTo(0,wy+400);
+  ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#9fe8ff';ctx.lineWidth=2;
+  ctx.beginPath();
+  for(var x2=0;x2<=W;x2+=12){
+    var yy2=wy+Math.sin(x2*0.07+Date.now()*0.005)*4;
+    if(x2===0)ctx.moveTo(x2,yy2);else ctx.lineTo(x2,yy2);
+  }
+  ctx.stroke();
+  ctx.fillStyle='#f2a6c0';
+  ctx.fillRect(px,py,pw,ph);
+  ctx.fillStyle='#081226';
+  ctx.fillRect(px+pw*0.28,py+7,4,5);
+  ctx.fillRect(px+pw*0.62,py+7,4,5);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  var d=waterY-(py+ph);
+  ctx.font='12px system-ui';ctx.fillStyle='#7f8ab0';ctx.textAlign='left';
+  ctx.fillText(d<160?'水面逼近,快向上蹬!':'贴墙缓降 · 按跳蹬出',10,H-10);
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){keys.J=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

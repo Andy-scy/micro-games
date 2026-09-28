@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>保龄球全倒</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ffd54f;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ffd54f;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ffd54f;color:#1a1f36;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>保龄球全倒</h1>
+<p class="tip">按住蓄力松手出球 · 滚动中按住左右半屏(或 A/D)使球弧线拐弯 · 5 局计分，全中+5 补中+3</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=cv.width,H=cv.height;
+var LX1=178,LX2=302,BR=13;
+var pins,ball,frame,roll,total,pinsBefore,phase,meter,mt,timer,msg,steerL,steerR,chargeHold;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function setupPins(){
+  pins=[];var s=[[240,255],[218,233],[262,233],[196,211],[240,211],[284,211],[174,189],[218,189],[262,189],[306,189]];
+  for(var i=0;i<s.length;i++)pins.push({x:s[i][0],y:s[i][1],up:true,fly:false,vx:0,vy:0,rot:0});
+}
+function reset(){
+  frame=1;roll=1;total=0;pinsBefore=10;phase='ready';meter=0;mt=0;timer=0;msg='';
+  ball=null;steerL=false;steerR=false;chargeHold=false;
+  setupPins();
+}
+function knock(p,spx,spy){
+  p.fly=true;p.vx=spx+rnd(-40,40);p.vy=spy+rnd(-20,20);
+}
+function update(dt){
+  if(phase==='charge'){mt+=dt;meter=0.5-0.5*Math.cos(mt*6.5);}
+  if(phase==='roll'&&ball){
+    var steps=Math.max(1,Math.ceil(dt/0.008)),sd=dt/steps;
+    var steer=(steerL?-1:0)+(steerR?1:0);
+    for(var i=0;i<steps;i++){
+      ball.vy+=26*sd;
+      ball.vx+=steer*300*sd;
+      if(ball.vx>170)ball.vx=170;if(ball.vx<-170)ball.vx=-170;
+      ball.x+=ball.vx*sd;ball.y+=ball.vy*sd;
+      if(ball.x<LX1+BR){ball.x=LX1+BR;ball.vx=Math.abs(ball.vx)*0.55;}
+      if(ball.x>LX2-BR){ball.x=LX2-BR;ball.vx=-Math.abs(ball.vx)*0.55;}
+      for(var p=0;p<pins.length;p++){
+        var pn=pins[p];
+        if(pn.up&&!pn.fly){
+          var dx=pn.x-ball.x,dy=pn.y-ball.y,d=Math.hypot(dx,dy);
+          if(d<20+BR-9){
+            knock(pn,dx*1.3+ball.vx*0.5,dy*1.3+ball.vy*0.5);
+            ball.vy*=0.93;ball.vx+=rnd(-35,35);
+          }
+        }
+      }
+    }
+    if(ball.y<105||ball.vy>-35){phase='settle';timer=0;ball=null;}
+  }
+  if(phase==='settle'){
+    timer+=dt;
+    var moving=false;
+    for(var j=0;j<pins.length;j++){
+      var f=pins[j];
+      if(f.fly){
+        f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vx*0.02;
+        f.vx*=(1-2.4*dt);f.vy*=(1-2.4*dt);
+        if(Math.hypot(f.vx,f.vy)<40){f.fly=false;f.up=false;}
+        else moving=true;
+        if(f.x<LX1+8)f.x=LX1+8;if(f.x>LX2-8)f.x=LX2-8;
+        if(f.y<150)f.y=150;
+        for(var k=0;k<pins.length;k++){
+          var o=pins[k];
+          if(o.up&&!o.fly){
+            var ddx=o.x-f.x,ddy=o.y-f.y,dd=Math.hypot(ddx,ddy);
+            if(dd<19&&dd>0.001){knock(o,ddx*1.6+f.vx*0.4,ddy*1.6+f.vy*0.4);}
+          }
+        }
+      }
+    }
+    if((!moving&&timer>0.6)||timer>2.6){countScore();}
+  }
+}
+function countScore(){
+  var standing=0;
+  for(var i=0;i<pins.length;i++)if(pins[i].up)standing++;
+  var knocked=pinsBefore-standing;
+  total+=knocked;
+  if(roll===1){
+    if(standing===0){total+=5;msg='全中！奖励 +5';frame++;roll=1;setupPins();pinsBefore=10;}
+    else{msg='击倒 '+knocked+' 瓶';roll=2;pinsBefore=standing;}
+  }else{
+    if(standing===0){total+=3;msg='补中！奖励 +3';}else{msg='击倒 '+knocked+' 瓶';}
+    frame++;roll=1;setupPins();pinsBefore=10;
+  }
+  if(frame>5){end();return;}
+  phase='ready';ball=null;
+}
+function end(){
+  phase='over';
+  var rank=total>=50?'保龄传奇！':total>=38?'路线掌控高手':total>=25?'小有手感':'继续练习';
+  ovT.textContent='五局终了';
+  ovX.textContent='总分 '+total+' 分（满分 70）· '+rank+'。全中 +5、补中 +3，弧线球更容易打满。';
+  ov.classList.remove('hidden');
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#26314a';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#37474f';ctx.fillRect(LX1-14,80,LX2-LX1+28,540);
+  ctx.fillStyle='#263238';ctx.fillRect(LX1-14,80,14,540);ctx.fillRect(LX2,80,14,540);
+  ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;
+  for(var l=0;l<4;l++){ctx.beginPath();ctx.moveTo(LX1+(LX2-LX1)*l/4,80);ctx.lineTo(LX1+(LX2-LX1)*l/4,620);ctx.stroke();}
+  ctx.fillStyle='rgba(255,213,79,.5)';
+  for(var a=0;a<5;a++){ctx.beginPath();ctx.moveTo(200+a*20,470);ctx.lineTo(195+a*20,455);ctx.lineTo(205+a*20,455);ctx.closePath();ctx.fill();}
+  ctx.fillStyle='#b71c1c';ctx.fillRect(LX1-14,596,LX2-LX1+28,6);
+  for(var i=0;i<pins.length;i++){
+    var p=pins[i];
+    if(p.up&&!p.fly){
+      ctx.fillStyle='#eceff1';
+      ctx.beginPath();ctx.arc(p.x,p.y,7,0,7);ctx.fill();
+      ctx.fillRect(p.x-5,p.y+2,10,14);
+      ctx.fillStyle='#e53935';ctx.fillRect(p.x-6,p.y+4,12,4);
+    }else if(!p.up||p.fly){
+      ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);
+      ctx.fillStyle='rgba(236,239,241,.85)';
+      ctx.beginPath();ctx.ellipse(0,0,13,5,0,0,7);ctx.fill();
+      ctx.fillStyle='#e53935';ctx.fillRect(-4,-4,8,8);
+      ctx.restore();
+    }
+  }
+  if(ball){
+    ctx.fillStyle='#7e57c2';ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,7);ctx.fill();
+    ctx.fillStyle='#4527a0';
+    ctx.beginPath();ctx.arc(ball.x-4,ball.y-3,2,0,7);ctx.arc(ball.x+3,ball.y-4,2,0,7);ctx.arc(ball.x+1,ball.y+2,2,0,7);ctx.fill();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+Math.min(frame,5)+' / 5 局 · 第 '+roll+' 球',14,28);
+  ctx.fillText('总分 '+total,14,52);
+  ctx.textAlign='right';ctx.fillText('立瓶 '+pinsBefore,W-14,28);
+  if(phase==='charge'){
+    var bx=140,bw=200;
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(bx,616,bw,16);
+    ctx.fillStyle='#ffd54f';ctx.fillRect(bx,616,bw*meter,16);
+    ctx.strokeStyle='#9fa8da';ctx.strokeRect(bx,616,bw,16);
+    ctx.fillStyle='#9fa8da';ctx.textAlign='center';ctx.font='13px system-ui,sans-serif';
+    ctx.fillText('松手出球！',W/2,606);
+  }
+  if(phase==='roll'){
+    ctx.fillStyle='#9fa8da';ctx.textAlign='center';ctx.font='13px system-ui,sans-serif';
+    ctx.fillText('◀ 按住左/右半屏拐弧线 ▶',W/2,616);
+  }
+  if(msg&&phase==='ready'){ctx.fillStyle='#ffd54f';ctx.textAlign='center';ctx.font='19px system-ui,sans-serif';ctx.fillText(msg,W/2,330);}
+  if(phase==='ready'&&!chargeHold){ctx.fillStyle='#9fa8da';ctx.textAlign='center';ctx.font='14px system-ui,sans-serif';ctx.fillText('按住蓄力',W/2,616);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect(),sx=W/r.width,x=(e.clientX-r.left)*sx;
+  if(phase==='roll'){if(x<W/2)steerL=true;else steerR=true;}
+  else if(phase==='ready'){phase='charge';mt=0;meter=0;chargeHold=true;}
+});
+window.addEventListener('pointerup',function(){
+  steerL=false;steerR=false;
+  if(phase==='charge'){
+    ball={x:240,y:560,vx:0,vy:-(240+meter*400)};
+    phase='roll';chargeHold=false;
+  }
+});
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')steerL=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')steerR=true;
+  if(e.code==='Space'&&phase==='ready'&&!e.repeat){phase='charge';mt=0;meter=0;chargeHold=true;}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')steerL=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')steerR=false;
+  if(e.code==='Space'&&phase==='charge'){
+    ball={x:240,y:560,vx:0,vy:-(240+meter*400)};
+    phase='roll';chargeHold=false;
+  }
+});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>檐下听雨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#93c5fd;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.bar{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+.bar button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:6px 18px;cursor:pointer;font-family:inherit;font-size:13px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#93c5fd}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#93c5fd;color:#172554;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>檐下听雨</h1>
+  <p class="hint">调屋檐倾角,引雨水滑入两缸 · 双缸各满 100ml 记一场雨 · 接满三场圆满</p>
+  <div class="hud">
+    <span>左缸 <b id="hJ0">0</b>ml</span>
+    <span>右缸 <b id="hJ1">0</b>ml</span>
+    <span>场次 <b id="hRound">0</b>/3</span>
+    <span id="hWind">风 · 微</span>
+  </div>
+  <div class="bar">
+    <button id="btnL">◀ 左倾</button>
+    <button id="btnR">右倾 ▶</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">檐下听雨</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">坐听檐雨</button>
+      <button id="btnMore" style="display:none">继续听雨</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hJ0=$("hJ0"),hJ1=$("hJ1"),hRound=$("hRound"),hWind=$("hWind");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,TAU=Math.PI*2;
+var PX=235,PY=200,L=128;
+var ang=-0.12;
+var drops=[],splashes=[],fx=[];
+var jar=[0,0],rounds=0,state="menu",goalDone=false,time=0;
+var wind=0,wTgt=0,wT=0,em=0;
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function clampAng(){if(ang>0.5)ang=0.5;if(ang<-0.5)ang=-0.5;}
+$("btnL").addEventListener("click",function(){ang-=0.06;clampAng();});
+$("btnR").addEventListener("click",function(){ang+=0.06;clampAng();});
+window.addEventListener("keydown",function(e){
+  if(state!=="play")return;
+  if(e.key==="ArrowLeft"){ang-=0.05;clampAng();e.preventDefault();}
+  if(e.key==="ArrowRight"){ang+=0.05;clampAng();e.preventDefault();}
+});
+function step(dt){
+  var i;
+  wT-=dt;
+  if(wT<=0){wT=3.5;wTgt=(Math.random()-0.5)*90;}
+  wind+=(wTgt-wind)*0.3*dt;
+  em+=dt*30;
+  while(em>1){em-=1;
+    if(drops.length<90)drops.push({x:150+Math.random()*170,y:44,
+      vx:wind*0.5+(Math.random()-0.5)*10,vy:150+Math.random()*40,on:false,u:0,vu:0});}
+  var ca=Math.cos(ang),sa=Math.sin(ang);
+  for(i=drops.length-1;i>=0;i--){var d=drops[i];
+    if(!d.on){
+      d.vy+=90*dt;
+      d.x+=d.vx*dt;d.y+=d.vy*dt;
+      var rx=d.x-PX,ry=d.y-PY;
+      var u=rx*ca+ry*sa,v=-rx*sa+ry*ca;
+      if(Math.abs(u)<=L&&v>=-3&&v<12&&d.vy>0){
+        d.on=true;d.u=u;
+        d.vu=d.vy*sa+d.vx*ca;
+      }
+    }else{
+      d.vu+=620*sa*dt;
+      d.u+=d.vu*dt;
+      if(Math.abs(d.u)>L){
+        d.on=false;
+        d.x=PX+d.u*ca;d.y=PY+d.u*sa+4;
+        d.vx=d.vu*ca;d.vy=d.vu*sa+26;
+      }
+    }
+    if(!d.on&&d.y>=286){
+      var hit=-1;
+      if(Math.abs(d.x-120)<23)hit=0;
+      else if(Math.abs(d.x-350)<23)hit=1;
+      if(hit>=0&&jar[hit]<100){
+        jar[hit]=Math.min(100,jar[hit]+4);
+        if(hit===0)hJ0.textContent=jar[hit];else hJ1.textContent=jar[hit];
+        splashes.push({x:d.x,y:286,t:1});
+      }else{
+        splashes.push({x:d.x,y:300,t:0.7});
+      }
+      drops.splice(i,1);continue;
+    }
+    if(d.y>H+10){drops.splice(i,1);continue;}
+  }
+  for(i=splashes.length-1;i>=0;i--){splashes[i].t-=dt*3;
+    if(splashes[i].t<=0)splashes.splice(i,1);}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  var wtxt=Math.abs(wind)<15?"风 · 微":(wind>0?"风 · 东来":"风 · 西去");
+  if(hWind.textContent!==wtxt)hWind.textContent=wtxt;
+  if(jar[0]>=100&&jar[1]>=100){
+    rounds++;hRound.textContent=rounds;
+    addFx(W/2,120,"这一场雨,满收了","#93c5fd");
+    jar[0]=0;jar[1]=0;hJ0.textContent="0";hJ1.textContent="0";
+    if(rounds>=3&&!goalDone){
+      goalDone=true;state="zen";
+      ovT.textContent="听雨圆满";
+      ovD.textContent="三场雨,两缸水,檐上滴滴答答。\n倾角在手,水流自有去处。\n雨还在下,可继续听。";
+      btnMore.style.display="inline-block";
+      ov.classList.remove("hide");
+    }
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  var sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#0d1326");sky.addColorStop(1,"#182136");
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#2a3350";
+  ctx.beginPath();ctx.ellipse(196,38,34,16,0,0,TAU);ctx.fill();
+  ctx.beginPath();ctx.ellipse(238,32,40,19,0,0,TAU);ctx.fill();
+  ctx.beginPath();ctx.ellipse(282,38,34,16,0,0,TAU);ctx.fill();
+  ctx.fillStyle="#1b2338";ctx.fillRect(0,300,W,H-300);
+  var ca=Math.cos(ang),sa=Math.sin(ang);
+  ctx.strokeStyle="#4a5578";ctx.lineWidth=7;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(PX-ca*L,PY-sa*L);ctx.lineTo(PX+ca*L,PY+sa*L);ctx.stroke();
+  ctx.strokeStyle="#2c3552";ctx.lineWidth=2;
+  for(i=-5;i<=5;i++){
+    var u=i*22,tx=PX+u*ca,ty=PY+u*sa;
+    ctx.beginPath();ctx.moveTo(tx-sa*4,ty+ca*4);ctx.lineTo(tx+sa*4,ty-ca*4);ctx.stroke();
+  }
+  ctx.lineCap="butt";
+  ctx.strokeStyle="#3a4568";ctx.lineWidth=6;
+  ctx.beginPath();ctx.moveTo(PX,PY);ctx.lineTo(PX,262);ctx.stroke();
+  ctx.fillRect(PX-40,262,80,7);
+  for(i=0;i<drops.length;i++){var d=drops[i];
+    ctx.strokeStyle="rgba(147,197,253,.7)";ctx.lineWidth=1.5;
+    if(d.on){
+      var px2=PX+d.u*ca-sa*6,py2=PY+d.u*sa+ca*6;
+      ctx.beginPath();ctx.arc(px2,py2,1.8,0,TAU);ctx.stroke();
+    }else{
+      ctx.beginPath();ctx.moveTo(d.x,d.y);
+      ctx.lineTo(d.x-d.vx*0.018,d.y-d.vy*0.018);ctx.stroke();
+    }
+  }
+  for(i=0;i<2;i++){
+    var jx=i===0?120:350;
+    ctx.strokeStyle="#5a6b95";ctx.lineWidth=2;
+    ctx.strokeRect(jx-22,286,44,20);
+    var ml=jar[i],fh=ml/100*16;
+    if(ml>0){
+      ctx.fillStyle="rgba(96,165,250,.75)";
+      ctx.fillRect(jx-21,306-fh-1,42,fh);
+    }
+    if(ml>=100){
+      ctx.strokeStyle="#fbbf24";ctx.lineWidth=2;
+      ctx.strokeRect(jx-22,286,44,20);
+    }
+  }
+  for(i=0;i<splashes.length;i++){var sp=splashes[i];
+    ctx.strokeStyle="rgba(147,197,253,"+(sp.t*0.8).toFixed(2)+")";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(sp.x,sp.y,(1-sp.t)*8+2,Math.PI,TAU);ctx.stroke();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 14px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+var pressing=false;
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;}
+function mv(e){
+  if(!pressing||state!=="play")return;
+  e.preventDefault();
+  var t=(e.touches&&e.touches[0])?e.touches[0]:e;
+  var rc=cv.getBoundingClientRect();
+  var y=(t.clientY-rc.top)*H/rc.height;
+  ang+=(y-(lastY===null?y:lastY))*0.004;
+  lastY=y;clampAng();
+}
+var lastY=null;
+function up(){pressing=false;lastY=null;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="檐下听雨";
+  ovD.textContent="云在屋上,雨自云落,风时东时西。\n用按钮、方向键或按住拖动来调屋檐倾角,\n让雨水顺着檐面滑进左右两只水缸。\n双缸各满 100ml 记一场雨,接满三场即圆满。";
+  btnGo.textContent="坐听檐雨";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

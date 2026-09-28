@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深潜浮升</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>深潜浮升</h1>
+  <p class="tips">你是一颗深海泡泡!按住屏幕或空格上浮,松手下沉,躲开海刺、顺路收小泡泡,一路浮出海面。越深越黑,勇气可嘉!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">上浮进度</div><div class="big" id="pg">0%</div></div>
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">深潜浮升</h2><p id="ovp">玩法说明:<br>· 按住屏幕(或空格/↑键)泡泡上浮,松手就下沉<br>· 躲开黑色海刺,碰到 -1 条生命并短暂无敌<br>· 顺路收集发光小泡泡,每个 +15 分<br>· 浮到海面 +200 分进入下一关,海刺更密<br>· 共 3 条生命,用完即结束<br>· 控制节奏,匀速上浮最安全!</p><button class="btn" id="obtn">开始上浮</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var WORLD=2400,SURF=140,STARTY=2330;
+var px=210,py=STARTY,vy=0;
+var urchins=[],bubbles=[],cam=0;
+var score=0,lives=3,level=1,invT=0,hold=false;
+var running=false,lastT=0,parts=[];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function genWorld(){
+  urchins=[];bubbles=[];
+  var n=Math.min(52,22+level*6);
+  for(var i=0;i<n;i++){
+    urchins.push({x:rnd(36,W-36),y:rnd(300,2220),r:rnd(17,25),rot:rnd(0,6.28)});
+  }
+  for(i=0;i<34;i++){
+    bubbles.push({x:rnd(30,W-30),y:rnd(280,2250),r:10,ph:rnd(0,6.28)});
+  }
+}
+function reset(){
+  score=0;lives=3;level=1;invT=0;hold=false;parts=[];
+  px=210;py=STARTY;vy=0;
+  genWorld();upd();
+}
+function upd(){
+  $i('sc').textContent=score;
+  var pr=Math.max(0,Math.min(100,Math.round((STARTY-py)/(STARTY-SURF+40)*100)));
+  $i('pg').textContent=pr+'%';
+  $i('lv').textContent=level;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(40,150);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,4),c:c,life:rnd(0.3,0.6)});}
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  if(!running)return;
+  if(invT>0)invT-=dt;
+  vy+=(hold?-540:300)*dt;
+  if(vy<-300)vy=-300;
+  if(vy>250)vy=250;
+  py+=vy*dt;
+  if(py>WORLD-30){py=WORLD-30;vy=0;}
+  cam=py-380;
+  if(cam<0)cam=0;
+  if(cam>WORLD-H)cam=WORLD-H;
+  if(invT<=0){
+    for(i=0;i<urchins.length;i++){
+      var u=urchins[i];
+      if(Math.abs(u.y-py)>60)continue;
+      var dx=u.x-px,dy=u.y-py;
+      var rr=u.r+12;
+      if(dx*dx+dy*dy<rr*rr){
+        lives--;invT=1.6;vy=200;
+        burst(px,py,'#ff5c5c',14);
+        upd();
+        if(lives<=0){
+          lives=0;upd();
+          running=false;
+          $i('ovt').textContent='泡泡被扎破了…';
+          $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达关卡:第 '+level+' 关';
+          $i('obtn').textContent='再来一局';
+          $i('overlay').classList.remove('hide');
+          return;
+        }
+        break;
+      }
+    }
+  }
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    if(Math.abs(b.y-py)>40)continue;
+    var dx2=b.x-px,dy2=b.y-py;
+    if(dx2*dx2+dy2*dy2<26*26){
+      bubbles.splice(i,1);
+      score+=15;
+      burst(b.x,b.y,'#8fd3ff',6);
+      upd();
+    }
+  }
+  if(py<=SURF+10){
+    score+=200;level++;
+    py=STARTY;vy=0;invT=1;
+    genWorld();upd();
+  }
+  upd();
+}
+function draw(){
+  var i;
+  var depth=1-Math.min(1,(py-200)/(WORLD-200));
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'rgb('+(18+depth*14)+','+(26+depth*30)+','+(58+depth*60)+')');
+  g.addColorStop(1,'#0a1024');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(143,211,255,.08)';
+  var sy;
+  for(i=0;i<6;i++){
+    var wy=Math.floor(cam/160)*160+i*160;
+    sy=wy-cam;
+    ctx.beginPath();ctx.arc((wy*0.7)%W,sy+40,14,0,6.2832);ctx.fill();
+    ctx.beginPath();ctx.arc((wy*1.3)%W,sy+110,10,0,6.2832);ctx.fill();
+  }
+  sy=SURF-cam;
+  if(sy>-40){
+    ctx.fillStyle='rgba(143,211,255,.16)';
+    ctx.fillRect(0,0,W,Math.max(0,sy));
+    ctx.strokeStyle='#8fd3ff';ctx.lineWidth=3;
+    ctx.beginPath();
+    for(var xx=0;xx<=W;xx+=14){
+      var yy=sy+Math.sin(xx*0.06+Date.now()*0.003)*4;
+      if(xx===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);
+    }
+    ctx.stroke();
+  }
+  for(i=0;i<urchins.length;i++){
+    var u=urchins[i];
+    var uy=u.y-cam;
+    if(uy<-40||uy>H+40)continue;
+    ctx.strokeStyle='#5b6690';ctx.lineWidth=3;
+    for(var k=0;k<9;k++){
+      var a=u.rot+k/9*6.2832;
+      ctx.beginPath();
+      ctx.moveTo(u.x+Math.cos(a)*u.r*0.5,uy+Math.sin(a)*u.r*0.5);
+      ctx.lineTo(u.x+Math.cos(a)*(u.r+6),uy+Math.sin(a)*(u.r+6));
+      ctx.stroke();
+    }
+    ctx.beginPath();ctx.arc(u.x,uy,u.r*0.72,0,6.2832);
+    ctx.fillStyle='#1c2444';ctx.fill();
+    ctx.strokeStyle='#8b96c4';ctx.lineWidth=2;ctx.stroke();
+  }
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    var by=b.y-cam+Math.sin(Date.now()*0.002+b.ph)*3;
+    if(by<-20||by>H+20)continue;
+    ctx.beginPath();ctx.arc(b.x,by,b.r,0,6.2832);
+    ctx.fillStyle='rgba(143,211,255,.35)';ctx.fill();
+    ctx.strokeStyle='#8fd3ff';ctx.lineWidth=1.5;ctx.stroke();
+  }
+  var pvy=py-cam;
+  if(!(invT>0&&Math.floor(Date.now()*0.01)%2===0)){
+    ctx.beginPath();ctx.arc(px,pvy,14,0,6.2832);
+    ctx.fillStyle='rgba(180,225,255,.5)';ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle='#c8e6ff';ctx.stroke();
+    ctx.beginPath();ctx.arc(px-4,pvy-4,4,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.8)';ctx.fill();
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y-cam,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='13px system-ui';ctx.fillStyle='#7f8ab0';ctx.textAlign='left';
+  ctx.fillText('按住上浮 · 松手下沉',12,H-12);
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();hold=true;});
+window.addEventListener('pointerup',function(){hold=false;});
+cv.addEventListener('pointercancel',function(){hold=false;});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'||e.code==='ArrowUp'){hold=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='Space'||e.code==='ArrowUp')hold=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

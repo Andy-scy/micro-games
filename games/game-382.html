@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>荡索飞跃</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#04263a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>荡索飞跃</h1>
+  <p class="hint">藤索自动越荡越高 · 空格 / 点击在最佳时机松手飞跃</p>
+  <div class="hud">
+    <span>回合 <b id="rd">1/5</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">荡索飞跃</h2>
+      <p id="ovDesc">抓住藤索来回摆荡,摆幅会越荡越大。看准时机按空格或点击屏幕松手,借摆势飞跃沟壑,落到发光的石台上。五轮全过即通关,落水扣一条命!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,AX=150,AY=70,RL=180,GRAV=0.0011,AMAX=0.9,WW=0.0027,BR=9;
+function $(id){return document.getElementById(id);}
+var elRd=$("rd"),elLv=$("lives"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s382");
+var ROUNDS=[
+ {x:296,y:410,w:100},{x:318,y:380,w:92},{x:340,y:350,w:86},
+ {x:362,y:322,w:80},{x:384,y:294,w:76}
+];
+var state,round,lives,score,phase,hangT,theta,fly,landT,msg,msgT,wave=0,retry=false;
+function reset(){round=0;lives=3;score=0;wave=0;retry=false;startRound();updateHud();}
+function startRound(){phase="hang";hangT=0;theta=0;fly=null;msg="第 "+(round+1)+" 轮 · 摆高后择机松手";msgT=1500;updateHud();}
+function updateHud(){
+  elRd.textContent=(round+1)+"/5";elLv.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+}
+function release(){
+  if(phase!=="hang")return;
+  var th=theta,thd=Math.min(AMAX,0.35+hangT*0.000175)*WW*Math.cos(WW*hangT);
+  th=Math.min(AMAX,0.35+hangT*0.000175)*Math.sin(WW*hangT);
+  fly={x:AX+RL*Math.sin(th),y:AY+RL*Math.cos(th),vx:RL*Math.cos(th)*thd,vy:-RL*Math.sin(th)*thd};
+  phase="fly";
+}
+function landOn(p){
+  var q=1-Math.min(1,Math.abs(fly.x-(p.x+p.w/2))/(p.w/2+6));
+  var bonus=20+Math.round(q*60);
+  score+=100+bonus;
+  msg=(q>0.75?"完美落台! +":"落台成功 +")+(100+bonus);msgT=1400;
+  phase="land";landT=900;updateHud();
+}
+function miss(){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"五轮未过,生命耗尽…再练练手感吧!");return;}
+  msg="落水了!剩余生命 "+lives;msgT=1400;
+  phase="land";landT=900;retry=true;
+}
+function afterLand(){
+  if(retry){retry=false;startRound();return;}
+  round++;
+  if(round>=ROUNDS.length){finish(true,"五轮全部落地,飞跃大师!");return;}
+  startRound();
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s382",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function act(){
+  if(state!=="playing")return;
+  if(phase==="hang")release();
+}
+cv.addEventListener("mousedown",function(e){act();e.preventDefault();});
+cv.addEventListener("touchstart",function(e){act();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else act();
+  }
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  wave+=dt*0.004;
+  if(state==="playing"){
+    if(msgT>0)msgT-=dt;
+    if(phase==="hang"){
+      hangT+=dt;
+      var A=Math.min(AMAX,0.35+hangT*0.000175);
+      theta=A*Math.sin(WW*hangT);
+    }else if(phase==="fly"){
+      fly.vy+=GRAV*dt;fly.x+=fly.vx*dt;fly.y+=fly.vy*dt;
+      var p=ROUNDS[round];
+      if(fly.vy>0&&fly.y+BR>=p.y&&fly.y+BR<=p.y+18&&fly.x>p.x-4&&fly.x<p.x+p.w+4)landOn(p);
+      else if(fly.y>H+30||fly.x>W+30||fly.x<-30)miss();
+    }else if(phase==="land"){
+      landT-=dt;
+      if(landT<=0)afterLand();
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  for(i=0;i<40;i++){
+    var s=((i*97)%W+wave*8)%W, sy=(i*63)%240;
+    ctx.fillStyle="rgba(255,255,255,0.05)";
+    ctx.fillRect(W-s,sy,2,2);
+  }
+  ctx.fillStyle="#12303f";ctx.fillRect(0,470,W,H-470);
+  ctx.strokeStyle="#1e5a74";ctx.lineWidth=2;
+  ctx.beginPath();
+  for(i=0;i<=W;i+=10){
+    var wy=470+Math.sin(i*0.05+wave)*3+(i%20===0?2:0);
+    if(i===0)ctx.moveTo(i,wy);else ctx.lineTo(i,wy);
+  }
+  ctx.stroke();
+  ctx.fillStyle="#2c3a5e";ctx.fillRect(AX-16,AY-16,32,14);
+  ctx.fillStyle="#415180";ctx.fillRect(AX-6,AY-4,12,6);
+  var bx,by;
+  if(phase==="hang"){
+    bx=AX+RL*Math.sin(theta);by=AY+RL*Math.cos(theta);
+    ctx.strokeStyle="#c8a06a";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(AX,AY);ctx.lineTo(bx,by);ctx.stroke();
+  }else if(fly){bx=fly.x;by=fly.y;}
+  else{bx=AX;by=AY+RL;}
+  for(i=0;i<ROUNDS.length;i++){
+    var p=ROUNDS[i],cur=(i===round&&state==="playing");
+    ctx.fillStyle=cur?"#2b5f46":"#26304e";
+    ctx.strokeStyle=cur?"#4ade80":"#3a466e";ctx.lineWidth=2;
+    ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(p.x,p.y,p.w,14,6);else ctx.rect(p.x,p.y,p.w,14);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle="#1a2238";
+    ctx.fillRect(p.x+p.w/2-3,p.y+14,6,470-p.y);
+    if(cur){
+      ctx.globalAlpha=0.35+0.3*Math.sin(t0*0.006);
+      ctx.strokeStyle="#4ade80";ctx.lineWidth=3;
+      ctx.strokeRect(p.x-5,p.y-5,p.w+10,24);
+      ctx.globalAlpha=1;
+    }
+  }
+  ctx.fillStyle="#38bdf8";
+  ctx.shadowColor="#38bdf8";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(bx,by,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(phase==="hang"&&state==="playing"){
+    ctx.fillStyle="rgba(139,144,176,0.9)";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("按空格 / 点击松手!",W/2,180);ctx.textAlign="left";
+  }
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#fbbf24";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,120);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+var t0=0;
+updateHud();
+requestAnimationFrame(function ts(t){t0=t;requestAnimationFrame(loop);});
+})();
+</script>
+</body>
+</html>

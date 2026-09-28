@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逍遥渔场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#f87171;font-size:13px;margin-bottom:6px}
+#pond{position:relative;height:170px;border-radius:12px;cursor:pointer;overflow:hidden;background:linear-gradient(180deg,#164e63,#0c2f42);border:1px solid #1e5f78;user-select:none}
+#pond .fish{font-size:26px;position:absolute;transition:transform 2s linear}
+#pond .tip{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:12px;color:#9fd7e8}
+.splash{position:absolute;font-size:14px;font-weight:700;color:#a5f3fc;pointer-events:none;animation:rise .8s ease-out forwards;z-index:3}
+@keyframes rise{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-40px)}}
+.bars{margin:8px 0}
+.brow{display:flex;align-items:center;gap:8px;font-size:12px;color:#c7cbe8;margin-bottom:4px}
+.brow .bl{width:70px}
+.bar{flex:1;height:14px;background:#0b0e1a;border-radius:7px;overflow:hidden}
+.bar>div{height:100%;width:0}
+#popFill{background:linear-gradient(90deg,#0891b2,#22d3ee)}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>逍遥渔场</h1>
+  <p class="hint">点水面撒网捕鱼 · 鱼群会自然繁衍,捞太狠种群崩溃 · 让池塘可持续,累计赚 <b>6000</b> 金币</p>
+  <div class="hud">
+    <span>金币 <b id="hMoney">0</b></span>
+    <span>鱼群 <b id="hFish">25</b>/<span id="hK">60</span></span>
+    <span>自然增长 <b id="hGrow">0.9</b>/秒</span>
+    <span>网产 <b id="hNet">3</b> 鱼/网</span>
+  </div>
+  <div id="msg"></div>
+  <div id="pond"></div>
+  <div class="bars">
+    <div class="brow"><span class="bl">种群健康</span><div class="bar"><div id="popFill"></div></div></div>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">逍遥渔场</h2>
+    <p id="ovDesc">池塘里的鱼按自然规律繁衍:鱼越多长得越快,但挤到容量上限就停滞。点水面撒网,一网 3 条起步。鱼少于 15 条进入濒危——捕捞减半、繁衍停滞!升级渔网、挖深池塘、建增殖站,找到那条可持续的财路。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">承包池塘</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elFish=$("hFish"),elK=$("hK"),elGrow=$("hGrow"),elNet=$("hNet"),elMsg=$("msg");
+var pond=$("pond"),popFill=$("popFill"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=6000;
+var ups=[
+ {nm:"加强渔网",ds:"每网 +2 鱼",base:60,mult:1.9,max:10},
+ {nm:"挖掘机清淤",ds:"容量 +50",base:130,mult:1.8,max:6},
+ {nm:"鱼苗增殖站",ds:"繁衍速率 +0.02",base:160,mult:2,max:5}
+];
+var money,pop,K,r,upLv,warnT,state,msgT,rows=[],fishEls=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function netPer(){return 3+2*upLv[0];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function growth(){return r*pop*(1-pop/K);}
+function say(t){elMsg.textContent=t;msgT=2.4;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够!");return;}
+  money-=c;upLv[i]++;
+  if(i===1)K+=50;
+  if(i===2)r+=0.02;
+  say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function cast(e){
+  if(state!=="play")return;
+  var c=Math.min(netPer(),Math.floor(pop));
+  if(pop<15)c=Math.ceil(c/2);
+  if(c<=0){say("一条鱼都捞不上来,让池塘歇歇!");return;}
+  pop-=c;money+=c*3;
+  var rect=pond.getBoundingClientRect();
+  var p=document.createElement("div");
+  p.className="splash";p.textContent="+"+c+"鱼";
+  p.style.left=(e.clientX-rect.left-18)+"px";
+  p.style.top=(e.clientY-rect.top-10)+"px";
+  pond.appendChild(p);
+  setTimeout(function(){if(p.parentNode)p.parentNode.removeChild(p);},800);
+}
+function spawnFish(){
+  var f=document.createElement("div");
+  f.className="fish";
+  f.textContent="🐟";
+  f.style.left=(5+Math.random()*85)+"%";
+  f.style.top=(8+Math.random()*70)+"%";
+  pond.appendChild(f);
+  fishEls.push(f);
+  var sway=6+Math.random()*14;
+  f.style.transform="translateX("+(Math.random()<0.5?-sway:sway)+"px)";
+}
+function syncFish(){
+  var want=Math.min(8,Math.ceil(pop/12));
+  while(fishEls.length<want)spawnFish();
+  while(fishEls.length>want){
+    var f=fishEls.pop();
+    if(f.parentNode)f.parentNode.removeChild(f);
+  }
+}
+function startGame(){
+  money=0;pop=25;K=60;r=0.05;upLv=[0,0,0];warnT=0;msgT=0;
+  fishEls=[];pond.innerHTML='<div class="tip">点击水面撒网</div>';
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+pond.addEventListener("click",cast);
+function render(){
+  elMoney.textContent=fmt(money);elFish.textContent=Math.floor(pop);elK.textContent=K;
+  elGrow.textContent=growth().toFixed(2);elNet.textContent=netPer();
+  popFill.style.width=Math.min(100,pop/K*100)+"%";
+  var i;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  if(pop>=15)pop=Math.min(K,pop+growth()*ds);
+  else{warnT-=ds;if(warnT<=0){warnT=6;say("种群濒危!繁衍停滞,捕捞减半,快停手等恢复!");}}
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  syncFish();render();
+  if(money>=WIN){
+    state="over";
+    showOv("渔场大亨!","取之有道的你赚得盆满钵满,鱼群依然欢腾!","累计赚得 "+fmt(money)+" 金币 · 存鱼 "+Math.floor(pop)+" 条");
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+money=0;pop=25;K=60;r=0.05;upLv=[0,0,0];warnT=0;state="menu";msgT=0;
+buildShop();
+render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

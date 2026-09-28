@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>岩浆攀升</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f87171;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f87171;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#330a0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>岩浆攀升</h1>
+  <p class="hint">←/→ 移动 · 空格/↑ 跳跃 · 触屏:点按跳,按住拖动 · 岩浆在脚下不断上涨,往上爬!</p>
+  <div class="hud">
+    <span>高度 <b id="score">0</b> 米</span>
+    <span>最佳 <b id="best">0</b> 米</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">岩浆攀升</h2>
+      <p id="ovDesc">火山喷发了!岩浆从洞底不断追升,踩着浮石一路向上跳,跳得越高越安全——但岩浆越来越快!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=480,H=360;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s428");
+var state="menu",plats,px,py,vy,vx,grounded,groundP,coyote,camY,lavaY,nextY,maxAlt,moveL,moveR,targetX,bubbles,shake;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  plats=[{y:0,x:150,w:180}];
+  px=210;py=-42;vy=0;vx=0;grounded=true;groundP=plats[0];coyote=0;
+  camY=-190;lavaY=240;nextY=-75;maxAlt=0;moveL=false;moveR=false;targetX=-1;bubbles=[];shake=0;
+  var i;
+  for(i=0;i<8;i++)bubbles.push({x:Math.random()*W,o:Math.random()*2,r:2+Math.random()*3});
+  genPlats();
+  elBest.textContent=best;
+}
+function genPlats(){
+  while(nextY>camY-90){
+    var pw=80+Math.random()*55;
+    plats.push({y:nextY,x:12+Math.random()*(W-24-pw),w:pw});
+    nextY-=52+Math.random()*42;
+  }
+}
+function updateHud(){
+  var alt=Math.max(0,Math.floor((-py)/10));
+  elScore.textContent=alt;
+}
+function gameOver(msg){
+  state="over";
+  var alt=Math.max(0,Math.floor((-py)/10));
+  if(alt>best){best=alt;saveBest("mg_s428",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="本次高度 "+alt+" 米 · 最佳 "+best+" 米";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded||coyote>0){vy=-540;grounded=false;coyote=0;}
+}
+function update(dt){
+  var s=dt/1000,i,p,prevY;
+  if(moveL)vx=-235;else if(moveR)vx=235;
+  else if(targetX>=0){
+    var diff=targetX-px;
+    vx=Math.max(-260,Math.min(260,diff*7));
+  }else vx=0;
+  px+=vx*s;
+  if(px<4){px=4;vx=0;}
+  if(px>W-36){px=W-36;vx=0;}
+  if(grounded){
+    var g=groundP;
+    if(!g||px+30<g.x||px>g.x+g.w||Math.abs(py+42-g.y)>2){grounded=false;coyote=0.09;vy=0;}
+  }
+  if(!grounded){
+    if(coyote>0)coyote-=s;
+    prevY=py;
+    vy+=1350*s;py+=vy*s;
+    if(vy>0){
+      for(i=0;i<plats.length;i++){
+        p=plats[i];
+        if(prevY+42<=p.y+2&&py+42>=p.y&&px+30>p.x&&px<p.x+p.w){
+          py=p.y-42;vy=0;grounded=true;groundP=p;
+          break;
+        }
+      }
+    }
+  }
+  camY=Math.min(camY,py-150);
+  var alt=-py;
+  if(alt>maxAlt)maxAlt=alt;
+  var lavaSpd=45+Math.min(80,maxAlt*0.02);
+  lavaY-=lavaSpd*s;
+  for(i=plats.length-1;i>=0;i--){
+    if(plats[i].y>lavaY+30)plats.splice(i,1);
+  }
+  genPlats();
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];b.o+=s*2;
+    if(b.o>2){b.o=0;b.x=Math.random()*W;}
+  }
+  if(lavaY<=py+42){shake=0.5;gameOver("岩浆追上了你——下次跳快一点!");return;}
+  if(py-camY>H+80){gameOver("一路向下,掉进了无底深渊……");return;}
+  updateHud();
+}
+function draw(){
+  var i,p,sy,grd,alt;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#160f1c");grd.addColorStop(1,"#241019");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,120,60,.05)";
+  for(i=0;i<12;i++)ctx.fillRect((i*163)%W,(i*97)%H,2,2);
+  if(shake>0)shake=Math.max(0,shake-0.03);
+  var shx=shake>0?(Math.random()-0.5)*6*shake:0;
+  ctx.save();
+  ctx.translate(shx,0);
+  for(i=0;i<plats.length;i++){
+    p=plats[i];sy=p.y-camY;
+    if(sy<-30||sy>H+30)continue;
+    ctx.fillStyle="#3d3350";
+    rr(p.x,sy,p.w,16,7);ctx.fill();
+    ctx.fillStyle="#575070";
+    rr(p.x+3,sy,p.w-6,5,3);ctx.fill();
+    ctx.fillStyle="rgba(248,113,113,.4)";
+    ctx.fillRect(p.x+4,sy+14,p.w-8,2);
+  }
+  var lsy=lavaY-camY;
+  if(lsy<H+80){
+    grd=ctx.createLinearGradient(0,lsy,0,H);
+    grd.addColorStop(0,"#fbbf24");grd.addColorStop(0.25,"#f87171");grd.addColorStop(1,"#7f1d1d");
+    ctx.fillStyle=grd;
+    ctx.beginPath();ctx.moveTo(0,lsy+8);
+    for(i=0;i<=8;i++)ctx.lineTo(i*60,lsy+8+Math.sin(i*1.7+lsy*0.08)*6);
+    ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
+    ctx.fillStyle="rgba(254,215,120,.8)";
+    for(i=0;i<bubbles.length;i++){
+      var b=bubbles[i];
+      var by=lsy+20+((b.o*40)%(H-lsy-20>0?H-lsy-20:60));
+      ctx.beginPath();ctx.arc(b.x,by,b.r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.fillStyle="rgba(251,191,36,.25)";
+    ctx.fillRect(0,lsy-14,W,14);
+  }
+  var psy=py-camY;
+  ctx.fillStyle="#f8f4e8";
+  rr(px,psy,30,42,10);ctx.fill();
+  ctx.fillStyle="#1c141f";
+  ctx.beginPath();ctx.arc(px+10,psy+14,3,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(px+21,psy+14,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#e2593b";
+  rr(px+4,psy+30,22,8,4);ctx.fill();
+  ctx.restore();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowLeft"||k==="ArrowRight")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k==="ArrowLeft"||k==="a"||k==="A")moveL=true;
+  if(k==="ArrowRight"||k==="d"||k==="D")moveR=true;
+  if((k===" "||k==="ArrowUp"||k==="w"||k==="W")&&!e.repeat)doJump();
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k==="ArrowLeft"||k==="a"||k==="A")moveL=false;
+  if(k==="ArrowRight"||k==="d"||k==="D")moveR=false;
+});
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  doJump();
+  var rect=cv.getBoundingClientRect();
+  targetX=(t.clientX-rect.left)/rect.width*W-15;
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+  targetX=(t.clientX-rect.left)/rect.width*W-15;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();targetX=-1;},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

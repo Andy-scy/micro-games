@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹珠画卷</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fde047;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fde047;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #8a6d1a;background:#0d1320;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.tools{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.tools button{background:#2a2410;color:#e8eaf6;border:1px solid #5c4d1a;border-radius:9px;padding:9px 22px;font-size:14px;cursor:pointer;font-family:inherit}
+.tools button:disabled{opacity:.4;cursor:default}
+.msg{text-align:center;color:#fbbf24;font-size:13px;height:18px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(10,9,4,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fde047}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#5eead4;font-weight:700}
+.overlay button{margin-top:6px;background:#fde047;color:#3a2c04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹珠画卷</h1>
+  <p class="hint">墨水画<b style="color:#e8eaf6">轨道</b>,按「投珠」放下颜料弹珠:它沿轨道滚落,碾过虚线<b style="color:#5eead4">色块</b>即染色;<br>弹珠掉落或停稳后可继续补轨道再投,墨水有限,铺满所有色块过关(空格=投珠)。</p>
+  <div class="hud"><span>关卡 <b id="lv">1/3</b></span><span>墨水 <b id="ink">100%</b></span><span>色块 <b id="pd">0/0</b></span><span>得分 <b id="sc">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">弹珠画卷</h2>
+      <p id="ovP">画几条斜坡当滑道,投下弹珠让它滚过每一个色块。<br>轨道越省墨,得分越高;弹珠停稳会自动回收,可再补画。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始画卷</button>
+    </div>
+  </div>
+  <div class="tools">
+    <button id="btnDrop">投珠</button>
+    <button id="btnClear">清空轨道</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo"),elMsg=$("msg");
+var btnDrop=$("btnDrop"),btnClear=$("btnClear");
+var elLv=$("lv"),elInk=$("ink"),elPd=$("pd"),elSc=$("sc");
+var LEVELS=[
+ {ink:900,spawn:{x:240,y:40},pads:[[120,300],[360,340],[240,430]]},
+ {ink:1150,spawn:{x:60,y:60},pads:[[240,190],[420,260],[80,380],[300,430]]},
+ {ink:1350,spawn:{x:240,y:40},pads:[[60,170],[420,170],[60,420],[420,420],[240,290]]}
+];
+var PAD_R=26,BALL_R=9,HALF_W=3,GRAV=0.055,MAXV=5;
+var PADCOLS=["#5eead4","#fb7185","#fbbf24","#a78bfa","#38bdf8"];
+var state="menu",lvIdx=0,level=null,ink=0,strokes=[],cur=null,pads=[],filled=0,score=0;
+var ball=null,restCnt=0,rollFrames=0;
+var pcv=document.createElement("canvas");pcv.width=480;pcv.height=480;
+var pctx=pcv.getContext("2d");
+function startLevel(){
+  level=LEVELS[lvIdx];
+  ink=level.ink;strokes=[];cur=null;pads=[];filled=0;
+  ball=null;restCnt=0;rollFrames=0;
+  var i;
+  for(i=0;i<level.pads.length;i++)pads.push({x:level.pads[i][0],y:level.pads[i][1],done:false,col:PADCOLS[i%PADCOLS.length]});
+  pctx.clearRect(0,0,480,480);
+  elLv.textContent=(lvIdx+1)+"/3";
+  elMsg.textContent="拖动画轨道,然后按「投珠」";
+  updHud();
+}
+function updHud(){
+  elInk.textContent=Math.round(ink/level.ink*100)+"%";
+  elPd.textContent=filled+"/"+pads.length;
+  elSc.textContent=score;
+}
+function pos(e){
+  var rect=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-rect.left)*cv.width/rect.width,y:(t.clientY-rect.top)*cv.height/rect.height};
+}
+function begin(e){
+  if(state!=="draw")return;
+  var p=pos(e);
+  if(ink<=4){elMsg.textContent="墨水不足,直接投珠碰运气吧";return;}
+  cur=[{x:p.x,y:p.y}];
+  strokes.push(cur);
+}
+function moveP(e){
+  if(state!=="draw"||!cur)return;
+  var p=pos(e),last=cur[cur.length-1];
+  var d=Math.hypot(p.x-last.x,p.y-last.y);
+  if(d<5)return;
+  if(ink<=0){elMsg.textContent="墨水用尽!";cur=null;return;}
+  var step=Math.min(d,ink);
+  var k=step/d;
+  cur.push({x:last.x+(p.x-last.x)*k,y:last.y+(p.y-last.y)*k});
+  ink-=step;
+  updHud();
+}
+function endP(){cur=null;}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Spacebar"){
+    e.preventDefault();
+    if(state==="draw")drop();
+  }
+});
+function drop(){
+  if(state!=="draw")return;
+  ball={x:level.spawn.x,y:level.spawn.y,vx:0,vy:0,px:level.spawn.x,py:level.spawn.y};
+  restCnt=0;rollFrames=0;
+  state="roll";
+  btnDrop.disabled=true;
+  elMsg.textContent="弹珠滚动中……";
+}
+function endThrow(msg){
+  ball=null;
+  if(filled>=pads.length){levelClear();return;}
+  if(ink<40){fail(msg);return;}
+  state="draw";
+  btnDrop.disabled=false;
+  elMsg.textContent=msg+"已染色 "+filled+"/"+pads.length+",补轨道再投!";
+}
+function levelClear(){
+  state="between";
+  btnDrop.disabled=false;
+  var bonus=Math.round(ink/level.ink*100)+50;
+  score+=bonus;
+  updHud();
+  var last=lvIdx>=LEVELS.length-1;
+  ovT.textContent=last?"画卷全部完成!":"第 "+(lvIdx+1)+" 关完成!";
+  ovP.textContent="剩余墨水奖励 "+bonus+" 分。\n"+(last?"弹珠画派掌门就是你!":"下一关色块更多更刁钻。");
+  ovS.style.display="block";ovS.textContent="总得分 "+score;
+  btnGo.textContent=last?"再来一局":"下一关";
+  ov.classList.remove("hide");
+}
+function fail(why){
+  state="over";
+  btnDrop.disabled=false;
+  ovT.textContent="墨水用尽";
+  ovP.textContent=why+"墨水不足 40,无法补轨。\n已染色 "+filled+"/"+pads.length+"。\n提示:斜坡要接住弹珠,别让它直坠落空。";
+  ovS.style.display="block";ovS.textContent="总得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function resolveSeg(p,q){
+  var dx=q.x-p.x,dy=q.y-p.y;
+  var l2=dx*dx+dy*dy;
+  if(l2<0.001)return;
+  var t=((ball.x-p.x)*dx+(ball.y-p.y)*dy)/l2;
+  if(t<0)t=0;if(t>1)t=1;
+  var cx=p.x+dx*t,cy=p.y+dy*t;
+  var nx=ball.x-cx,ny=ball.y-cy;
+  var d=Math.sqrt(nx*nx+ny*ny);
+  var R=BALL_R+HALF_W;
+  if(d>=R||d<0.0001){
+    if(d<0.0001){ball.y-=R;ball.vy=0;}
+    return;
+  }
+  nx/=d;ny/=d;
+  ball.x+=nx*(R-d);ball.y+=ny*(R-d);
+  var vn=ball.vx*nx+ball.vy*ny;
+  if(vn<0){
+    var tx=-ny,ty=nx;
+    var vt=(ball.vx*tx+ball.vy*ty)*0.99;
+    var bounce=-vn*0.12;
+    ball.vx=tx*vt+nx*bounce;
+    ball.vy=ty*vt+ny*bounce;
+  }
+}
+function physics(){
+  var s,j,sub;
+  for(sub=0;sub<4;sub++){
+    ball.vy+=GRAV;
+    var sp=Math.hypot(ball.vx,ball.vy);
+    if(sp>MAXV){ball.vx*=MAXV/sp;ball.vy*=MAXV/sp;}
+    ball.px=ball.x;ball.py=ball.y;
+    ball.x+=ball.vx;ball.y+=ball.vy;
+    for(s=0;s<strokes.length;s++){
+      var pts=strokes[s];
+      for(j=0;j+1<pts.length;j++)resolveSeg(pts[j],pts[j+1]);
+    }
+    if(ball.x<BALL_R){ball.x=BALL_R;ball.vx=Math.abs(ball.vx)*0.4;}
+    if(ball.x>480-BALL_R){ball.x=480-BALL_R;ball.vx=-Math.abs(ball.vx)*0.4;}
+    var i;
+    for(i=0;i<pads.length;i++){
+      if(!pads[i].done){
+        var ddx=ball.x-pads[i].x,ddy=ball.y-pads[i].y;
+        if(ddx*ddx+ddy*ddy<(PAD_R-2)*(PAD_R-2)){
+          pads[i].done=true;filled++;
+          updHud();
+          if(filled>=pads.length)elMsg.textContent="色块全染!等弹珠回收……";
+        }
+      }
+    }
+    pctx.strokeStyle="rgba(253,224,71,0.75)";
+    pctx.lineWidth=4;pctx.lineCap="round";
+    pctx.beginPath();pctx.moveTo(ball.px,ball.py);pctx.lineTo(ball.x,ball.y);pctx.stroke();
+  }
+  if(ball.y>520){endThrow("弹珠坠落。");return;}
+  var v2=ball.vx*ball.vx+ball.vy*ball.vy;
+  restCnt=v2<0.06?restCnt+1:0;
+  rollFrames++;
+  if(restCnt>60||rollFrames>900){endThrow("弹珠停稳。");return;}
+}
+function draw(){
+  ctx.fillStyle="#0d1320";ctx.fillRect(0,0,480,480);
+  ctx.fillStyle="rgba(139,144,176,0.07)";
+  var gx,gy;
+  for(gx=40;gx<480;gx+=40)ctx.fillRect(gx,0,1,480);
+  for(gy=40;gy<480;gy+=40)ctx.fillRect(0,gy,480,1);
+  var i;
+  for(i=0;i<pads.length;i++){
+    var pd=pads[i];
+    ctx.beginPath();ctx.arc(pd.x,pd.y,PAD_R,0,Math.PI*2);
+    if(pd.done){ctx.fillStyle=pd.col;ctx.fill();}
+    else{
+      ctx.setLineDash([5,5]);ctx.strokeStyle=pd.col;ctx.lineWidth=2;ctx.stroke();ctx.setLineDash([]);
+    }
+    ctx.fillStyle=pd.done?"rgba(13,19,32,0.9)":pd.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(pd.done?"✓":String(i+1),pd.x,pd.y);
+  }
+  ctx.drawImage(pcv,0,0);
+  ctx.strokeStyle="rgba(203,213,240,0.9)";ctx.lineWidth=6;ctx.lineCap="round";ctx.lineJoin="round";
+  for(i=0;i<strokes.length;i++){
+    var pts=strokes[i];
+    if(pts.length<2)continue;
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    var k;
+    for(k=1;k<pts.length;k++)ctx.lineTo(pts[k].x,pts[k].y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([4,4]);ctx.strokeStyle="#fde047";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(level.spawn.x,level.spawn.y,13,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle="#fde047";
+  ctx.beginPath();ctx.arc(level.spawn.x,level.spawn.y+20,3,0,Math.PI*2);ctx.fill();
+  if(ball){
+    ctx.beginPath();ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2);
+    ctx.fillStyle="#fde047";ctx.fill();
+    ctx.strokeStyle="rgba(58,44,4,0.6)";ctx.lineWidth=2;ctx.stroke();
+  }
+}
+btnDrop.addEventListener("click",drop);
+btnClear.addEventListener("click",function(){
+  if(state!=="draw")return;
+  strokes=[];
+  elMsg.textContent="轨道已清(墨水不退,下笔更省着点)";
+});
+btnGo.addEventListener("click",function(){
+  if(state==="over"||(state==="between"&&btnGo.textContent==="再来一局")){score=0;lvIdx=0;}
+  else if(state==="between")lvIdx++;
+  startLevel();
+  state="draw";
+  btnDrop.disabled=false;
+  ovS.style.display="none";
+  ov.classList.add("hide");
+});
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==="roll")physics();
+  if(state==="draw"||state==="roll")draw();
+}
+})();
+</script>
+</body>
+</html>

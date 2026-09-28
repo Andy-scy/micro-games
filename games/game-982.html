@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>沙画曼陀罗</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#5eead4;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{background:#5eead4;color:#042f2e;border-color:#5eead4;font-weight:700}
+.ctl button:disabled{opacity:.35;cursor:default}
+.lb{color:#8b90b0;margin-left:4px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#5eead4}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#5eead4;color:#042f2e;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>沙画曼陀罗</h1>
+  <p class="hint">按住在盘内拖动漏下细砂,对称旋成花纹 · 意境 65% 圆满并解锁新砂色</p>
+  <div class="hud">
+    <span>意境 <b id="hCov">0%</b></span>
+    <span>最高 <b id="hBest">0%</b></span>
+  </div>
+  <div class="ctl">
+    <span class="lb">对称</span>
+    <button data-s="4">4 折</button><button data-s="6" class="sel">6 折</button><button data-s="8">8 折</button>
+    <span class="lb">砂色</span>
+    <button data-p="0" class="sel">暖沙</button><button data-p="1" id="pal1" disabled>黛青 20%</button><button data-p="2" id="pal2" disabled>霞紫 45%</button>
+    <button id="btnClr">清盘</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="460" height="460"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">沙画曼陀罗</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开始漏沙</button>
+      <button id="btnMore" style="display:none">继续创作</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hCov=$("hCov"),hBest=$("hBest");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=460,H=460,CX=230,CY=230,R=205,CELL=5,GW=92,GH=92,TAU=Math.PI*2;
+var PAL=[
+ ["#d9a679","#b97f52","#8f5f3c","#e8c9a3"],
+ ["#7fb8c9","#5a8fa8","#3f6b85","#a8d0dd"],
+ ["#b48ed9","#8f66bd","#6d4a9c","#d4bdf0"]];
+var grid=new Array(GW*GH),i,j;
+for(i=0;i<grid.length;i++)grid[i]=0;
+var zoneTotal=0;
+for(i=0;i<GH;i++)for(j=0;j<GW;j++){
+  var ddx=j*CELL+2.5-CX,ddy=i*CELL+2.5-CY;
+  if(ddx*ddx+ddy*ddy<R*R)zoneTotal++;
+}
+var off=document.createElement("canvas");off.width=W;off.height=H;
+var octx=off.getContext("2d");
+var sym=6,palIdx=0,particles=[],filled=0,best=0,state="menu",pressing=false,lastPt=null;
+var goalDone=false,un1=false,un2=false;
+function emit(p){
+  var dx=p.x-CX,dy=p.y-CY,rr=Math.sqrt(dx*dx+dy*dy);
+  if(rr>R-6)rr=R-6;
+  var th=Math.atan2(dy,dx),n=sym,mir=1;
+  if(sym===4)n=8;else if(sym===6)n=12;else mir=0;
+  var k;
+  for(k=0;k<n;k++){
+    var a;
+    if(mir&&k>=sym)a=-th+(k-sym)*TAU/sym;
+    else a=th+(k%sym)*TAU/sym;
+    if(particles.length<520){
+      particles.push({x:CX+Math.cos(a)*rr,y:CY+Math.sin(a)*rr,
+        vx:(Math.random()-0.5)*14,vy:14+Math.random()*22,
+        life:0.9+Math.random()*0.5,
+        col:PAL[palIdx][(Math.random()*PAL[palIdx].length)|0]});
+    }
+  }
+}
+function settle(p,ci,ri){
+  if(ci<0||ci>=GW||ri<0||ri>=GH)return;
+  var k=ri*GW+ci;
+  if(grid[k]!==0)return;
+  var dx=ci*CELL+2.5-CX,dy=ri*CELL+2.5-CY;
+  if(dx*dx+dy*dy>=R*R)return;
+  grid[k]=1;filled++;
+  octx.fillStyle=p.col;octx.fillRect(ci*CELL,ri*CELL,CELL,CELL);
+}
+function step(dt){
+  var i2;
+  for(i2=particles.length-1;i2>=0;i2--){var p=particles[i2];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=60*dt;p.vx*=0.99;p.life-=dt;
+    var ci=Math.floor(p.x/CELL),ri=Math.floor(p.y/CELL),stop=false;
+    var occupied=(ci>=0&&ci<GW&&ri>=0&&ri<GH&&grid[ri*GW+ci]!==0);
+    var dx=p.x-CX,dy=p.y-CY,inside=(dx*dx+dy*dy)<R*R;
+    if(occupied||!inside||p.life<=0)stop=true;
+    if(stop){
+      if(inside&&!occupied)settle(p,ci,ri);
+      particles.splice(i2,1);
+    }
+  }
+}
+function covPct(){return filled/zoneTotal;}
+function clearPan(){
+  var i2;
+  for(i2=0;i2<grid.length;i2++)grid[i2]=0;
+  filled=0;particles=[];
+  octx.clearRect(0,0,W,H);
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;lastPt=null;mv(e);}
+function mv(e){
+  if(!pressing||state!=="play")return;
+  e.preventDefault();
+  var p=ptr(e);
+  if(lastPt){
+    var dx=p.x-lastPt.x,dy=p.y-lastPt.y,d=Math.sqrt(dx*dx+dy*dy),n=Math.floor(d/6),k;
+    for(k=1;k<=n;k++)emit({x:lastPt.x+dx*k/(n+1),y:lastPt.y+dy*k/(n+1)});
+  }else emit(p);
+  lastPt=p;
+}
+function up(){pressing=false;lastPt=null;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+var sbs=document.querySelectorAll("[data-s]");
+for(i=0;i<sbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    sym=parseInt(b.getAttribute("data-s"),10);
+    for(var k2=0;k2<sbs.length;k2++)sbs[k2].className="";
+    b.className="sel";
+  });
+})(sbs[i]);}
+var pbs=document.querySelectorAll("[data-p]");
+for(i=0;i<pbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    if(b.disabled)return;
+    palIdx=parseInt(b.getAttribute("data-p"),10);
+    for(var k2=0;k2<pbs.length;k2++)pbs[k2].className="";
+    b.className="sel";
+  });
+})(pbs[i]);}
+$("btnClr").addEventListener("click",function(){if(state==="play")clearPan();});
+function unlockCheck(){
+  var pc=covPct();
+  if(pc>best)best=pc;
+  if(!un1&&best>=0.2){un1=true;$("pal1").disabled=false;}
+  if(!un2&&best>=0.45){un2=true;$("pal2").disabled=false;}
+  if(!goalDone&&best>=0.65){
+    goalDone=true;state="zen";
+    ovT.textContent="曼陀罗初成";
+    ovD.textContent="意境已达 65%,纹样流转如花。\n清盘可再画,砂色已尽数解锁。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#141829";ctx.beginPath();ctx.arc(CX,CY,R+8,0,TAU);ctx.fill();
+  ctx.fillStyle="#0b0e1a";ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.fill();
+  ctx.drawImage(off,0,0);
+  var i2;
+  for(i2=0;i2<particles.length;i2++){var p=particles[i2];
+    ctx.globalAlpha=Math.max(0,Math.min(1,p.life*2));
+    ctx.fillStyle=p.col;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+  ctx.strokeStyle="rgba(94,234,212,.5)";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.stroke();
+  ctx.fillStyle="rgba(94,234,212,.25)";ctx.beginPath();ctx.arc(CX,CY,3,0,TAU);ctx.fill();
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play"){step(dt);unlockCheck();
+    hCov.textContent=Math.round(covPct()*100)+"%";
+    hBest.textContent=Math.round(best*100)+"%";
+  }
+  draw();
+}
+function showMenu(){
+  ovT.textContent="沙画曼陀罗";
+  ovD.textContent="盘底如流沙,按住并缓缓拖动,细砂落下并按对称角旋出花纹。\n意境(覆盖度)达 20% 与 45% 时解锁新砂色,\n达 65% 即圆满。清盘可随时重来。";
+  btnGo.textContent="开始漏沙";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>透视公路冲刺</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>透视公路冲刺</h1>
+  <p class="tips">伪 3D 直道计时赛:穿过青色氮气门提速,绕开前车与锥桶,1500 米冲线,越快越好!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/1500</div></div>
+    <div class="stat"><div class="mut">计时</div><div class="big" id="st">0.00 s</div></div>
+    <div class="stat"><div class="mut">时速</div><div class="big" id="sv">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="420" height="540"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">透视公路冲刺</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 左右转向(触屏按住画面拖动)<br>· 车辆自动加速,↑ 再压一把、↓ 刹车<br>· 穿过<b>青色箭头门</b>获得氮气爆发<br>· 撞上前车或锥桶立即出局<br>· 目标:用最短时间冲完 1500 米</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=420,H=540,HZ=160,RH=H-HZ,NEAR=7,HALF=175,TOTAL=1500;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var dist,speed,px,time,boostT,running,best=null,msg='',msgT=0;
+var obst=[],gates=[];
+var keys={};
+function $i(id){return document.getElementById(id)}
+function rnd(a,b){return a+Math.random()*(b-a)}
+function reset(){
+  dist=0;speed=0;px=0;time=0;boostT=0;msg='';msgT=0;
+  obst.length=0;gates.length=0;
+  var z=140,r;
+  while(z<TOTAL-60){
+    r=Math.random();
+    if(r<0.68)obst.push({z:z,x:rnd(-0.72,0.72),car:r<0.36,done:false});
+    z+=55+Math.random()*95;
+  }
+  var gz=210;
+  while(gz<TOTAL-70){gates.push({z:gz,x:rnd(-0.55,0.55),got:false});gz+=160+Math.random()*120;}
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/1500';
+  $i('st').textContent=time.toFixed(2)+' s';
+  $i('sv').textContent=Math.floor(speed*0.5);
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function win(){
+  if(best===null||time<best)best=time;
+  endRun('冲线成功!','本次用时 <b>'+time.toFixed(2)+' s</b><br>历史最佳 '+best.toFixed(2)+' s<br>贴着氮气门飞,才是王道!');
+}
+function crashed(){
+  endRun('撞上障碍!','冲到 '+Math.floor(dist)+' m / 1500 m<br>小锦囊:青色箭头门是氮气,锥桶很窄,贴边就能过。');
+}
+function update(dt){
+  time+=dt;
+  var acc=210;
+  if(keys.ArrowUp||keys.w||keys.W)acc=430;
+  if(keys.ArrowDown||keys.s||keys.S)acc=-380;
+  if(boostT>0){boostT-=dt;acc+=190;}
+  speed=Math.max(0,Math.min(560,speed+acc*dt));
+  if(Math.abs(px)>0.98&&speed>200)speed-=260*dt;
+  var st=1.5*(0.5+speed/460);
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  px=Math.max(-1.15,Math.min(1.15,px));
+  dist+=speed*dt;
+  var i,o,g;
+  for(i=0;i<obst.length;i++){
+    o=obst[i];
+    if(!o.done&&o.z-dist<NEAR+2){
+      o.done=true;
+      var hw=o.car?0.115:0.05;
+      if(Math.abs(o.x-px)<hw+0.1){crashed();return;}
+    }
+  }
+  for(i=0;i<gates.length;i++){
+    g=gates[i];
+    if(!g.got&&g.z-dist<NEAR+2){
+      g.got=true;
+      if(Math.abs(g.x-px)<0.3){boostT=1.15;msg='氮气!';msgT=1;}
+    }
+  }
+  if(msgT>0)msgT-=dt;
+  if(dist>=TOTAL){win();return;}
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,HZ);
+  g.addColorStop(0,'#1b2350');g.addColorStop(1,'#43326b');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,HZ);
+  ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(W*0.72,HZ-28,18,0,6.2832);ctx.fill();
+  ctx.fillStyle='#141a38';ctx.fillRect(0,HZ,W,H-HZ);
+  var y,t,zw,half,i,o,g2,rel;
+  for(y=H;y>HZ;y-=6){
+    t=(y-HZ)/RH;zw=NEAR/t;half=HALF*t;
+    ctx.fillStyle=(Math.floor((dist+zw)/9)%2===0)?'#333a63':'#2c3257';
+    ctx.fillRect(W/2-half,y-6.2,half*2,6.5);
+    if(Math.floor((dist+zw)/9)%2===0){
+      ctx.fillStyle='rgba(255,255,255,.5)';
+      ctx.fillRect(W/2-half,y-6.2,3,6.5);
+      ctx.fillRect(W/2+half-3,y-6.2,3,6.5);
+      ctx.fillRect(W/2-2,y-6.2,4,6.5);
+    }
+  }
+  for(rel=NEAR+2;rel<230;rel+=17){
+    t=NEAR/rel;y=HZ+RH*t;half=HALF*t;
+    ctx.fillStyle='rgba(255,224,138,.8)';
+    ctx.fillRect(W/2-half-10*t-2,y-20*t,4,20*t);
+    ctx.fillRect(W/2+half+10*t-2,y-20*t,4,20*t);
+  }
+  var frel=TOTAL-dist;
+  if(frel>NEAR&&frel<300){
+    t=NEAR/frel;y=HZ+RH*t;half=HALF*t;
+    var cw=Math.max(4,12*t),ch=Math.max(3,26*t),k=0,cxx;
+    for(cxx=-half;cxx<half;cxx+=cw){
+      ctx.fillStyle=(k%2===0)?'#f2f2f2':'#1c1c28';
+      ctx.fillRect(W/2+cxx,y-ch/2,cw,ch);k++;
+    }
+  }
+  for(i=0;i<gates.length;i++){
+    g2=gates[i];rel=g2.z-dist;
+    if(g2.got||rel<NEAR-2||rel>280)continue;
+    t=NEAR/rel;y=HZ+RH*t;half=HALF*t;
+    var gx=W/2+g2.x*half,s1=Math.max(6,26*t);
+    ctx.strokeStyle='rgba(80,220,255,.9)';ctx.lineWidth=Math.max(2,6*t);
+    ctx.beginPath();ctx.moveTo(gx-s1,y+s1*0.4);ctx.lineTo(gx,y-s1*0.35);ctx.lineTo(gx+s1,y+s1*0.4);ctx.stroke();
+  }
+  for(i=0;i<obst.length;i++){
+    o=obst[i];rel=o.z-dist;
+    if(o.done&&rel<NEAR-4)continue;
+    if(rel<NEAR*0.85||rel>300)continue;
+    t=NEAR/rel;y=Math.min(H+60,HZ+RH*t);half=HALF*t;
+    var ox=W/2+o.x*half;
+    if(o.car){
+      var cw2=0.23*half*2,ch2=cw2*1.35;
+      ctx.fillStyle='#7d86b8';rr(ox-cw2/2,y-ch2/2,cw2,ch2,cw2*0.2);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.3)';ctx.fillRect(ox-cw2*0.35,y-ch2*0.38,cw2*0.7,ch2*0.22);
+    }else{
+      var cs=Math.max(3,0.07*half*2);
+      ctx.fillStyle='#ff9f43';
+      ctx.beginPath();ctx.moveTo(ox,y-cs);ctx.lineTo(ox+cs*0.6,y+cs*0.5);ctx.lineTo(ox-cs*0.6,y+cs*0.5);ctx.closePath();ctx.fill();
+    }
+  }
+  var pxx=W/2+px*HALF*0.94,pyy=H-66;
+  if(boostT>0){
+    ctx.fillStyle='rgba(80,220,255,.85)';
+    ctx.beginPath();ctx.moveTo(pxx-13,pyy+32);ctx.lineTo(pxx,pyy+50+Math.random()*12);ctx.lineTo(pxx+13,pyy+32);ctx.closePath();ctx.fill();
+  }
+  ctx.fillStyle='#ff5c5c';rr(pxx-23,pyy-32,46,64,12);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';rr(pxx-17,pyy-18,34,16,5);ctx.fill();
+  ctx.fillStyle='rgba(10,14,30,.65)';rr(pxx-17,pyy+4,34,16,5);ctx.fill();
+  ctx.fillStyle='#ff3b3b';ctx.fillRect(pxx-20,pyy+26,12,6);ctx.fillRect(pxx+8,pyy+26,12,6);
+  if(msgT>0){
+    ctx.font='bold 22px system-ui';ctx.textAlign='center';
+    ctx.fillStyle='rgba(80,220,255,'+Math.min(1,msgT)+')';
+    ctx.fillText(msg,W/2,HZ+70);
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptr(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;px=Math.max(-1.1,Math.min(1.1,(ptr(e)-W/2)/HALF));});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn)px=Math.max(-1.1,Math.min(1.1,(ptr(e)-W/2)/HALF));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

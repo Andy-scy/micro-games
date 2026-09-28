@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>形状挪移</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#fde68a;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fde68a;font-size:16px}
+.gbtn{background:#3a3210;color:#fde68a;border:1px solid #fde68a;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#fde68a;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.board{position:relative;aspect-ratio:3/2;max-width:420px;margin:0 auto;touch-action:manipulation}
+.tile{position:absolute;width:30%;height:46%;border-radius:12px;background:#1b2140;border:2px solid #4a4228;display:flex;align-items:center;justify-content:center;font-size:34px;color:#fde68a;cursor:pointer;transition:left .45s ease,top .45s ease,box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none}
+.tile.lit{background:#fde68a;color:#3a3210;box-shadow:0 0 26px rgba(253,230,138,.9)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#fde68a;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#fde68a;color:#3a3210;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>形状挪移</h1>
+  <p class="hint">形状版记忆序列:演示时六块形状牌会依次亮起;演示一结束,牌面立刻大洗牌!记住的是「形状」,不是位置——洗牌后找到 ●▲■★◆✦,按原顺序点回来。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>序列长 <b id="len">0</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="board" id="board"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">形状挪移</h2>
+    <p id="ovDesc">看位置记序列?这里行不通。每轮演示后形状牌会瞬间换座,你只能跟着「形状」走。考验对图形本身的绑定记忆,位置党请重新学艺。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg351_best",SHAPES=["●","▲","■","★","◆","✦"],FREQ=[261.63,311.13,349.23,392.00,466.16,523.25],GAP=700,FLASH=420;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var tiles=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew"),board=$("board");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.3;v=v==null?0.15:v;o.type=type||"triangle";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function slotXY(s){var col=s%3,row=(s/3)|0;return[(2.5+col*32.5)+"%",(4+row*50)+"%"];}
+(function build(){for(var i=0;i<6;i++){var d=document.createElement("div");d.className="tile";d.textContent=SHAPES[i];d.dataset.s=String(i);var xy=slotXY(i);d.style.left=xy[0];d.style.top=xy[1];board.appendChild(d);tiles.push(d);}})();
+function flash(i,ms){var el=tiles[i];el.classList.add("lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<6;i++)tiles[i].classList.remove("lit");}
+function rnd(){var n;do{n=(Math.random()*6)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function shuffleSlots(){var perm=[],i,j,t;
+for(i=0;i<6;i++)perm.push(i);
+for(i=5;i>0;i--){j=(Math.random()*(i+1))|0;t=perm[i];perm[i]=perm[j];perm[j]=t;}
+var same=true;for(i=0;i<6;i++)if(perm[i]!==i){same=false;break;}
+if(same){t=perm[0];perm[0]=perm[1];perm[1]=t;}
+for(i=0;i<6;i++){var xy=slotXY(perm[i]);tiles[i].style.left=xy[0];tiles[i].style.top=xy[1];}}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";setMsg("记住每个形状…");var i=0;(function step(){
+if(i>=seq.length){setMsg("洗牌!");shuffleSlots();
+timers.push(setTimeout(function(){state="input";pos=0;setMsg("按形状原顺序点回来!");},560));return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();seq=[];pos=0;level=0;state="wait";setMsg("");
+for(var i=0;i<6;i++){var xy=slotXY(i);tiles[i].style.left=xy[0];tiles[i].style.top=xy[1];}
+updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;state="wait";setMsg("形状追踪成功!加一步…");updateHud();timers.push(setTimeout(nextRound,850));}
+function fail(){clearTimers();clearLit();state="over";tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="形状跟丢了";
+ovDesc.textContent="洗牌之后,序列在第 "+seq.length+" 步断了。诀窍:给每个形状配一个口头绰号,演示时就念成一句话。";
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flash(i,200);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+board.addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.s!=null)press(parseInt(t.dataset.s,10));});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>闪电鼠潮</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#facc15;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#241f0e;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#facc15}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#facc15;color:#2b2205;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>闪电鼠潮</h1>
+  <p class="hint">30 秒极速冲刺 · 抢先 0.26 秒内命中可得「神速」双倍分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>时间 <b id="time">30</b> 秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">闪电鼠潮</h2>
+      <p id="ovDesc">鼠潮暴走!地鼠探头的瞬间极短,同一时刻最多 3 只冒头。普通命中 +10,在冒头 0.26 秒内命中算「神速」+20。30 秒,拼手速!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var GAME_LEN=30,FAST_MS=260;
+var best=loadBest("mg_s204");
+var state="menu",score=0,hits=0,fastHits=0,timeLeft=GAME_LEN,spawnT=250;
+var holes=[],moles=[],floats=[],rings=[];
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initHoles(){
+  holes=[];
+  for(var r=0;r<3;r++)for(var c=0;c<3;c++)holes.push({x:90+c*150,y:160+r*132});
+}
+initHoles();
+
+function freeHole(){
+  var used={},i,cand=[];
+  for(i=0;i<moles.length;i++)used[moles[i].hole]=1;
+  for(i=0;i<holes.length;i++)if(!used[i])cand.push(i);
+  if(!cand.length)return -1;
+  return cand[(Math.random()*cand.length)|0];
+}
+function spawnMole(){
+  if(moles.length>=3)return;
+  var h=freeHole();
+  if(h<0)return;
+  moles.push({hole:h,state:"rise",frac:0,t:0,upMs:0});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function reset(){
+  moles=[];floats=[];rings=[];
+  score=0;hits=0;fastHits=0;timeLeft=GAME_LEN;spawnT=250;
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s204",best);}
+  ovTitle.textContent="冲刺结束!";
+  ovDesc.textContent="命中 "+hits+" 只,其中神速 "+fastHits+" 只";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elTime.textContent=Math.ceil(timeLeft);
+  elBest.textContent=best;
+}
+
+function update(dt){
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;endGame();return;}
+  spawnT-=dt;
+  var prog=1-timeLeft/GAME_LEN;
+  if(spawnT<=0){
+    var gap=Math.max(210,320-prog*110);
+    spawnT=gap*(0.75+Math.random()*0.5);
+    spawnMole();
+    if(prog>0.5&&Math.random()<0.5)spawnMole();
+  }
+  var i,m;
+  for(i=moles.length-1;i>=0;i--){
+    m=moles[i];m.t+=dt;
+    if(m.state==="rise"){
+      m.frac=Math.min(1,m.t/100);
+      if(m.frac>=1){m.state="up";m.t=0;m.upMs=420+Math.random()*220+prog*60;}
+    }else if(m.state==="up"){
+      if(m.t>=m.upMs){m.state="down";m.t=0;}
+    }else if(m.state==="down"){
+      m.frac=1-Math.min(1,m.t/120);
+      if(m.frac<=0)moles.splice(i,1);
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>700)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>280)rings.splice(i,1);}
+}
+
+function whack(p){
+  if(state!=="playing")return;
+  var i,m;
+  for(i=0;i<moles.length;i++){
+    m=moles[i];
+    if(m.state!=="down"&&m.frac>0.3){
+      var hx=holes[m.hole].x,hy=holes[m.hole].y-34*m.frac;
+      var dx=p.x-hx,dy=p.y-hy;
+      if(dx*dx+dy*dy<58*58){
+        moles.splice(i,1);
+        hits++;
+        if(m.state==="up"&&m.t<=FAST_MS){
+          score+=20;fastHits++;
+          addFloat(hx,hy-46,"神速 +20","#facc15");
+          addRing(hx,hy,58,"rgba(250,204,21,0.9)");
+        }else{
+          score+=10;
+          addFloat(hx,hy-46,"+10","#4ade80");
+          addRing(hx,hy,48,"rgba(74,222,128,0.8)");
+        }
+        updateHud();
+        return;
+      }
+    }
+  }
+  addRing(p.x,p.y,24,"rgba(248,113,113,0.5)");
+}
+
+function drawMoleAt(h,frac){
+  var bh=78,base=h.y+10,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-72,h.y-172,144,184);ctx.clip();
+  ctx.fillStyle="#b3832c";
+  ctx.beginPath();ctx.ellipse(h.x,cy,34,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a1408";
+  ctx.beginPath();ctx.arc(h.x-11,cy-8,3.6,0,Math.PI*2);ctx.arc(h.x+11,cy-8,3.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+4,5.5,4,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function drawHoleBack(h){
+  ctx.fillStyle="#0d0b05";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#5c4d1e";ctx.lineWidth=4;ctx.stroke();
+}
+function drawHoleFront(h){
+  ctx.fillStyle="#0d0b05";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2c2510");g.addColorStop(1,"#171307");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<holes.length;i++)drawHoleBack(holes[i]);
+  for(i=0;i<moles.length;i++){
+    var m=moles[i];
+    if(m.frac>0.02)drawMoleAt(holes[m.hole],m.frac);
+  }
+  for(i=0;i<holes.length;i++)drawHoleFront(holes[i]);
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/280;
+    ctx.strokeStyle=r.c;ctx.lineWidth=3*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.4+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/700;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 19px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-34*fk);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="rgba(0,0,0,0.4)";ctx.fillRect(0,0,W,26);
+  ctx.fillStyle="#facc15";ctx.fillRect(0,0,W*timeLeft/GAME_LEN,26);
+  ctx.font="bold 14px sans-serif";ctx.textAlign="left";
+  ctx.fillStyle="#0f1220";
+  ctx.fillText("冲刺!剩 "+Math.ceil(timeLeft)+" 秒",10,14);
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

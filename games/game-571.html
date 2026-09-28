@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>关骰盒</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+#tiles{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.tile{width:46px;height:56px;border:0;border-radius:9px;background:#2a3154;color:#e8eaf6;font-size:22px;font-weight:800;cursor:pointer;font-family:inherit}
+.tile.sel{background:#7a5c00;color:#ffd166;box-shadow:inset 0 0 0 2px #ffd166}
+.tile.off{background:#141830;color:#3c4468;cursor:default;text-decoration:line-through}
+.die{position:relative;width:50px;height:50px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.mut{color:#9aa3c0;font-size:13px}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>关骰盒</h1>
+  <p class="tips">酒馆名局「Shut the Box」:9 块数字牌全部立着,掷两颗骰子后,翻下任意<b>加起来等于骰点和</b>的一组牌(可多块组合)。7、8、9 全关后只掷一骰。无牌可翻时结算:剩余牌面之和就是你的分数——<b>0 分全关完美,≤6 分算胜利</b>!</p>
+  <div class="card" style="text-align:center">
+    <div id="tiles"></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
+    <div class="big" id="sumtx" style="margin-top:8px">—</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="roll">掷骰</button>
+      <button class="btn sec" id="close">关牌</button>
+    </div>
+  </div>
+  <div class="card log" id="log">点「掷骰」开始!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var open=[false,true,true,true,true,true,true,true,true,true];
+var sel=[false,false,false,false,false,false,false,false,false,false];
+var dsum=0,phase='roll',over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function openSum(){var s=0;for(var i=1;i<=9;i++)if(open[i])s+=i;return s}
+function openCount(){var n=0;for(var i=1;i<=9;i++)if(open[i])n++;return n}
+function buildTiles(){
+  var T=$('tiles');T.innerHTML='';
+  for(var i=1;i<=9;i++){
+    var b=document.createElement('button');
+    b.className='tile'+(sel[i]?' sel':'')+(open[i]?'':' off');
+    b.textContent=i;
+    b.onclick=(function(k){return function(){
+      if(over||phase!=='pick'||!open[k])return;
+      sel[k]=!sel[k];buildTiles();
+    }})(i);
+    T.appendChild(b);
+  }
+}
+function say(m){$('log').textContent=m}
+function setBtns(){
+  $('roll').disabled=over||phase!=='roll';
+  $('close').disabled=over||phase!=='pick';
+}
+function hasCombo(target){
+  var list=[],i;
+  for(i=1;i<=9;i++)if(open[i])list.push(i);
+  var n=list.length,total=1<<n,k,s;
+  for(k=1;k<total;k++){
+    s=0;
+    for(i=0;i<n;i++)if(k&(1<<i))s+=list[i];
+    if(s===target)return true;
+  }
+  return false;
+}
+function doRoll(){
+  if(over||phase!=='roll')return;
+  var one=(open[7]&&open[8]&&open[9]);
+  sel=[false,false,false,false,false,false,false,false,false,false];
+  var a=rnd(),b=one?0:rnd();
+  setDie($('d1'),a);
+  setDie($('d2'),one?0:b);
+  dsum=one?a:a+b;
+  $('sumtx').textContent='骰点和 '+dsum;
+  phase='pick';buildTiles();setBtns();
+  if(!hasCombo(dsum)){end();return}
+  say(one?'只剩单骰:掷出 '+dsum+' 点,翻牌吧!':'掷出 '+a+'+'+b+'='+dsum+',点选加和为 '+dsum+' 的牌组关掉!');
+}
+function doClose(){
+  if(over||phase!=='pick')return;
+  var s=0,n=0,i;
+  for(i=1;i<=9;i++)if(sel[i]&&open[i]){s+=i;n++}
+  if(n===0){say('先点选要关的数字牌。');return}
+  if(s!==dsum){say('所选牌面加和 '+s+',不等于骰点和 '+dsum+'。');return}
+  for(i=1;i<=9;i++)if(sel[i])open[i]=false;
+  sel=[false,false,false,false,false,false,false,false,false,false];
+  buildTiles();
+  if(openCount()===0){end();return}
+  phase='roll';setBtns();
+  $('sumtx').textContent='—';
+  say('咔哒!关掉 '+n+' 块牌,剩余面值 '+openSum()+'。继续掷骰!');
+}
+function end(){
+  over=true;setBtns();
+  var rest=openSum();
+  var t=rest===0?'完美关盒!':rest<=6?'胜利!':'游戏结束';
+  $('ovt').textContent=t;
+  $('ovp').innerHTML='剩余未关牌面值合计 <b>'+rest+'</b> 分(越低越好)<br>'+(rest===0?'九牌全关,酒馆为你沸腾!':rest<=6?'只差几块牌就是完美盒子!':'无牌可翻时盒子关到这就卡住啦,下次试试优先拆大数。');
+  $('overlay').classList.add('show');
+}
+$('roll').onclick=doRoll;
+$('close').onclick=doClose;
+$('again').onclick=function(){
+  open=[false,true,true,true,true,true,true,true,true,true];
+  sel=[false,false,false,false,false,false,false,false,false,false];
+  dsum=0;phase='roll';over=false;
+  $('overlay').classList.remove('show');
+  setDie($('d1'),1);setDie($('d2'),2);
+  $('sumtx').textContent='—';
+  buildTiles();setBtns();
+  say('新盒子已经打开,点「掷骰」!');
+};
+setDie($('d1'),1);setDie($('d2'),2);
+buildTiles();setBtns();
+</script>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>豆豆回廊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fde047;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:6px;align-items:center}
+.hud b{color:#fde047;font-size:16px}
+.msg{color:#fde047;font-size:13px;min-height:18px;text-align:center;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fde047}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fde047;color:#3a3003;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>豆豆回廊</h1>
+  <p class="hint">方向键 / WASD 持续前行 · 触屏滑动 · 吃光全部豆子,小心回廊里的幽灵</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>剩余 <b id="left">0</b></span>
+    <span>生命 <b id="lives">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">豆豆回廊</h2>
+      <p id="ovDesc">你会在回廊里不停滑行,直到撞墙才停下——按新方向即可继续。吃光迷宫里所有豆子即获胜。4 颗大力豆能让幽灵短暂变蓝,趁机反咬一口得高分!你有 3 条命。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开吃</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLeft=$("left"),elLives=$("lives"),elBest=$("best"),elMsg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s272");
+var state="menu";
+var grid,dots,dotsLeft,player,ghosts,desired,score,lives,energyT,invulnT,pulse,msgT,msgText,animT;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j,st=[[0,0]],vis={"0,0":true};
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0];
+      vis[(cx+d[0])+","+(cy+d[1])]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[cy*2+1+d[1]*2][cx*2+1+d[0]*2]=0;
+      st.push([cx+d[0],cy+d[1]]);
+    }else st.pop();
+  }
+  return g;
+}
+function braid(){
+  var x,y;
+  for(y=1;y<ROWS-1;y++)for(x=1;x<COLS-1;x++){
+    if(grid[y][x]!==1||((x%2===0)===(y%2===0)))continue;
+    var hOpen=grid[y][x-1]===0&&grid[y][x+1]===0;
+    var vOpen=grid[y-1][x]===0&&grid[y+1][x]===0;
+    if((hOpen||vOpen)&&Math.random()<0.14)grid[y][x]=0;
+  }
+}
+function fieldTo(sx,sy){
+  var dist=[],i,j,q=[],head=0,dirs=[[1,0],[-1,0],[0,1],[0,-1]],k;
+  for(j=0;j<ROWS;j++){dist.push(new Array(COLS));for(i=0;i<COLS;i++)dist[j][i]=-1;}
+  dist[sy][sx]=0;q.push([sx,sy]);
+  while(head<q.length){
+    var c=q[head];head++;
+    for(k=0;k<4;k++){
+      var nx=c[0]+dirs[k][0],ny=c[1]+dirs[k][1];
+      if(nx<0||ny<0||nx>=COLS||ny>=ROWS||grid[ny][nx]!==0||dist[ny][nx]!==-1)continue;
+      dist[ny][nx]=dist[c[1]][c[0]]+1;
+      q.push([nx,ny]);
+    }
+  }
+  return dist;
+}
+function makeEnt(x,y,spd){return{gx:x,gy:y,dx:0,dy:0,off:0,spd:spd,fx:1,fy:0};}
+function renderPos(e){return{x:e.gx+e.dx*e.off,y:e.gy+e.dy*e.off};}
+function open_(gx,gy,dx,dy){return grid[gy+dy]&&grid[gy+dy][gx+dx]===0;}
+function playerChoice(){
+  if((desired.x!==0||desired.y!==0)&&open_(player.gx,player.gy,desired.x,desired.y))return desired;
+  if((player.dx!==0||player.dy!==0)&&open_(player.gx,player.gy,player.dx,player.dy))return{x:player.dx,y:player.dy};
+  return null;
+}
+function ghostChoice(g){
+  var field=fieldTo(player.gx,player.gy);
+  var dirs=[[1,0],[-1,0],[0,1],[0,-1]],opts=[],i,revX=g.gx-g.dx,revY=g.gy-g.dy;
+  for(i=0;i<4;i++){
+    var nx=g.gx+dirs[i][0],ny=g.gy+dirs[i][1];
+    if(nx<0||ny<0||nx>=COLS||ny>=ROWS||grid[ny][nx]!==0)continue;
+    if(nx===revX&&ny===revY&&(g.dx!==0||g.dy!==0))continue;
+    opts.push(dirs[i]);
+  }
+  if(!opts.length)opts.push({x:-g.dx,y:-g.dy});
+  var bestI=0,bestV=field[g.gy+opts[0].y][g.gx+opts[0].x];
+  for(i=1;i<opts.length;i++){
+    var v=field[g.gy+opts[i].y][g.gx+opts[i].x];
+    if(v<0)continue;
+    if(energyT>0?v>bestV:v<bestV){bestV=v;bestI=i;}
+  }
+  return{x:opts[bestI].x,y:opts[bestI].y};
+}
+function moveEnt(e,dt,choiceFn){
+  var move=e.spd*dt,guard=0;
+  while(move>0&&guard<8){
+    guard++;
+    if(e.dx===0&&e.dy===0){
+      var d0=choiceFn(e);
+      if(!d0)break;
+      e.dx=d0.x;e.dy=d0.y;
+    }
+    var m=Math.min(move,1-e.off);
+    e.off+=m;move-=m;
+    e.fx=e.dx;e.fy=e.dy;
+    if(e.off>=0.999){
+      e.gx+=e.dx;e.gy+=e.dy;e.off=0;
+      var d1=choiceFn(e);
+      if(d1){e.dx=d1.x;e.dy=d1.y;}
+      else{e.dx=0;e.dy=0;break;}
+    }
+  }
+}
+function eatAt(cx,cy){
+  if(cx<0||cy<0||cx>=COLS||cy>=ROWS)return;
+  var d=dots[cy][cx];
+  if(!d)return;
+  dots[cy][cx]=0;dotsLeft--;
+  if(d===1)score+=10;
+  else{score+=50;energyT=6;setMsg("大力豆!幽灵变蓝了,反咬它们!");}
+  updateHud();
+  if(dotsLeft<=0)endGame(true);
+}
+function setMsg(s){msgText=s;msgT=2;}function reset(){
+  grid=genMaze(10,10);
+  braid();
+  dots=[];
+  var x,y,i,dist=fieldTo(1,1),far=[];
+  dotsLeft=0;
+  for(y=0;y<ROWS;y++){
+    dots.push(new Array(COLS));
+    for(x=0;x<COLS;x++){
+      if(grid[y][x]===0&&!(x===1&&y===1)){dots[y][x]=1;dotsLeft++;}
+      else dots[y][x]=0;
+      if(grid[y][x]===0&&dist[y][x]>=10)far.push({x:x,y:y});
+    }
+  }
+  var powers=[],guard=0;
+  while(powers.length<4&&far.length&&guard<200){
+    guard++;
+    i=(Math.random()*far.length)|0;
+    var c=far[i],bad=false,j;
+    for(j=0;j<powers.length;j++)if(powers[j].x===c.x&&powers[j].y===c.y)bad=true;
+    if(!bad){powers.push(c);dots[c.y][c.x]=2;}
+    far.splice(i,1);
+  }
+  player=makeEnt(1,1,5.5);
+  desired={x:0,y:0};
+  var cells=[],used=[{x:1,y:1}];
+  for(y=1;y<ROWS-1;y++)for(x=1;x<COLS-1;x++){
+    if(grid[y][x]===0&&dist[y][x]>=10)cells.push({x:x,y:y});
+  }
+  ghosts=[];
+  var gcols=["#f87171","#fb923c"];
+  for(i=0;i<2;i++){
+    var pick=null,tries=0;
+    while(!pick&&tries<300){
+      tries++;
+      var g2=cells[(Math.random()*cells.length)|0],bad2=false,j2;
+      for(j2=0;j2<used.length;j2++)if(used[j2].x===g2.x&&used[j2].y===g2.y)bad2=true;
+      if(!bad2)pick=g2;
+    }
+    if(!pick)pick={x:COLS-2,y:1};
+    used.push(pick);
+    ghosts.push({gx:pick.x,gy:pick.y,dx:0,dy:0,off:0,spd:4.0,fx:-1,fy:0,spawn:{x:pick.x,y:pick.y},color:gcols[i]});
+  }
+  score=0;lives=3;energyT=0;invulnT=0;pulse=0;msgT=0;animT=0;
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLeft.textContent=dotsLeft;
+  var h="",i;
+  for(i=0;i<lives;i++)h+="♥";
+  elLives.textContent=h||"--";
+  elBest.textContent=best;
+}
+function respawnAll(){
+  var i;
+  player.gx=1;player.gy=1;player.dx=0;player.dy=0;player.off=0;
+  desired={x:0,y:0};
+  for(i=0;i<ghosts.length;i++){
+    var g3=ghosts[i];
+    g3.gx=g3.spawn.x;g3.gy=g3.spawn.y;g3.dx=0;g3.dy=0;g3.off=0;
+  }
+  invulnT=2;
+}
+function endGame(won){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s272",best);}
+  ovTitle.textContent=won?"豆子一扫而空!":"被幽灵抓住了!";
+  ovDesc.textContent=won?"整座回廊被你舔得干干净净,幽灵们饿着肚子回家了。":"回廊里的幽灵比你想的更执着。多吃大力豆,在岔路口甩开它们的围追。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#26305c";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#33407a";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function drawGhost(g){
+  var p=renderPos(g);
+  var x=p.x*CELL+CELL/2,y=p.y*CELL+CELL/2,r=CELL/2-3;
+  var col=g.color;
+  if(energyT>0)col=(energyT<1.8&&Math.floor(animT*8)%2===0)?"#e5e7eb":"#60a5fa";
+  ctx.fillStyle=col;
+  ctx.shadowColor=col;ctx.shadowBlur=10;
+  var zig=[[r,0.75],[r*0.55,0.4],[r*0.15,0.75],[-r*0.25,0.4],[-r*0.65,0.75],[-r,0.4]],zi;
+  ctx.beginPath();
+  ctx.arc(x,y-1,r,Math.PI,0);
+  for(zi=0;zi<zig.length;zi++)ctx.lineTo(x+zig[zi][0],y+r*zig[zi][1]);
+  ctx.closePath();ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath();
+  ctx.arc(x-3,y-3,2.6,0,Math.PI*2);
+  ctx.arc(x+3,y-3,2.6,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="#1e293b";
+  ctx.beginPath();
+  ctx.arc(x-3+g.fx*1.3,y-3+g.fy*1.3,1.3,0,Math.PI*2);
+  ctx.arc(x+3+g.fx*1.3,y-3+g.fy*1.3,1.3,0,Math.PI*2);
+  ctx.fill();
+}
+function draw(){
+  var x,y,i;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1){drawWall(x,y);continue;}
+    if(dots[y][x]===1){
+      ctx.fillStyle="rgba(253,230,138,0.85)";
+      ctx.beginPath();ctx.arc(x*CELL+CELL/2,y*CELL+CELL/2,2.2,0,Math.PI*2);ctx.fill();
+    }else if(dots[y][x]===2){
+      var pr2=5+Math.sin(pulse*3)*1.5;
+      ctx.fillStyle="#fef3c7";
+      ctx.shadowColor="#fde047";ctx.shadowBlur=10;
+      ctx.beginPath();ctx.arc(x*CELL+CELL/2,y*CELL+CELL/2,pr2,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+    }
+  }
+  var blink=invulnT>0&&Math.floor(animT*10)%2===0;
+  if(!blink){
+    var pp=renderPos(player),px=pp.x*CELL+CELL/2,py=pp.y*CELL+CELL/2;
+    var ang=Math.atan2(player.fy,player.fx),open=0.12+Math.abs(Math.sin(animT*11))*0.22;
+    ctx.fillStyle="#fde047";
+    ctx.shadowColor="#fde047";ctx.shadowBlur=12;
+    ctx.beginPath();
+    ctx.moveTo(px,py);
+    ctx.arc(px,py,8.5,ang+open*Math.PI,ang-open*Math.PI+Math.PI*2);
+    ctx.closePath();ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  for(i=0;i<ghosts.length;i++)drawGhost(ghosts[i]);
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT)/1000;lastT=t;
+  pulse+=dt;animT+=dt;
+  if(msgT>0){msgT-=dt;elMsg.textContent=msgText;}
+  else elMsg.textContent="";
+  if(state==="playing"){
+    if(energyT>0)energyT-=dt;
+    if(invulnT>0)invulnT-=dt;
+    var i;
+    moveEnt(player,dt,playerChoice);
+    for(i=0;i<ghosts.length;i++){
+      ghosts[i].spd=energyT>0?2.4:4.0;
+      moveEnt(ghosts[i],dt,ghostChoice);
+    }    eatAt(Math.round(player.gx+player.dx*player.off),Math.round(player.gy+player.dy*player.off));
+    if(state==="playing"){
+      var prp=renderPos(player);
+      for(i=0;i<ghosts.length;i++){
+        var gp=renderPos(ghosts[i]),ddx=prp.x-gp.x,ddy=prp.y-gp.y;
+        if(ddx*ddx+ddy*ddy>=0.36)continue;
+        if(energyT>0){
+          score+=100;
+          var ge=ghosts[i];
+          ge.gx=ge.spawn.x;ge.gy=ge.spawn.y;ge.dx=0;ge.dy=0;ge.off=0;
+          setMsg("反杀成功 +100!");
+          updateHud();
+        }else if(invulnT<=0){
+          lives--;
+          updateHud();
+          if(lives<=0){endGame(false);break;}
+          setMsg("被抓住了!剩余生命 "+lives);
+          respawnAll();
+        }
+      }
+    }
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();desired={x:0,y:-1};}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();desired={x:0,y:1};}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();desired={x:-1,y:0};}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();desired={x:1,y:0};}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))desired={x:dx>0?1:-1,y:0};
+  else desired={x:0,y:dy>0?1:-1};
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

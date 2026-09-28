@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子宾果</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#7bd88f;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+#board{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.cell{aspect-ratio:1;border:0;border-radius:9px;background:#2a3154;color:#e8eaf6;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit}
+.cell.hint{background:#2f6d4f;box-shadow:inset 0 0 0 2px #7bd88f}
+.cell.off{background:#141830;color:#3c4468;cursor:default;text-decoration:line-through}
+.die{position:relative;width:52px;height:52px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#7bd88f}
+.mut{color:#9aa3c0;font-size:13px}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:40px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#7bd88f;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子宾果</h1>
+  <p class="tips">5×5 宾果盘上洒满 1-6 的点数。掷骰后,点击盘上一枚<b>相同点数</b>的格子划掉(每格 10 分),横、竖、斜连成一线 +100 分!共 25 次掷骰机会,凑出 5 条线完美通关,4 条线也算胜利;点错不扣,「跳过」会消耗一次机会。</p>
+  <div class="row">
+    <div class="card" style="flex:1;text-align:center"><div class="mut">连线</div><div class="big" id="ln">0/5</div></div>
+    <div class="card" style="flex:1;text-align:center"><div class="mut">剩余掷骰</div><div class="big" id="rl">25</div></div>
+    <div class="card" style="flex:1;text-align:center"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+  </div>
+  <div class="card">
+    <div id="board"></div>
+    <div class="row" style="margin-top:12px">
+      <div class="die" id="die"></div>
+      <button class="btn" id="roll">掷骰</button>
+      <button class="btn sec" id="skip">跳过本掷</button>
+    </div>
+  </div>
+  <div class="card log" id="log">点「掷骰」开始划格连线!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var board=[],marked=[],rollsLeft=25,lines=0,score=0,cur=0,phase='idle',over=false;
+var LINES=[],i,r,c;
+for(r=0;r<5;r++){var row=[];for(c=0;c<5;c++)row.push(r*5+c);LINES.push(row)}
+for(c=0;c<5;c++){var col=[];for(r=0;r<5;r++)col.push(r*5+c);LINES.push(col)}
+LINES.push([0,6,12,18,24]);LINES.push([4,8,12,16,20]);
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function buildBoard(){
+  var B=$('board');B.innerHTML='';
+  for(i=0;i<25;i++){
+    var b=document.createElement('button');b.className='cell';b.textContent=board[i];
+    (function(k){b.onclick=function(){
+      if(over||phase!=='pick'||marked[k])return;
+      if(board[k]!==cur){return}
+      marked[k]=true;score+=10;
+      checkLines();
+      render();
+      if(over)return;
+      nextRoll();
+    }})(i);
+    B.appendChild(b);
+  }
+}
+function render(){
+  var cells=$('board').children;
+  for(i=0;i<25;i++){
+    cells[i].textContent=board[i];
+    cells[i].classList.toggle('off',marked[i]);
+    cells[i].classList.toggle('hint',phase==='pick'&&!marked[i]&&board[i]===cur);
+  }
+  $('ln').textContent=lines+'/5';
+  $('rl').textContent=rollsLeft;
+  $('sc').textContent=score;
+  $('roll').disabled=over||phase!=='idle';
+  $('skip').disabled=over||phase!=='pick';
+}
+function say(m){$('log').textContent=m}
+function checkLines(){
+  for(var L=0;L<12;L++){
+    var ok=true;
+    for(var j=0;j<5;j++){if(!marked[LINES[L][j]]){ok=false;break}}
+    if(ok){
+      lines++;score+=100;
+      say('宾果!连成一线,目前 '+lines+' 条!');
+    }
+  }
+  if(lines>=5){finish(true)}
+  else if(rollsLeft<=0){finish(false)}
+}
+function nextRoll(){
+  rollsLeft--;
+  if(rollsLeft<=0){render();finish(lines>=4);return}
+  cur=0;phase='idle';render();
+  say('还剩 '+rollsLeft+' 次机会,继续掷!');
+}
+$('roll').onclick=function(){
+  if(over||phase!=='idle')return;
+  cur=rnd();setDie($('die'),cur);phase='pick';render();
+  say('掷出 '+cur+' 点,点击盘上一枚 '+cur+' 划掉!');
+};
+$('skip').onclick=function(){
+  if(over||phase!=='pick')return;
+  nextRoll();
+};
+function finish(good){
+  over=true;render();
+  var t=lines>=5?'完美宾果!':good?'胜利!':'挑战失败';
+  $('ovt').textContent=t;
+  $('ovp').innerHTML='连成 <b>'+lines+'</b> 条线,得分 <b>'+score+'</b><br>'+(lines>=5?'25 格全部盘活,骰运如神!':good?'四线以上,稳稳达标!':'再规划一下划格路线,下次冲 5 线!');
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  board=[];marked=[];
+  for(i=0;i<25;i++){board.push(rnd());marked.push(false)}
+  rollsLeft=25;lines=0;score=0;cur=0;phase='idle';over=false;
+  $('overlay').classList.remove('show');
+  setDie($('die'),1);buildBoard();render();
+  say('新盘开张,点「掷骰」开始!');
+};
+(function init(){
+  for(i=0;i<25;i++){board.push(rnd());marked.push(false)}
+  setDie($('die'),1);buildBoard();render();
+})();
+</script>
+</body>
+</html>

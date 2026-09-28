@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>传送带街口</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>传送带街口</h1>
+<p class="tip">这座路口的"安全岛"居然是传送带人行道——站上去会被强行拖走!<br>借助(或对抗)传送带的拖力穿过 6 条马路,安全抵达对面的商店。即使不动,也要不停修正位置。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>穿越 <b id="sC">0</b></span></div>
+<canvas id="cv" width="420" height="520"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=13,LOOP=540,OFF=60;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sC=document.getElementById("sC");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var CAR_COLORS=["#e05656","#e8a33d","#3fa66a","#4f8ef7","#b06ee0","#d05fa2","#4bb8c9"];
+var rowsDef=[
+  {r:1,t:"road"},{r:2,t:"conv",dir:1},{r:3,t:"road"},{r:4,t:"walk"},
+  {r:5,t:"road"},{r:6,t:"conv",dir:-1},{r:7,t:"road"},{r:8,t:"walk"},
+  {r:9,t:"road"},{r:10,t:"conv",dir:1},{r:11,t:"road"}
+];
+var roads,convs,frog,score,lives,crossing,deadT,state,gt=0;
+var moving=false,fx0=0,fy0=0,fx1=0,fy1=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function buildWorld(){
+  roads=[];convs=[];var i;
+  for(i=0;i<rowsDef.length;i++){
+    var d=rowsDef[i];
+    if(d.t==="road"){
+      var dir=d.r%2===1?1:-1,speed=rnd(45,90)*(1+crossing*0.05),cars=[],x0=rnd(0,LOOP),j;
+      for(j=0;j<3;j++)cars.push({x:(x0+j*180+rnd(-30,30)+LOOP)%LOOP,w:rnd(46,76),c:CAR_COLORS[(d.r+j)%CAR_COLORS.length]});
+      roads.push({r:d.r,dir:dir,speed:speed,cars:cars});
+    }else if(d.t==="conv"){
+      convs.push({r:d.r,dir:d.dir,speed:rnd(48,72)*(1+crossing*0.04)});
+    }
+  }
+}
+function roadByRow(r){var i;for(i=0;i<roads.length;i++)if(roads[i].r===r)return roads[i];return null;}
+function convByRow(r){var i;for(i=0;i<convs.length;i++)if(convs[i].r===r)return convs[i];return null;}
+function updHud(){sS.textContent=score;sL.textContent=lives;sC.textContent=crossing;}
+function resetFrog(){frog={x:210,y:12*CELL,r:12};moving=false;}
+function reset(){score=0;lives=3;crossing=0;deadT=0;buildWorld();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",穿越 "+crossing+" 次。");}
+}
+function arrive(){
+  if(frog.r===0){
+    score+=160+crossing*20;crossing++;
+    buildWorld();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var r=frog.r,x=frog.x;
+  if(d==="up")r--;else if(d==="down")r++;else if(d==="left")x-=40;else x+=40;
+  r=Math.max(0,Math.min(12,r));x=Math.max(15,Math.min(405,x));
+  fx0=frog.x;fy0=frog.y;fx1=x;fy1=r*CELL;mt=0;moving=true;frog.r=r;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var i,j,ln;
+  for(i=0;i<roads.length;i++){
+    ln=roads[i];
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j];
+      car.x=(car.x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+      var cx=car.x-OFF,cy=ln.r*CELL;
+      if(Math.abs(cx+car.w/2-frog.x)<car.w/2+11&&frog.y+34>cy+4&&frog.y+8<cy+36){die("被车撞了!");return;}
+    }
+  }
+  if(moving){
+    mt+=dt/0.13;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=fx0+(fx1-fx0)*mt;frog.y=fy0+(fy1-fy0)*mt;
+    if(!moving)arrive();
+  }else{
+    var cv2=convByRow(frog.r);
+    if(cv2)frog.x=Math.max(15,Math.min(405,frog.x+cv2.dir*cv2.speed*dt));
+  }
+}
+function draw(){
+  var r,i,j,d;
+  for(r=0;r<ROWS;r++){
+    var t=null;
+    for(d=0;d<rowsDef.length;d++)if(rowsDef[d].r===r)t=rowsDef[d].t;
+    ctx.fillStyle=r===0?"#1e3b26":(r===12?"#1e3b26":(t==="conv"?"#33313f":(t==="road"?"#232741":"#2a2f4a")));
+    ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  for(i=0;i<convs.length;i++){
+    var cn=convs[i],cy2=cn.r*CELL;
+    var off=((gt*cn.speed*cn.dir)%36+36)%36;
+    ctx.fillStyle="#1f1d2b";
+    for(j=0;j<13;j++)ctx.fillRect(j*36+(cn.dir>0?off:-off),cy2+30,18,10);
+    ctx.fillStyle="#ffd668";
+    for(j=0;j<8;j++){
+      var ax=j*56+(cn.dir>0?(gt*cn.speed%56):-(gt*cn.speed%56));
+      if(ax>-20&&ax<430){
+        ctx.beginPath();
+        if(cn.dir>0){ctx.moveTo(ax,cy2+10);ctx.lineTo(ax+10,cy2+20);ctx.lineTo(ax,cy2+30);}
+        else{ctx.moveTo(ax+10,cy2+10);ctx.lineTo(ax,cy2+20);ctx.lineTo(ax+10,cy2+30);}
+        ctx.strokeStyle="#ffd668";ctx.lineWidth=2;ctx.stroke();
+      }
+    }
+  }
+  ctx.strokeStyle="#3a4470";ctx.lineWidth=2;ctx.setLineDash([14,18]);
+  for(i=0;i<roads.length;i++){ln=roads[i];ctx.beginPath();ctx.moveTo(0,ln.r*CELL+20);ctx.lineTo(420,ln.r*CELL+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(i=0;i<roads.length;i++){
+    ln=roads[i];var cy=ln.r*CELL;
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j],cx=car.x-OFF;
+      if(cx>420||cx+car.w<0)continue;
+      ctx.fillStyle=car.c;rr(cx+2,cy+6,car.w-4,28,7);ctx.fill();
+      ctx.fillStyle="rgba(20,24,48,.55)";rr(cx+car.w/2-7,cy+11,14,8,3);ctx.fill();
+    }
+  }
+  ctx.fillStyle="#ffd668";ctx.font="20px system-ui";ctx.textAlign="center";
+  ctx.fillText("商店",210,26);
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,180,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」进城",210,230);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("黄色箭头=传送带方向 · 站上就会被拖走",210,260);
+    ctx.fillText("普通灰色人行道才是真正的歇脚点",210,282);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("传送带街口","安全岛被换成了传送带:黄色箭头指方向,站上去就被拖走。利用拖力或反向补偿走位,穿过 6 条马路抵达商店。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

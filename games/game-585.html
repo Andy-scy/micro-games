@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>补字行动</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#hud .hp{color:#ff6b8a}
+.card{background:#151a30;border-radius:14px;padding:16px;text-align:center}
+#zh{font-size:16px;color:#8ecae6;margin-bottom:14px}
+#slots{display:flex;justify-content:center;gap:6px;min-height:62px;margin-bottom:16px;flex-wrap:wrap}
+.slot{width:50px;height:58px;border-bottom:3px solid #2a3160;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:bold;font-family:Consolas,monospace;color:#fff}
+.slot.hole{border-bottom:3px dashed #4cc9f0;cursor:default}
+.slot.set{color:#4cc9f0}
+.slot.bad{color:#ff6b8a;border-bottom-color:#ff6b8a}
+#pool{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;min-height:60px}
+.tile{width:50px;height:58px;border:none;border-radius:10px;background:#232a4d;color:#ffd166;font-size:28px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+.tile.used{visibility:hidden}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+.ok{animation:pop .35s}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+</style>
+</head>
+<body>
+<h1>补字行动</h1>
+<p id="tip">每个单词缺了 2 个字母,从字母池中点选补齐 · 依据中文释义判断 · 填错扣一颗心,3 颗心用完则失败</p>
+<div id="wrap">
+<div id="hud"><span>进度 <b id="prog">1</b>/15</span><span>得分 <b id="score">0</b></span><span class="hp" id="hp">♥♥♥</span></div>
+<div class="card">
+<div id="zh"></div>
+<div id="slots"></div>
+<div id="pool"></div>
+</div>
+<div id="ov"><h2 id="ovT">补字行动</h2><p id="ovP">单词缺了两个字母
+看中文释义 从字母池点选补齐
+共 15 题 填错一次扣一颗心</p><button id="ovB">开始行动</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  ["apple","苹果"],["bread","面包"],["chair","椅子"],["cloud","云"],["dance","跳舞"],
+  ["dream","梦想"],["eagle","老鹰"],["field","田野"],["grape","葡萄"],["heart","心脏"],
+  ["juice","果汁"],["light","光"],["money","钱"],["night","夜晚"],["ocean","海洋"],
+  ["piano","钢琴"],["queen","女王"],["river","河流"],["snake","蛇"],["sugar","糖"],
+  ["table","桌子"],["voice","声音"],["whale","鲸鱼"],["zebra","斑马"],["beach","海滩"],
+  ["clock","时钟"],["lemon","柠檬"],["mouse","老鼠"],["plant","植物"],["storm","风暴"]
+];
+var TOTALQ = 15;
+var progEl = document.getElementById("prog");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var zhEl = document.getElementById("zh");
+var slotsEl = document.getElementById("slots");
+var poolEl = document.getElementById("pool");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var qNum = 0, score = 0, hp = 3, playing = false;
+var cur = null;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function makeQ() {
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  var w = pick[0];
+  var holes = [];
+  while (holes.length < 2) {
+    var p = Math.floor(Math.random() * w.length);
+    if (holes.indexOf(p) < 0) holes.push(p);
+  }
+  holes.sort();
+  var pool = [w[holes[0]], w[holes[1]]];
+  var bag = "abcdefghijklmnoprstuvwyz";
+  while (pool.length < 8) {
+    var ch = bag[Math.floor(Math.random() * bag.length)];
+    if (pool.indexOf(ch) < 0) pool.push(ch);
+  }
+  shuffle(pool);
+  cur = { w: w, zh: pick[1], holes: holes, filled: [null, null], pool: pool };
+  zhEl.textContent = "释义:" + pick[1];
+  render();
+}
+
+function render() {
+  slotsEl.innerHTML = "";
+  var hi = 0;
+  for (var i = 0; i < cur.w.length; i++) {
+    var holeIdx = -1;
+    if (cur.holes.indexOf(i) >= 0) {
+      holeIdx = hi;
+      hi++;
+    }
+    (function (idx, hIdx) {
+      var d = document.createElement("div");
+      d.className = "slot";
+      if (hIdx >= 0) {
+        d.className = "slot hole" + (cur.filled[hIdx] !== null ? " set" : "");
+        d.textContent = cur.filled[hIdx] !== null ? cur.pool[cur.filled[hIdx]].toUpperCase() : "";
+      } else {
+        d.textContent = cur.w[idx].toUpperCase();
+      }
+      slotsEl.appendChild(d);
+    })(i, holeIdx);
+  }
+  poolEl.innerHTML = "";
+  for (var p = 0; p < cur.pool.length; p++) {
+    (function (pi) {
+      var b = document.createElement("button");
+      var used = cur.filled.indexOf(pi) >= 0;
+      b.className = "tile" + (used ? " used" : "");
+      b.textContent = cur.pool[pi].toUpperCase();
+      b.onclick = function () { pickTile(pi); };
+      poolEl.appendChild(b);
+    })(p);
+  }
+}
+
+function pickTile(pi) {
+  if (!playing || cur.filled.indexOf(pi) >= 0) return;
+  var slot = cur.filled[0] === null ? 0 : (cur.filled[1] === null ? 1 : -1);
+  if (slot < 0) return;
+  cur.filled[slot] = pi;
+  render();
+  if (cur.filled[0] !== null && cur.filled[1] !== null) check();
+}
+
+function check() {
+  var ok = true;
+  for (var h = 0; h < 2; h++) {
+    if (cur.pool[cur.filled[h]] !== cur.w[cur.holes[h]]) ok = false;
+  }
+  if (ok) {
+    score += 10;
+    scoreEl.textContent = score;
+    slotsEl.classList.add("ok");
+    setTimeout(next, 380);
+  } else {
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    for (var s = 0; s < 2; s++) {
+      var idx = cur.holes[s];
+      var d = slotsEl.children[idx];
+      if (d) d.classList.add("bad");
+    }
+    if (hp <= 0) {
+      setTimeout(lose, 600);
+    } else {
+      setTimeout(function () {
+        cur.filled = [null, null];
+        render();
+      }, 600);
+    }
+  }
+}
+
+function next() {
+  slotsEl.classList.remove("ok");
+  qNum++;
+  if (qNum >= TOTALQ) {
+    playing = false;
+    ovT.textContent = "行动完成!";
+    ovP.textContent = "15 个单词全部补齐\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  progEl.textContent = qNum + 1;
+  makeQ();
+}
+
+function lose() {
+  playing = false;
+  ovT.textContent = "行动失败";
+  ovP.textContent = "进行到第 " + (qNum + 1) + " 题\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  qNum = 0; score = 0; hp = 3;
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  progEl.textContent = "1";
+  playing = true;
+  ov.classList.add("hide");
+  makeQ();
+}
+
+ovB.onclick = start;
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暗夜探照</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:420px}
+#board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+.card{aspect-ratio:1/1;cursor:pointer;border-radius:10px;background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;display:flex;align-items:center;justify-content:center;font-size:clamp(20px,7vw,32px);transition:transform .15s,border-color .15s,box-shadow .15s,opacity .3s}
+.card.sel{border-color:#ffd166;transform:scale(1.07);box-shadow:0 0 14px rgba(255,209,102,.5)}
+.card.gone{opacity:0;transform:scale(.6);pointer-events:none}
+#dark{position:absolute;inset:-4px;border-radius:14px;pointer-events:none;z-index:5;background:rgba(6,8,20,.97)}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>暗夜探照</h1>
+<div class="hint">全场陷入黑暗!卡牌图案全部朝上却被夜色掩盖;移动鼠标或手指,用手电筒照亮卡牌寻找相同图案,依次点选两张配对。考验你的搜索与记忆!</div>
+<div class="bar"><span>已配对 <b id="stPairs">0/8</b></span><span>用时 <b id="stTime">0.0</b> 秒</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="dark"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var SYMS=['🍎','🍋','🍉','🍇','🍓','🐶','🐱','🦊'];
+var board=document.getElementById('board');
+var stage=document.getElementById('stage');
+var dark=document.getElementById('dark');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elPairs=document.getElementById('stPairs');
+var elTime=document.getElementById('stTime');
+var btnAgain=document.getElementById('btnAgain');
+var lock=false,selA=null,pairs=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  el.textContent=sym;el.sym=sym;
+  board.appendChild(el);return el;
+}
+function setLight(x,y){
+  dark.style.background='radial-gradient(circle at '+x+'px '+y+'px, rgba(6,8,20,0) 0px, rgba(6,8,20,.5) 75px, rgba(6,8,20,.97) 125px)';
+}
+function centerLight(){
+  setLight(stage.clientWidth/2,stage.clientHeight/2);
+}
+function newGame(){
+  clearTimers();board.innerHTML='';
+  lock=false;selA=null;pairs=0;running=false;over=false;
+  elPairs.textContent='0/8';elTime.textContent='0.0';
+  overlay.classList.remove('show');
+  var syms=shuffle(SYMS.concat(SYMS));
+  for(var i=0;i<syms.length;i++)makeCard(syms[i]);
+  later(function(){
+    running=true;startAt=performance.now();centerLight();
+  },300);
+}
+function onCard(el){
+  if(lock||over||!running)return;
+  if(el.classList.contains('gone'))return;
+  if(el.classList.contains('sel')){el.classList.remove('sel');selA=null;return;}
+  if(!selA){selA=el;el.classList.add('sel');return;}
+  var a=selA;selA=null;
+  a.classList.remove('sel');el.classList.add('sel');
+  if(a.sym===el.sym){
+    a.classList.remove('sel');el.classList.remove('sel');
+    a.classList.add('gone');el.classList.add('gone');
+    pairs++;elPairs.textContent=pairs+'/8';
+    if(pairs===SYMS.length)finish();
+  }else{
+    lock=true;
+    later(function(){
+      a.classList.remove('sel');el.classList.remove('sel');lock=false;
+    },420);
+  }
+}
+function finish(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  var score=Math.max(100,Math.round(1400-sec*14));
+  var grade=sec<=35?'★★★ 夜视鹰眼':(sec<=55?'★★☆ 稳步搜索':'★☆☆ 完成挑战');
+  ovTitle.textContent='黑暗驱散!';
+  ovDesc.innerHTML='用时 '+sec.toFixed(1)+' 秒<br>得分 <b style="color:#ffd166">'+score+'</b><br>'+grade;
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+stage.addEventListener('mousemove',function(e){
+  var r=stage.getBoundingClientRect();
+  setLight(e.clientX-r.left,e.clientY-r.top);
+});
+stage.addEventListener('touchstart',function(e){
+  var t=e.touches[0],r=stage.getBoundingClientRect();
+  setLight(t.clientX-r.left,t.clientY-r.top);
+},{passive:true});
+stage.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  var t=e.touches[0],r=stage.getBoundingClientRect();
+  setLight(t.clientX-r.left,t.clientY-r.top);
+},{passive:false});
+var tick=function(){
+  if(running&&!over)elTime.textContent=((performance.now()-startAt)/1000).toFixed(1);
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

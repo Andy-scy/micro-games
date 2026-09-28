@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>百步穿杨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffb74d;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffb74d;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffb74d}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffb74d;color:#3d2600;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>百步穿杨</h1>
+  <p class="hint">每命中一次,靶更远更小、箭飞更久 · 三次脱靶结束 · 冲 150 分</p>
+  <div class="hud">
+    <span>第 <b id="ld">1</b> 梯</span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>连击 <b id="cb">0</b></span>
+    <span>机会 <b id="lv">3</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">百步穿杨</h2>
+      <p id="ovD">阶梯射艺:开始靶大而近,每命中一次,靶就退得更远、缩得更小,箭在空中飞的时间也更长——你必须越来越有耐心地预判。连击越高单发得分越高,脱靶三次便被请下靶场,冲击 150 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">上靶场</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elLd=$("ld"),elSc=$("sc"),elCb=$("cb"),elLv=$("lv"),elMsg=$("msg");
+const OX=240,OY=545,GOAL=150;
+let state="menu",score=0,combo=0,lives=3,ladder=1,tp=0;
+let target={x:320,y:220,r:85},flies=[],pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function placeT(){
+  let tries=0;
+  while(tries<50){
+    const nx=120+Math.random()*300,ny=90+Math.random()*330;
+    if(Math.hypot(nx-target.x,ny-target.y)>110||tries>40){target.x=nx;target.y=ny;break;}
+    tries++;
+  }
+}
+function flight(){return 0.16+(85-target.r)*0.004;}
+function fire(){
+  if(state!=="play")return;
+  flies.push({x0:OX,y0:OY,x1:mouse.x,y1:mouse.y,t:0,dur:flight()});
+}
+function burst(x,y,col){
+  for(let i=0;i<10;i++){
+    const a=Math.random()*6.28,s=50+Math.random()*130;
+    pops.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:col});
+  }
+}
+function resolve(f){
+  if(Math.hypot(f.x1-target.x,f.y1-target.y)<target.r+4){
+    const gain=10+combo*5+Math.round((85-target.r)/2);
+    score+=gain;combo++;ladder++;
+    elMsg.textContent="中靶 +"+gain+" · 下一梯更远";
+    burst(target.x,target.y,"#ffcc80");
+    target.r=Math.max(26,target.r*0.86);
+    placeT();
+    elLd.textContent=ladder;
+  }else{
+    combo=0;lives--;
+    elMsg.textContent=lives>0?"脱靶!还剩 "+lives+" 次机会":"脱靶!机会用尽";
+    elLv.textContent=Math.max(0,lives);
+  }
+  elSc.textContent=score;elCb.textContent=combo;
+  if(lives<=0)finish();
+}
+function startGame(){
+  score=0;combo=0;lives=3;ladder=1;tp=0;
+  target={x:320,y:220,r:85};flies=[];pops=[];
+  elMsg.textContent="";elLd.textContent="1";elSc.textContent="0";elCb.textContent="0";elLv.textContent="3";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"射艺超群!":"止步靶场";
+  ovT.style.color=win?"#ffb74d":"#ef9a9a";
+  ovD.textContent=win?"第 "+ladder+" 梯的成绩,足以让人侧目。":"你在第 "+ladder+" 梯被请下了靶场。远靶要等箭到,心急就脱靶。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+let mouse={x:300,y:240};
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];f.t+=dt/f.dur;
+      if(f.t>=1){resolve(f);flies.splice(i,1);}
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;
+    }
+  }
+  draw();
+}
+function drawTarget(){
+  const tr=target.r;
+  ctx.save();ctx.translate(target.x,target.y);
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  const cols=["#eceff1","#e53935","#ffc107"];
+  const rs=[1,0.6,0.28];
+  for(let i=0;i<3;i++){
+    ctx.fillStyle=cols[i];
+    ctx.beginPath();ctx.arc(0,0,tr*rs[i],0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  ctx.restore();
+  ctx.fillStyle="#ffb74d";ctx.font="bold 13px system-ui";ctx.textAlign="center";
+  ctx.fillText("第 "+ladder+" 梯 · "+Math.round(tr)+" 步",target.x,target.y-tr-12);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#25203a");g.addColorStop(1,"#141126");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(255,183,77,0.08)";ctx.lineWidth=1;
+  for(let i=1;i<=6;i++){
+    ctx.beginPath();ctx.moveTo(OX,545);ctx.lineTo(40+i*70,60);ctx.stroke();
+  }
+  ctx.fillStyle="#22301f";ctx.fillRect(0,500,W,H-500);
+  ctx.fillStyle="rgba(0,0,0,0.3)";
+  ctx.beginPath();ctx.ellipse(target.x,target.y+target.r+6,target.r*0.9,8,0,0,Math.PI*2);ctx.fill();
+  drawTarget();
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(OX,OY+6,14,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i],e=Math.min(1,f.t);
+    const px=f.x0+(f.x1-f.x0)*e,py=f.y0+(f.y1-f.y0)*e;
+    const ang=Math.atan2(f.y1-f.y0,f.x1-f.x0);
+    ctx.save();ctx.translate(px,py);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==="play"){
+    ctx.strokeStyle="#ffb74d";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

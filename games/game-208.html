@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>僵尸夜袭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#84cc16;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#84cc16;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0d141a;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#84cc16}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#84cc16;color:#1a2605;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>僵尸夜袭</h1>
+  <p class="hint">守满 8 波僵尸进攻 · 漏掉一只咬掉一颗心</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>波次 <b id="wave">1/8</b></span>
+    <span>防线 <b id="lives">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">僵尸夜袭</h2>
+      <p id="ovDesc">夜幕降临,僵尸一波接一波从坟头爬出!敲中一只 +15 分;僵尸缩回去就等于咬到你,防线 -1 颗心。守住全部 8 波即胜利,心扣光则失守。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elWave=$("wave"),elLives=$("lives"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s208");
+var state="menu",score=0,kills=0,wave=1,lives=3;
+var graves=[],zombies=[],toSpawn=0,spawnT=0,betweenT=0,bannerText="",flashT=0;
+var floats=[],rings=[];
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initGraves(){
+  graves=[];
+  var xs=[66,182,298,414],ys=[190,360],r,c;
+  for(r=0;r<2;r++)for(c=0;c<4;c++)graves.push({x:xs[c],y:ys[r]});
+}
+initGraves();
+
+function hearts(){
+  var s="",i;
+  for(i=0;i<lives;i++)s+="♥";
+  return s;
+}
+function freeGrave(){
+  var used={},i,cand=[];
+  for(i=0;i<zombies.length;i++)used[zombies[i].grave]=1;
+  for(i=0;i<graves.length;i++)if(!used[i])cand.push(i);
+  if(!cand.length)return -1;
+  return cand[(Math.random()*cand.length)|0];
+}
+function spawnZombie(){
+  var g=freeGrave();
+  if(g<0)return false;
+  zombies.push({grave:g,state:"rise",frac:0,t:0});
+  return true;
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function reset(){
+  zombies=[];floats=[];rings=[];
+  score=0;kills=0;wave=1;lives=3;flashT=0;
+  toSpawn=5;spawnT=0;betweenT=1400;bannerText="第 1 波来袭!";
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(win){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s208",best);}
+  if(win){
+    ovTitle.textContent="守住啦!";
+    ovDesc.textContent="你扛住了全部 8 波夜袭,敲倒僵尸 "+kills+" 只!";
+  }else{
+    ovTitle.textContent="防线失守…";
+    ovDesc.textContent="僵尸冲到了第 "+wave+" 波,共敲倒 "+kills+" 只";
+  }
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elWave.textContent=wave+"/8";
+  elLives.textContent=hearts();
+  elLives.style.color=lives>1?"#84cc16":"#f87171";
+  elBest.textContent=best;
+}
+
+function update(dt){
+  var i,z;
+  if(flashT>0)flashT-=dt;
+  if(betweenT>0){
+    betweenT-=dt;
+    if(betweenT<=0)spawnT=0;
+  }else{
+    var conc=wave<3?2:3;
+    spawnT-=dt;
+    if(toSpawn>0&&zombies.length<conc&&spawnT<=0){
+      if(spawnZombie()){
+        toSpawn--;
+        spawnT=Math.max(380,920-wave*55);
+      }
+    }
+  }
+  for(i=zombies.length-1;i>=0;i--){
+    z=zombies[i];z.t+=dt;
+    if(z.state==="rise"){
+      z.frac=Math.min(1,z.t/550);
+      if(z.frac>=1){z.state="up";z.t=0;}
+    }else if(z.state==="up"){
+      if(z.t>=850){z.state="down";z.t=0;}
+    }else if(z.state==="down"){
+      z.frac=1-Math.min(1,z.t/450);
+      if(z.frac<=0){
+        zombies.splice(i,1);
+        lives--;
+        flashT=450;
+        var g=graves[z.grave];
+        addFloat(g.x,g.y-90,"咬到了!","#f87171");
+        updateHud();
+        if(lives<=0){endGame(false);return;}
+      }
+    }
+  }
+  if(betweenT<=0&&toSpawn===0&&zombies.length===0){
+    if(wave>=8){endGame(true);return;}
+    wave++;
+    toSpawn=Math.min(10,4+wave);
+    betweenT=1300;
+    bannerText="第 "+wave+" 波来袭!";
+    addFloat(W/2,240,bannerText,"#fbbf24");
+    updateHud();
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>900)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>300)rings.splice(i,1);}
+}
+
+function whack(p){
+  if(state!=="playing")return;
+  var i,z;
+  for(i=0;i<zombies.length;i++){
+    z=zombies[i];
+    if(z.state!=="down"&&z.frac>0.3){
+      var g=graves[z.grave];
+      var gx=g.x,gy=g.y-36*z.frac;
+      var dx=p.x-gx,dy=p.y-gy;
+      if(dx*dx+dy*dy<60*60){
+        zombies.splice(i,1);
+        score+=15;kills++;
+        addFloat(gx,gy-48,"+15","#84cc16");
+        addRing(gx,gy,54,"rgba(132,204,22,0.85)");
+        updateHud();
+        return;
+      }
+    }
+  }
+}
+
+function drawGrave(g){
+  ctx.fillStyle="#2a3330";
+  ctx.beginPath();ctx.ellipse(g.x,g.y+16,50,18,0,Math.PI,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#3d4a45";
+  ctx.beginPath();
+  ctx.moveTo(g.x-20,g.y+8);ctx.lineTo(g.x-20,g.y-38);
+  ctx.arcTo(g.x-20,g.y-50,g.x-8,g.y-50,10);
+  ctx.lineTo(g.x+8,g.y-50);
+  ctx.arcTo(g.x+20,g.y-50,g.x+20,g.y-38,10);
+  ctx.lineTo(g.x+20,g.y+8);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle="#28312d";
+  ctx.fillRect(g.x-4,g.y-42,8,22);
+  ctx.fillRect(g.x-10,g.y-36,20,7);
+}
+function drawZombie(g,frac){
+  var bh=80,base=g.y+6,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(g.x-72,g.y-176,144,186);ctx.clip();
+  ctx.fillStyle="#4b6b3a";
+  ctx.beginPath();ctx.ellipse(g.x,cy+18,32,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#5d8048";
+  ctx.beginPath();ctx.arc(g.x,cy-30,24,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#e8eaf6";
+  ctx.beginPath();ctx.arc(g.x-9,cy-34,5,0,Math.PI*2);ctx.arc(g.x+9,cy-34,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#c0392b";
+  ctx.beginPath();ctx.arc(g.x-9,cy-34,2.2,0,Math.PI*2);ctx.arc(g.x+9,cy-34,2.2,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#243318";ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(g.x-7,cy-18);ctx.lineTo(g.x+7,cy-18);ctx.stroke();
+  ctx.fillStyle="#4b6b3a";
+  ctx.save();
+  ctx.translate(g.x-28,cy+2);ctx.rotate(-0.5);
+  ctx.fillRect(-6,-8,30,13);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(g.x+28,cy+2);ctx.rotate(0.5);
+  ctx.fillRect(-24,-8,30,13);
+  ctx.restore();
+  ctx.fillStyle="#31431f";
+  ctx.fillRect(g.x-20,cy+30,40,26);
+  ctx.restore();
+}
+function drawGraveFront(g){
+  ctx.fillStyle="#232b28";
+  ctx.beginPath();ctx.ellipse(g.x,g.y+12,50,16,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#0a1118");g.addColorStop(1,"#101a14");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(132,204,22,0.05)";
+  ctx.beginPath();ctx.arc(W/2,H/2,220,0,Math.PI*2);ctx.fill();
+  var i;
+  for(i=0;i<graves.length;i++)drawGrave(graves[i]);
+  for(i=0;i<zombies.length;i++){
+    var z=zombies[i];
+    if(z.frac>0.02)drawZombie(graves[z.grave],z.frac);
+  }
+  for(i=0;i<graves.length;i++)drawGraveFront(graves[i]);
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/300;
+    ctx.strokeStyle=r.c;ctx.lineWidth=3*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.4+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/900;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 20px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-36*fk);
+    ctx.globalAlpha=1;
+  }
+  if(flashT>0){
+    ctx.strokeStyle="rgba(248,113,113,"+(flashT/450*0.9)+")";
+    ctx.lineWidth=14;
+    ctx.strokeRect(7,7,W-14,H-14);
+  }
+  if(betweenT>0&&state==="playing"){
+    ctx.font="bold 26px sans-serif";
+    ctx.fillStyle="#fbbf24";
+    ctx.fillText(bannerText,W/2,120);
+  }
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

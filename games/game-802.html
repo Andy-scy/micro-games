@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单配菜师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ecdc4;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ecdc4;font-size:16px}
+.stage{position:relative;background:#12202a;border:2px solid #1e3a44;border-radius:12px;padding:14px}
+.ticket{background:#fdf6e3;color:#333;border-radius:10px;padding:10px 12px;text-align:center;margin-bottom:12px}
+.ticket.shake{animation:shk .3s}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
+.ticket .tno{font-size:13px;color:#a0522d;font-weight:700;margin-bottom:6px}
+.trow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.ti{width:52px;height:52px;border-radius:10px;background:#fff;border:2px dashed #d9c79a;font-size:26px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+.ti small{font-size:10px;color:#8a7a55}
+.ti.ok{border:2px solid #2fa84f;background:#eafff0;box-shadow:0 0 8px #7ee2a0}
+.desk{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.ing{background:#1b2f3a;border:2px solid #2a4a58;border-radius:10px;padding:8px 2px;text-align:center;cursor:pointer;font-size:24px;color:#c7cbe8;user-select:none}
+.ing small{display:block;font-size:11px;color:#8b90b0}
+.ing:active{transform:scale(.94);border-color:#4ecdc4}
+.msg{height:22px;text-align:center;color:#fbbf24;font-size:15px;font-weight:700;margin-top:10px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ecdc4}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#4ecdc4;color:#062a27;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>订单配菜师</h1>
+  <p class="hint">看小票上的配料顺序,在下方案台<b style="color:#4ecdc4">依次点击</b>同款配料<br>点错扣 3 秒并断连击,60 秒内尽量多出餐!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>时间 <b id="time">60</b>秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="ticket" id="ticket">
+      <div class="tno" id="tno">1 号桌 · 三文治</div>
+      <div class="trow" id="trow"></div>
+    </div>
+    <div class="desk" id="desk"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">订单配菜师</h2>
+      <p id="ovDesc">小票上会列出 3~5 个按顺序摆放的配料,照顺序点击下方配料台,全对自动出餐。订单越长奖励越高,连击越高加分越多!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var ING=[["🍅","番茄"],["🥬","生菜"],["🧀","芝士"],["🥩","牛肉"],["🍤","虾排"],["🥚","蛋皮"]];
+var elScore=$("score"),elCombo=$("combo"),elTime=$("time"),elBest=$("best");
+var tno=$("tno"),trow=$("trow"),desk=$("desk"),ticket=$("ticket"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s802");
+var state="menu",seq,prog,score,combo,completed,timeLeft,lastT,orderNo;
+var iconEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildDesk(){
+  var i,b,s;
+  for(i=0;i<ING.length;i++){
+    b=document.createElement("div");
+    b.className="ing";
+    s=document.createElement("span");s.textContent=ING[i][0];b.appendChild(s);
+    s=document.createElement("small");s.textContent=ING[i][1];b.appendChild(s);
+    b.setAttribute("data-i",String(i));
+    desk.appendChild(b);
+  }
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+}
+function newOrder(){
+  orderNo++;
+  var len=3+Math.min(2,Math.floor(completed/3));
+  seq=[];prog=0;
+  for(var i=0;i<len;i++)seq.push((Math.random()*ING.length)|0);
+  tno.textContent=orderNo+" 号桌 · "+len+" 料三文治";
+  trow.innerHTML="";
+  iconEls=[];
+  for(i=0;i<seq.length;i++){
+    var d=document.createElement("div");
+    d.className="ti";
+    d.innerHTML=ING[seq[i]][0]+"<small>"+ING[seq[i]][1]+"</small>";
+    trow.appendChild(d);
+    iconEls.push(d);
+  }
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";}
+function pick(i){
+  if(state!=="playing")return;
+  if(prog>=seq.length)return;
+  if(i===seq[prog]){
+    iconEls[prog].classList.add("ok");
+    prog++;
+    if(prog>=seq.length){
+      var pts=10+seq.length*2+combo*2;
+      score+=pts;combo++;completed++;
+      showMsg("出餐成功 +"+pts,"#4ade80");
+      updateHud();
+      setTimeout(function(){if(state==="playing")newOrder();},350);
+    }
+  }else{
+    combo=0;timeLeft=Math.max(0,timeLeft-3);
+    showMsg("配错了! -3 秒","#f87171");
+    ticket.classList.add("shake");
+    setTimeout(function(){ticket.classList.remove("shake");},320);
+    updateHud();
+  }
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s802",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="60 秒内共完成 "+completed+" 份订单。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function reset(){
+  score=0;combo=0;completed=0;orderNo=0;timeLeft=60;
+  msg.textContent="";newOrder();updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state!=="playing")return;
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;updateHud();gameOver();return;}
+  updateHud();
+}
+desk.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==desk&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==desk)pick(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  var map={"1":0,"2":1,"3":2,"4":3,"5":4,"6":5};
+  if(map[k]!==undefined&&state==="playing"){pick(map[k]);e.preventDefault();}
+  else if((e.key===" "||e.code==="Space")&&state!=="playing"){e.preventDefault();startGame();}
+});
+btnGo.addEventListener("click",startGame);
+buildDesk();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

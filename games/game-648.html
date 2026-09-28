@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>挑出异类</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#4de3c1;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#4de3c1}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:12px}
+#tbar{height:100%;width:100%;background:#4de3c1;border-radius:6px}
+#lead{text-align:center;font-size:16px;margin-bottom:12px;color:#cdd6f4}
+#items{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.item{width:86px;height:86px;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:12px;font-size:14px;cursor:pointer;font-family:inherit;padding:6px;line-height:1.4}
+.item:hover{border-color:#4de3c1}
+.item.ok{border-color:#51d88a;background:#173327}
+.item.bad{border-color:#ff5c5c;background:#3a1a20}
+.item.dim{opacity:.45}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:36px;margin-top:12px;line-height:1.6}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#4de3c1;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4de3c1;color:#06231c;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>挑出异类</h1>
+  <p class="tips">五个词语里藏着一个"不合群":点击你认为不属于同一类的那个。每题 12 秒,共 15 题,答错或超时扣一条命并给出分类理由,3 命用完结束。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/15</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="lead">—— 下面哪个和其他四个不同类? ——</div>
+    <div id="items"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">挑出异类</h2><p id="ovp">· 每题给出 5 个词语,其中 1 个与其他<br>　四个不同类,点击选出它<br>· 每题 12 秒,答对 +100<br>· 答错或超时 -1 条命,并解释为什么<br>· 共 15 题,3 命用完提前结束<br>· 小窍门:先找四个词的共同点</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{its:['白菜','苹果','香蕉','葡萄','西瓜'],why:'其余都是水果,白菜是蔬菜。'},
+{its:['山羊','老虎','狮子','狼','豹'],why:'其余都是肉食动物,山羊吃草。'},
+{its:['方','红','黄','绿','紫'],why:'其余都是颜色,方是形状。'},
+{its:['泰山','长江','黄河','珠江','淮河'],why:'其余都是河流,泰山是山。'},
+{its:['棋子','乒乓球','篮球','足球','羽毛球'],why:'其余都是球类运动器材,棋子不是球。'},
+{its:['雨','春','夏','秋','冬'],why:'其余都是季节,雨是天气现象。'},
+{its:['鱼缸','猫','狗','兔','鸟'],why:'其余都是动物,鱼缸是物品。'},
+{its:['星期一','语文','数学','英语','体育'],why:'其余都是学科,星期一是时间。'},
+{its:['橡皮','铅笔','钢笔','圆珠笔','毛笔'],why:'其余都是笔,橡皮是文具但不是笔。'},
+{its:['电梯','飞机','火车','汽车','自行车'],why:'其余都能长途载人出行,电梯只在楼内运行。'},
+{its:['话筒','笛子','钢琴','吉他','小提琴'],why:'其余都是乐器,话筒是扩音设备。'},
+{its:['西瓜','冬瓜','南瓜','黄瓜','苦瓜'],why:'其余都是蔬菜瓜,西瓜是水果。'},
+{its:['病人','医生','护士','药剂师','外科大夫'],why:'其余都是医护职业,病人是被照顾者。'},
+{its:['马路','火车','地铁','高铁','公交车'],why:'其余都是交通工具,马路是道路。'},
+{its:['沙','金','木','水','火'],why:'金木水火土是五行,沙不属于五行。'},
+{its:['土豆','玫瑰','百合','康乃馨','向日葵'],why:'其余都是观赏花卉,土豆是农作物。'},
+{its:['盘子','袜子','手套','围巾','口罩'],why:'其余都是穿戴用品,盘子是餐具。'},
+{its:['鲨鱼','鲸鱼','海豚','海豹','海狮'],why:'其余都是海洋哺乳动物,鲨鱼是鱼类。'},
+{its:['可乐','米饭','馒头','面条','饺子'],why:'其余都是主食,可乐是饮料。'},
+{its:['灯泡','太阳','月亮','星星','地球'],why:'其余都是天体,灯泡是人造物。'},
+{its:['同学','爸爸','妈妈','哥哥','姐姐'],why:'其余都是家庭成员,同学不是。'},
+{its:['洗','煮','蒸','炒','烤'],why:'其余都是烹饪方式,洗是清洁动作。'},
+{its:['星期八','星期一','星期二','星期三','星期四'],why:'一周只有七天,星期八不存在。'},
+{its:['甜','玫瑰红','柠檬黄','天蓝','草绿'],why:'其余都是颜色,甜是味觉。'},
+{its:['订书机','三角尺','圆规','量角器','直尺'],why:'其余都是绘图测量工具,订书机是办公文具。'},
+{its:['桌','喜','怒','哀','乐'],why:'其余都是情绪,桌是家具。'},
+{its:['蝙蝠','麻雀','燕子','老鹰','鸽子'],why:'其余都是鸟类,蝙蝠是哺乳动物。'},
+{its:['豆腐','牛肉','猪肉','羊肉','鸡肉'],why:'其余都是肉类,豆腐是豆制品。'},
+{its:['自行车','汽车','轮船','飞机','直升机'],why:'其余都靠发动机驱动,自行车靠人力。'},
+{its:['眼镜','皮肤','眼睛','耳朵','鼻子'],why:'其余都是身体器官,眼镜是物品。'}
+];
+var N=15,QLEN=12;
+var quiz=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0,oddPos=-1;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  var arr=it.its.slice();
+  shuffle(arr);
+  oddPos=0;
+  for(var i=0;i<arr.length;i++)if(arr[i]===it.its[0])oddPos=i;
+  var box=$('items');box.innerHTML='';
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='item';
+    b.textContent=arr[k];
+    b.dataset.odd=(k===oddPos)?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var it=quiz[idx];
+  locked=true;
+  var items=$('items').children,i;
+  if(btn.dataset.odd==='1'){
+    score+=100;
+    btn.classList.add('ok');
+    for(i=0;i<items.length;i++)if(items[i]!==btn)items[i].classList.add('dim');
+    $('msg').textContent='眼力不错!+100';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<items.length;i++)if(items[i].dataset.odd==='1')items[i].classList.add('ok');
+    $('msg').textContent=qLeft<=0?'超时!'+it.why:'不对哦。'+it.why;
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1500);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1300?'分类大师!':(score>=800?'眼光独到!':'继续磨炼!');
+  $('ovt').textContent=win?'全部完成 · '+rank:'生命耗尽…';
+  $('ovp').innerHTML='完成 '+Math.min(idx+1,N)+'/'+N+' 题<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 先找共同点再排除,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0){
+      locked=true;
+      var it=quiz[idx],items=$('items').children,i;
+      lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+      for(i=0;i<items.length;i++)if(items[i].dataset.odd==='1')items[i].classList.add('ok');
+      $('msg').textContent='超时!'+it.why;
+      schedule(function(){
+        if(!playing||over)return;
+        if(lives<=0)finish(false);
+        else{idx++;showQ();}
+      },1500);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

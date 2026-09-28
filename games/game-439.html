@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一息滑行</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fde047;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fde047;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fde047}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fde047;color:#332a04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>一息滑行</h1>
+  <p class="hint">不能跳!按住 空格/↓/S 或画面 贴地滑行钻闸门 · 滑行消耗呼吸,松开回复 · 蓝色气泡补呼吸 · 呼吸耗尽会强制站起!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>呼吸 <b id="br">100</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">一息滑行</h2>
+      <p id="ovDesc">低顶管道里不能跳,只能滑!贴地滑行会消耗呼吸,松手才能喘气恢复。闸门、长隧道、巡逻无人机轮番上阵,滑多久、何时起,全靠一息之间。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elBr=$("br"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s439");
+var state="menu",dist,score,speed,obs,px,sliding,held,breath,forced,nextGap,t,orbs;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=320;obs=[];orbs=[];px=90;sliding=false;held=false;
+  breath=100;forced=false;nextGap=460;t=0;
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elBr.textContent=Math.round(breath);
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s439",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,o;
+  t+=s;
+  speed=Math.min(580,320+dist*0.016);
+  dist+=speed*s;score=Math.floor(dist/10);
+  sliding=held&&!forced;
+  if(sliding){
+    breath-=32*s;
+    if(breath<=0){breath=0;forced=true;}
+  }else{
+    breath+=48*s;
+    if(breath>100)breath=100;
+    if(forced&&breath>=30)forced=false;
+  }
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var r=Math.random();
+    if(r<0.32){
+      obs.push({x:W+30,type:"bar",w:22,b:216+Math.random()*11});
+    }else if(r<0.55){
+      obs.push({x:W+30,type:"bar",w:22,b:216+Math.random()*11});
+      obs.push({x:W+150,type:"bar",w:22,b:216+Math.random()*11});
+    }else if(r<0.78){
+      obs.push({x:W+30,type:"tunnel",w:110+Math.random()*90,b:218+Math.random()*8});
+      orbs.push({x:W+60+Math.random()*40,y:GY-18,taken:false});
+    }else{
+      obs.push({x:W+30,type:"drone",w:34,ph:Math.random()*6});
+    }
+    nextGap=310+Math.random()*250+speed*0.28;
+  }
+  var b=sliding?{x:px-6,y:GY-20,w:42,h:20}:{x:px+3,y:GY-40,w:20,h:40};
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-200){obs.splice(i,1);continue;}
+    var oy=0,oh,ow;
+    if(o.type==="bar"){oh=o.b;ow=o.w;}
+    else if(o.type==="tunnel"){oh=o.b;ow=o.w;}
+    else{oy=206+Math.sin(t*3+o.ph)*4;oh=20;ow=o.w;}
+    if(b.x+b.w>o.x+2&&b.x<o.x+ow-2&&b.y<oy+oh-2&&b.y+b.h>oy+2){
+      gameOver(o.type==="drone"?"撞上了巡逻无人机!":"一头顶上了闸门——要贴地滑行!");
+      return;
+    }
+  }
+  for(i=orbs.length-1;i>=0;i--){
+    var ob=orbs[i];ob.x-=speed*s;
+    if(ob.x<-30){orbs.splice(i,1);continue;}
+    if(b.x+b.w>ob.x-9&&b.x<ob.x+9&&b.y+b.h>ob.y-9&&b.y<ob.y+9){
+      orbs.splice(i,1);
+      breath=Math.min(100,breath+35);
+    }
+  }
+  updateHud();
+}
+function draw(){
+  var i,o,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#171c10");grd.addColorStop(1,"#243012");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(253,224,71,.05)";
+  for(i=0;i<12;i++)ctx.fillRect((i*143+dist*0.12%W+W)%W,(i*53)%140+8,20,20);
+  ctx.fillStyle="#262e18";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#fde047";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%70;
+  ctx.fillStyle="rgba(255,255,255,.08)";
+  for(i=0;i<11;i++)ctx.fillRect(i*70-dsh,GY+14,30,3);
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    if(o.x>W+40||o.x+o.w<-40)continue;
+    if(o.type==="drone"){
+      var dy=206+Math.sin(t*3+o.ph)*4;
+      ctx.fillStyle="#4b5563";
+      rr(o.x,dy,o.w,18,8);ctx.fill();
+      ctx.fillStyle="#9ca3af";
+      ctx.fillRect(o.x-6,dy-4,o.w+12,3);
+      ctx.fillStyle="#fde047";
+      ctx.beginPath();ctx.arc(o.x+o.w/2,dy+9,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(253,224,71,.18)";
+      ctx.beginPath();
+      ctx.moveTo(o.x+o.w/2-4,dy+12);ctx.lineTo(o.x+o.w/2+4,dy+12);ctx.lineTo(o.x+o.w/2+16,GY);ctx.lineTo(o.x+o.w/2-16,GY);
+      ctx.fill();
+    }else{
+      var bottom=o.b;
+      ctx.fillStyle="#3f3a1c";
+      ctx.fillRect(o.x-3,0,o.w+6,bottom);
+      ctx.fillStyle="#fde047";
+      for(var sy=8;sy<bottom-6;sy+=16)ctx.fillRect(o.x,sy,o.w,5);
+      ctx.fillStyle="#fbbf24";
+      ctx.fillRect(o.x-3,bottom-4,o.w+6,4);
+    }
+  }
+  for(i=0;i<orbs.length;i++){
+    var ob=orbs[i];
+    ctx.fillStyle="rgba(103,232,249,.35)";
+    ctx.beginPath();ctx.arc(ob.x,ob.y,10+Math.sin(t*5+i)*1.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#67e8f9";
+    ctx.beginPath();ctx.arc(ob.x,ob.y,5,0,Math.PI*2);ctx.fill();
+  }
+  if(sliding){
+    ctx.fillStyle="#fde047";
+    rr(px-6,GY-18,40,16,7);ctx.fill();
+    ctx.fillStyle="#332a04";
+    ctx.fillRect(px+20,GY-15,7,3);
+    ctx.strokeStyle="rgba(103,232,249,.5)";
+    ctx.beginPath();ctx.moveTo(px-14,GY-8);ctx.lineTo(px-30,GY-8);ctx.moveTo(px-14,GY-4);ctx.lineTo(px-26,GY-4);ctx.stroke();
+  }else{
+    ctx.fillStyle="#fde047";
+    rr(px,GY-40,20,40,7);ctx.fill();
+    ctx.fillStyle="#332a04";
+    ctx.fillRect(px+11,GY-33,6,4);
+    ctx.fillStyle="#c7b21f";
+    ctx.fillRect(px+2,GY-14,16,4);
+  }
+  if(forced){
+    ctx.strokeStyle="rgba(248,113,113,.85)";ctx.lineWidth=2;
+    rr(px-6,GY-44,32,46,8);ctx.stroke();ctx.lineWidth=1;
+  }
+  ctx.fillStyle="rgba(10,14,26,.75)";
+  rr(12,12,144,16,6);ctx.fill();
+  ctx.fillStyle=forced?"#f87171":(breath<35?"#fbbf24":"#67e8f9");
+  ctx.fillRect(15,15,138*breath/100,10);
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowDown"||k==="ArrowUp")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k===" "||k==="ArrowDown"||k==="s"||k==="S")held=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowDown"||k==="s"||k==="S")held=false;
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();held=true;},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();held=false;},{passive:false});
+cv.addEventListener("mousedown",function(){held=true;});
+document.addEventListener("mouseup",function(){held=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三球开伦</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#5eead4;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#5eead4}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#5eead4;color:#042f2e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>三球开伦</h1>
+  <p class="hint">无袋球台 · 一杆之内让母球先后撞到红球和黄球即得 1 开伦,20 杆凑 10 次</p>
+  <div class="hud">
+    <span>开伦 <b id="hCarom">0</b>/10</span>
+    <span>剩余杆数 <b id="hShots">20</b></span>
+    <span>连击 <b id="hStreak">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="290"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">三球开伦</h2>
+      <p id="ovD">法式开伦台球:台面上没有袋口,母球撞出去永远留在台上。一杆之内让母球先碰到红球、再碰到黄球(顺序不限,但要两颗都碰到)即得 1 次开伦。连续开伦有连击加成,20 杆内攒满 10 次开伦即通关。反弹库边很有弹性,多用三边走位。</p>
+      <button id="btnGo">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hCarom=$("hCarom"),hShots=$("hShots"),hStreak=$("hStreak");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo");
+var W=470,H=290,RL=16,RT=16,RR=454,RB=274,R=8,TAU=6.28318;
+var balls=[],cue=null,red=null,yellow=null;
+var state="menu",moving=false;
+var aiming=false,aimDx=1,aimDy=0,power=0;
+var caroms=0,shots=20,streak=0,hitRed=false,hitYel=false;
+var fx=[];
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function mkBall(x,y,o){var b={x:x,y:y,vx:0,vy:0,r:R,live:true};if(o)for(var k in o)b[k]=o[k];balls.push(b);return b;}
+function anyMoving(){for(var i=0;i<balls.length;i++){var b=balls[i];if(b.live&&(b.vx*b.vx+b.vy*b.vy)>25)return true;}return false;}
+function onRail(){}
+function onClack(a,b){
+  if(a===cue&&b===red)hitRed=true;
+  else if(a===cue&&b===yellow)hitYel=true;
+  else if(b===cue&&a===red)hitRed=true;
+  else if(b===cue&&a===yellow)hitYel=true;
+}
+function physics(dt){
+  var i,j,b;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    var f=1-1.15*dt;if(f<0)f=0;b.vx*=f;b.vy*=f;
+    if(b.vx*b.vx+b.vy*b.vy<36){b.vx=0;b.vy=0;}}
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live)continue;
+    if(b.x<RL+b.r){b.x=RL+b.r;if(b.vx<0)b.vx=-b.vx*0.92;}
+    else if(b.x>RR-b.r){b.x=RR-b.r;if(b.vx>0)b.vx=-b.vx*0.92;}
+    if(b.y<RT+b.r){b.y=RT+b.r;if(b.vy<0)b.vy=-b.vy*0.92;}
+    else if(b.y>RB-b.r){b.y=RB-b.r;if(b.vy>0)b.vy=-b.vy*0.92;}}
+  for(i=0;i<balls.length;i++){var a=balls[i];if(!a.live)continue;
+    for(j=i+1;j<balls.length;j++){b=balls[j];if(!b.live)continue;
+      var dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy,mn=a.r+b.r;
+      if(d2<mn*mn&&d2>0.0001){var d=Math.sqrt(d2),nx=dx/d,ny=dy/d,ovp=(mn-d)/2;
+        a.x-=nx*ovp;a.y-=ny*ovp;b.x+=nx*ovp;b.y+=ny*ovp;
+        var rel=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+        if(rel<0){var im=-0.975*rel;a.vx-=im*nx;a.vy-=im*ny;b.vx+=im*nx;b.vy+=im*ny;onClack(a,b);}}}}
+}
+function endShot(){
+  shots--;
+  if(hitRed&&hitYel){
+    caroms++;streak++;
+    addFx(cue.x,cue.y,"开伦!连击×"+streak,"#5eead4");
+  }else{
+    if(streak>0)addFx(235,70,"连击中断","#94a3b8");
+    streak=0;
+  }
+  hitRed=false;hitYel=false;updHud();
+  if(caroms>=10){state="over";showOv("开伦大师!","20 杆内完成 10 次开伦!\n剩余 "+shots+" 杆","再来一局");return;}
+  if(shots<=0){state="over";showOv("杆数用尽","完成 "+caroms+" 次开伦,还差 "+(10-caroms)+" 次。","再来一局");}
+}
+function updHud(){hCarom.textContent=caroms;hShots.textContent=shots>0?shots:0;hStreak.textContent=streak;}
+function reset(){
+  balls=[];fx=[];caroms=0;shots=20;streak=0;hitRed=false;hitYel=false;moving=false;power=0;aiming=false;
+  cue=mkBall(110,145,{col:"#f5f5f0"});
+  red=mkBall(330,145,{col:"#ef4444"});
+  yellow=mkBall(240,60,{col:"#eab308"});
+  state="play";updHud();
+}
+function showOv(t,d){ovT.textContent=t;ovD.textContent=d;btnGo.textContent="再来一局";ov.classList.remove("hide");}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play"||moving)return;e.preventDefault();aiming=true;mv(e);}
+function mv(e){if(!aiming)return;e.preventDefault();var p=ptr(e);var dx=cue.x-p.x,dy=cue.y-p.y,d=Math.hypot(dx,dy);if(d<8){power=0;return;}power=Math.min(d,150)/150;aimDx=dx/d;aimDy=dy/d;}
+function up(e){if(!aiming)return;if(e&&e.preventDefault)e.preventDefault();aiming=false;if(power>0.04&&cue.live){var v=120+power*1500;cue.vx=aimDx*v;cue.vy=aimDy*v;moving=true;}power=0;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+btnGo.addEventListener("click",function(){ov.classList.add("hide");reset();});
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawBall(b){
+  ctx.save();ctx.translate(b.x,b.y);
+  ctx.beginPath();ctx.arc(0,0,b.r,0,TAU);
+  ctx.fillStyle=b.col;ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.35)";ctx.beginPath();ctx.arc(-b.r*0.32,-b.r*0.35,b.r*0.3,0,TAU);ctx.fill();
+  ctx.restore();
+}
+function drawAim(){
+  if(!aiming||power<=0)return;
+  var x=cue.x,y=cue.y,dx=aimDx,dy=aimDy,bt=1e9,hb=null,tw=1e9,i,b,t;
+  for(i=0;i<balls.length;i++){b=balls[i];if(!b.live||b===cue)continue;
+    t=segHit(x,y,dx,dy,b,b.r+R);if(t>0&&t<bt){bt=t;hb=b;}}
+  if(dx<-1e-6)tw=Math.min(tw,(RL+R-x)/dx);else if(dx>1e-6)tw=Math.min(tw,(RR-R-x)/dx);
+  if(dy<-1e-6)tw=Math.min(tw,(RT+R-y)/dy);else if(dy>1e-6)tw=Math.min(tw,(RB-R-y)/dy);
+  if(tw<bt){bt=tw;hb=null;}
+  if(bt>1e8)bt=0;
+  var ex=x+dx*bt,ey=y+dy*bt;
+  ctx.strokeStyle="rgba(245,245,240,.7)";ctx.lineWidth=1.5;ctx.setLineDash([5,5]);
+  ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(ex,ey);ctx.stroke();ctx.setLineDash([]);
+  if(hb){ctx.strokeStyle="rgba(251,191,36,.9)";ctx.beginPath();ctx.arc(ex,ey,R,0,TAU);ctx.stroke();
+    var nd=Math.hypot(hb.x-ex,hb.y-ey)||1;
+    ctx.strokeStyle="rgba(251,191,36,.55)";ctx.beginPath();ctx.moveTo(hb.x,hb.y);
+    ctx.lineTo(hb.x+(hb.x-ex)/nd*26,hb.y+(hb.y-ey)/nd*26);ctx.stroke();}
+  ctx.fillStyle="rgba(0,0,0,.45)";ctx.fillRect(RL,4,RR-RL,9);
+  ctx.fillStyle=power>0.8?"#f87171":"#5eead4";ctx.fillRect(RL+1,5,(RR-RL-2)*power,7);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#22283f";rr(1,1,W-2,H-2,12);ctx.fill();
+  ctx.fillStyle="#8a5a3b";rr(RL-8,RT-8,RR-RL+16,RB-RT+16,6);ctx.fill();
+  ctx.fillStyle="#b0794f";rr(RL-2,RT-2,RR-RL+4,RB-RT+4,3);ctx.fill();
+  ctx.fillStyle="#0e4636";rr(RL+6,RT+6,RR-RL-12,RB-RT-12,4);ctx.fill();
+  var i;
+  for(i=0;i<balls.length;i++){var b=balls[i];if(b.live)drawBall(b);}
+  drawAim();
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.t-=0.02;if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+  if(hitRed!==hitYel&&state==="play"){
+    ctx.fillStyle="rgba(94,234,212,.9)";ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(hitRed?"已碰红球,再找黄球!":"已碰黄球,再找红球!",235,270);}
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);if(!lastT)lastT=t;var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play"&&moving){var acc=dt,n=0;
+    while(acc>0&&n<60){var s=Math.min(acc,1/240);physics(s);acc-=s;n++;}
+    if(!anyMoving()){moving=false;endShot();}}
+  draw();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

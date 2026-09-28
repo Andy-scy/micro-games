@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>龙虎斗 一决高低</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+button.on{border-color:#4cc9f0;box-shadow:0 0 0 2px rgba(76,201,240,.4)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:680px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#duel{display:flex;gap:26px;align-items:center;justify-content:center}
+.side{display:flex;flex-direction:column;align-items:center;gap:8px}
+.side .nm{font-size:18px;font-weight:800;color:#ffd166}
+.card{width:84px;height:120px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .25s ease}
+@keyframes pop{from{transform:scale(.4) rotate(-10deg);opacity:.2}to{transform:scale(1) rotate(0);opacity:1}}
+.card.red{color:#d62839}
+.card .r{font-size:30px;font-weight:800}
+.card .s{font-size:44px;line-height:1}
+.card.none{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.none span{visibility:hidden}
+#vs{font-size:26px;font-weight:800;color:#4cc9f0}
+#res{min-height:22px;font-size:15px;color:#ffd166;text-align:center;font-weight:700}
+#btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#stakes{display:flex;gap:8px}
+#hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;min-height:26px}
+.hc{padding:2px 9px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;background:#1c2030;border:1px solid #556}
+.hc.l{background:#b8860b}.hc.h{background:#7a1f3d}.hc.t{background:#1f7a4d}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>龙虎斗 · 一决高低</h1>
+<p id="how">龙虎各开一张牌比大小（A 最小 K 最大）：押中赢的一方得 1 倍，押「和」赔 8 倍；开平时龙虎注退回一半。连胜有额外奖励分。筹码到 250 赢下赌桌，不足 5 出局。</p>
+<div id="bar"><span>筹码 <b id="ch">100</b></span><span>连胜 <b id="wk">0</b></span><span>目标 250</span></div>
+<div id="table">
+  <div id="duel">
+    <div class="side"><div class="nm">龙</div><div id="lslot"></div></div>
+    <div id="vs">VS</div>
+    <div class="side"><div class="nm">虎</div><div id="hslot"></div></div>
+  </div>
+  <div id="res">选边押注，点「开牌」</div>
+  <div id="btns">
+    <button data-k="l" class="acc" style="background:#b8860b;border-color:#b8860b">押龙</button>
+    <button data-k="t" class="acc" style="background:#1f7a4d;border-color:#1f7a4d">押和</button>
+    <button data-k="h" class="acc" style="background:#7a1f3d;border-color:#7a1f3d">押虎</button>
+  </div>
+  <div id="stakes">
+    <button data-v="5" class="on">押 5</button><button data-v="10">押 10</button>
+    <button data-v="25">押 25</button><button data-v="50">押 50</button>
+    <button id="go" class="acc">开牌</button>
+  </div>
+  <div id="hist"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var chips=100,stake=5,side='l',winStreak=0,phase='bet',hist=[];
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+1;}
+function cardHTML(c){
+  if(!c)return '<div class="card none"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('ch').textContent=chips;$('wk').textContent=winStreak;
+  var bs=document.querySelectorAll('#btns button');
+  for(var i=0;i<bs.length;i++)bs[i].className='acc'+(bs[i].getAttribute('data-k')===side?' on':'');
+  var st=document.querySelectorAll('#stakes button[data-v]');
+  for(var j=0;j<st.length;j++)st[j].className=parseInt(st[j].getAttribute('data-v'),10)===stake?'on':'';
+  $('go').disabled=(phase!=='bet'||stake>chips);
+  var hh='';
+  for(var k=0;k<hist.length;k++){
+    var it=hist[k];
+    hh+='<div class="hc '+(it==='和'?'t':(it==='龙'?'l':'h'))+'">'+it+'</div>';
+  }
+  $('hist').innerHTML=hh;
+}
+function msg(s){$('res').textContent=s;}
+function go(){
+  if(phase!=='bet'||stake>chips)return;
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});
+  var lc=d[Math.floor(Math.random()*52)],hc=d[Math.floor(Math.random()*52)];
+  $('lslot').innerHTML=cardHTML(lc);$('hslot').innerHTML=cardHTML(hc);
+  chips-=stake;
+  var lv=vi(lc.r),hv=vi(hc.r);
+  var outcome=lv>hv?'龙':(hv>lv?'虎':'和');
+  var mult=0;
+  if(outcome==='和'){if(side==='t')mult=8;}
+  else if(side===outcome)mult=2;
+  var text='龙开 '+lc.r+lc.s+'，虎开 '+hc.r+hc.s+'，'+outcome+'赢！';
+  if(mult>0){
+    var profit=stake*(mult-1);
+    chips+=stake*mult;winStreak++;
+    if(mult===2&&winStreak>=2){var bonus=5*winStreak;chips+=bonus;text+='连胜奖励 +'+bonus+'！';}
+    text+='盈利 +'+profit;
+  }else{
+    winStreak=0;
+    if(outcome==='和'){chips+=Math.floor(stake/2);text+='龙虎注退回一半';}
+    else text+='这注输了';
+  }
+  hist.unshift(outcome);if(hist.length>12)hist.pop();
+  msg(text);
+  if(chips>=250){phase='done';render();end(true,'筹码滚到 '+chips+'，龙虎桌归你了！');return;}
+  if(chips<5){phase='done';render();end(false,'筹码不足 5，离场吧');return;}
+  phase='bet';render();
+}
+function end(win,info){
+  phase='done';
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终筹码：'+chips;
+  $('over').classList.remove('hide');
+}
+$('btns').addEventListener('click',function(e){
+  var t=e.target;
+  if(!t.getAttribute||!t.getAttribute('data-k'))return;
+  side=t.getAttribute('data-k');render();
+});
+$('stakes').addEventListener('click',function(e){
+  var t=e.target;
+  if(!t.getAttribute)return;
+  var v=t.getAttribute('data-v');
+  if(v){stake=parseInt(v,10);render();}
+});
+$('go').onclick=go;
+$('again').onclick=function(){
+  chips=100;stake=5;side='l';winStreak=0;phase='bet';hist=[];
+  $('lslot').innerHTML=cardHTML(null);$('hslot').innerHTML=cardHTML(null);
+  $('over').classList.add('hide');msg('选边押注，点「开牌」');render();
+};
+$('lslot').innerHTML=cardHTML(null);$('hslot').innerHTML=cardHTML(null);
+render();
+})();
+</script>
+</body>
+</html>

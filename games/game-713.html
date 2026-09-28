@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>变大变小</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>变大变小</h1>
+  <p class="tips">←→ 移动,空格跳跃。喝红药水变大:跳得更高、还能撞碎木箱;喝蓝药水变小:钻进矮缝。身材切换间通过 3 处机关房。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">形态</div><div class="big" id="fm">小</div></div>
+    <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/3</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">跳</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">变大变小</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃<br>· 红药水「大」:跳高 120px,一撞就碎木箱<br>· 蓝药水「小」:跳高变低,但能钻过 30px 矮缝<br>· 大个子过不去矮缝,小个子碎不了木箱<br>· 尖刺与深渊 -1 生命,共 3 条生命<br>· 星屑 +50,碎箱 +20,过关 +200,共 3 关</p><button class="btn" id="obtn">出发</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var LEVELS=[
+{px:16,py:304,
+ solids:[[0,320,480,40],[190,160,120,14],[230,275,32,45,1],[230,230,32,45,1],[340,140,70,150]],
+ pots:[[80,300,'G'],[280,300,'S']],
+ spikes:[],
+ gems:[[60,270],[240,250],[400,240]],door:[420,268]},
+{px:16,py:304,
+ solids:[[0,320,480,40],[130,140,40,150],[180,210,110,14],[430,140,50,180]],
+ pots:[[180,300,'G']],
+ spikes:[[300,304,60,16]],
+ gems:[[220,170],[300,140],[455,60]],door:[439,88]},
+{px:16,py:304,
+ solids:[[0,320,480,40],[150,275,32,45,1],[150,230,32,45,1],[260,140,60,150],[380,210,100,14]],
+ pots:[[60,300,'G'],[220,300,'S'],[350,300,'G']],
+ spikes:[],
+ gems:[[30,270],[200,250],[430,120]],door:[415,158]}
+];
+var lv=0,solids=[],pots=[],spikes=[],gems=[];
+var door={x:0,y:0,w:34,h:52};
+var px=16,py=304,vx=0,vy=0,pw=16,ph=16,onG=false,face=1,big=false,pendingG=false;
+var score=0,lives=3;
+var running=false,lastT=0,bannerT=0,parts=[];
+var keys={L:false,R:false,J:false},jHeld=false;
+function loadLv(n){
+  var L=LEVELS[n],i;
+  solids=[];
+  for(i=0;i<L.solids.length;i++)solids.push({x:L.solids[i][0],y:L.solids[i][1],w:L.solids[i][2],h:L.solids[i][3],crate:L.solids[i][4]===1});
+  pots=[];
+  for(i=0;i<L.pots.length;i++)pots.push({x:L.pots[i][0],y:L.pots[i][1],t:L.pots[i][2],got:false});
+  spikes=[];
+  for(i=0;i<L.spikes.length;i++)spikes.push({x:L.spikes[i][0],y:L.spikes[i][1],w:L.spikes[i][2],h:L.spikes[i][3]});
+  gems=[];
+  for(i=0;i<L.gems.length;i++)gems.push({x:L.gems[i][0],y:L.gems[i][1],got:false});
+  door.x=L.door[0];door.y=L.door[1];
+  px=L.px;py=L.py;vx=0;vy=0;face=1;
+  big=false;pendingG=false;pw=16;ph=16;bannerT=1.4;
+}
+function reset(){score=0;lives=3;lv=0;parts=[];loadLv(0);hud()}
+function hud(){
+  $i('fm').textContent=big?'大':'小';
+  $i('lv').textContent=(lv+1)+'/3';
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function rectFree(nx,ny,nw,nh){
+  for(var i=0;i<solids.length;i++){var s=solids[i];
+    if(nx<s.x+s.w&&nx+nw>s.x&&ny<s.y+s.h&&ny+nh>s.y)return false}
+  return true;
+}
+function hitSpikes(){
+  for(var i=0;i<spikes.length;i++){var s=spikes[i];
+    if(px<s.x+s.w-5&&px+pw>s.x+5&&py<s.y+s.h-6&&py+ph>s.y+6)return true}
+  return false;
+}
+function tryGrow(){
+  var nx=px+pw/2-12,ny=py+ph-40;
+  if(rectFree(nx,ny,24,40)){
+    px=nx;py=ny;pw=24;ph=40;big=true;pendingG=false;
+    burst(px+12,py+20,'#ff8fa3',10);
+  }
+}
+function drink(t){
+  if(t==='G'){
+    if(!big){pendingG=true;tryGrow()}
+  }else{
+    px=px+pw/2-8;py=py+ph-16;pw=16;ph=16;big=false;pendingG=false;
+    burst(px+8,py+8,'#4cc9f0',10);
+  }
+  hud();
+}
+function breakCrate(i){
+  var s=solids[i];
+  burst(s.x+s.w/2,s.y+s.h/2,'#c98d5a',12);
+  solids.splice(i,1);
+  score+=20;hud();
+}
+function physics(dt){
+  var i,s;
+  var acc=1500,mx=big?230:210;
+  if(keys.L){vx-=acc*dt;face=-1}
+  if(keys.R){vx+=acc*dt;face=1}
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,(onG?12:2)*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  vy+=1500*dt;if(vy>900)vy=900;
+  px+=vx*dt;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(s.crate&&big){breakCrate(i);i--;continue}
+      if(vx>0)px=s.x-pw;else if(vx<0)px=s.x+s.w;
+      vx=0;
+    }}
+  if(px<0)px=0;if(px+pw>W)px=W-pw;
+  py+=vy*dt;onG=false;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(s.crate&&big&&vy>0){breakCrate(i);i--;continue}
+      if(vy>0){py=s.y-ph;vy=0;onG=true}
+      else if(vy<0){py=s.y+s.h;vy=0}
+    }}
+  if(keys.J&&!jHeld&&onG){vy=big?-600:-470;onG=false}
+}
+function hurt(){
+  if(!running)return;
+  lives--;hud();
+  burst(px+pw/2,py+ph/2,'#ff5c5c',12);
+  if(lives<=0){lives=0;hud();endGame(false);return}
+  loadLv(lv);hud();
+}
+function endGame(win){
+  running=false;
+  if(win){score+=lives*100;hud();$i('ovt').textContent='伸缩自如!';$i('ovp').innerHTML='大与小的机关全部破解!<br>最终得分:<b>'+score+'</b>';}
+  else{$i('ovt').textContent='身材用错了地方…';$i('ovp').innerHTML='矮缝要变小,木箱要变大!<br>最终得分:<b>'+score+'</b><br>止步于第 '+(lv+1)+' 关';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(bannerT>0)bannerT-=dt;
+  if(!running)return;
+  physics(dt);
+  if(pendingG)tryGrow();
+  for(i=0;i<pots.length;i++){var q=pots[i];
+    if(q.got)continue;
+    var dx=q.x-(px+pw/2),dy=q.y-(py+ph/2);
+    if(dx*dx+dy*dy<24*24){q.got=true;drink(q.t)}
+  }
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    var gx=gm.x-(px+pw/2),gy=gm.y-(py+ph/2);
+    if(gx*gx+gy*gy<26*26){gm.got=true;score+=50;burst(gm.x,gm.y,'#ffd166',8);hud()}
+  }
+  if(px+pw>door.x&&px<door.x+door.w&&py+ph>door.y&&py<door.y+door.h){
+    score+=200;hud();
+    if(lv>=LEVELS.length-1){endGame(true);return}
+    lv++;loadLv(lv);hud();return;
+  }
+  if(hitSpikes()||py>H+60)hurt();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#241532');g.addColorStop(1,'#0c1026');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i,s;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(s.crate){
+      ctx.fillStyle='#8a5a2b';rr(s.x,s.y,s.w,s.h,3);ctx.fill();
+      ctx.strokeStyle='#c98d5a';ctx.lineWidth=2;
+      ctx.strokeRect(s.x+3,s.y+3,s.w-6,s.h-6);
+      ctx.beginPath();ctx.moveTo(s.x+3,s.y+3);ctx.lineTo(s.x+s.w-3,s.y+s.h-3);
+      ctx.moveTo(s.x+s.w-3,s.y+3);ctx.lineTo(s.x+3,s.y+s.h-3);ctx.stroke();
+    }else{
+      ctx.fillStyle='#2b3358';rr(s.x,s.y,s.w,s.h,4);ctx.fill();
+      ctx.fillStyle='#4a5688';ctx.fillRect(s.x+2,s.y,s.w-4,3);
+    }
+  }
+  ctx.fillStyle='#aab4d4';
+  for(i=0;i<spikes.length;i++){var sp=spikes[i];
+    var n=Math.max(1,Math.round(sp.w/14));
+    for(var k=0;k<n;k++){
+      var x0=sp.x+k*(sp.w/n),x1=x0+sp.w/n;
+      ctx.beginPath();ctx.moveTo(x0,sp.y+sp.h);ctx.lineTo((x0+x1)/2,sp.y);ctx.lineTo(x1,sp.y+sp.h);ctx.closePath();ctx.fill();
+    }
+  }
+  for(i=0;i<pots.length;i++){var q=pots[i];
+    if(q.got)continue;
+    var bob=Math.sin(Date.now()*0.004+i)*3;
+    ctx.fillStyle=q.t==='G'?'#ff8fa3':'#4cc9f0';
+    ctx.beginPath();ctx.arc(q.x,q.y+bob,9,0,6.28);ctx.fill();
+    ctx.fillStyle='#e8eaf6';
+    ctx.fillRect(q.x-3,q.y-13+bob,6,5);
+    ctx.fillStyle='#1a1f36';ctx.font='bold 9px system-ui';ctx.textAlign='center';
+    ctx.fillText(q.t==='G'?'大':'小',q.x,q.y+3+bob);
+  }
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    ctx.save();ctx.translate(gm.x,gm.y+Math.sin(Date.now()*0.004+i)*3);ctx.rotate(0.785);
+    ctx.fillStyle='#ffd166';ctx.fillRect(-6,-6,12,12);
+    ctx.fillStyle='#fff3c4';ctx.fillRect(-3,-3,6,6);
+    ctx.restore();
+  }
+  ctx.fillStyle='#b388ff';
+  rr(door.x,door.y,door.w,door.h,6);ctx.fill();
+  ctx.fillStyle='#1a1f36';
+  ctx.beginPath();ctx.arc(door.x+door.w/2,door.y+door.h/2,7,0,6.28);ctx.fill();
+  ctx.fillStyle=big?'#ff8fa3':'#8fd3ff';
+  rr(px,py,pw,ph,5);ctx.fill();
+  ctx.fillStyle='#081226';
+  var ez=big?7:5,es=big?5:4;
+  ctx.fillRect(px+pw*0.25,py+ez,es,es+1);
+  ctx.fillRect(px+pw*0.55,py+ez,es,es+1);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  if(bannerT>0){
+    ctx.globalAlpha=Math.min(1,bannerT);
+    ctx.fillStyle='rgba(15,18,32,.55)';ctx.fillRect(0,H/2-34,W,68);
+    ctx.fillStyle='#ffd166';ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText('第 '+(lv+1)+' 间机关房',W/2,H/2+9);
+    ctx.globalAlpha=1;
+  }
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=true;
+  if(e.code==='Space'||e.code==='ArrowUp')e.preventDefault();
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>磁力淘金跑酷</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#2e2004;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>磁力淘金跑酷</h1>
+  <p class="hint">空格/↑ 跳跃 · 按住 ↓/S 滑铲 · 触屏:点右半跳,按住左半滑铲 · 吃金币得分,拿到磁铁自动吸金币!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>金币 <b id="coin">0</b></span>
+    <span>磁铁 <b id="mag">--</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">磁力淘金跑酷</h2>
+      <p id="ovDesc">矿洞轨道上遍地黄金!高处的金币要跳起来吃,低矮通道里的金币要滑铲钻过去吃,捡到磁铁还能隔空吸金——但别撞上矿石!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elCoin=$("coin"),elMag=$("mag"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s430");
+var state="menu",dist,score,coins,speed,items,px,py,vy,grounded,jumpHeld,slideHeld,sliding,nextGap,magT,coinN;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;coins=[];speed=300;items=[];px=90;py=GY-42;vy=0;grounded=true;
+  jumpHeld=false;slideHeld=false;sliding=false;nextGap=380;magT=0;coinN=0;
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elCoin.textContent=coinN;
+  elMag.textContent=magT>0?magT.toFixed(1)+"s":"--";
+}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;sliding=false;}
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s430",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="淘金路上撞了矿车,金子撒了一地。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+"(金币 "+coinN+") · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function pbox(){
+  if(sliding)return{x:px-8,y:GY-20,w:44,h:20};
+  return{x:px+2,y:py+2,w:22,h:38};
+}
+function circleHit(cx,cy,r,b){
+  var nx=Math.max(b.x,Math.min(cx,b.x+b.w));
+  var ny=Math.max(b.y,Math.min(cy,b.y+b.h));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var s=dt/1000,i,j,o,c,b;
+  speed=Math.min(560,300+dist*0.016);
+  dist+=speed*s;
+  sliding=grounded&&slideHeld;
+  if(!grounded){
+    var g=2200;
+    if(vy<0&&jumpHeld)g=1150;
+    vy+=g*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  if(magT>0)magT=Math.max(0,magT-s);
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var r=Math.random(),startX=W+40;
+    if(r<0.4){
+      items.push({type:"rock",x:startX,w:26,h:34,y:0});
+      for(j=0;j<4;j++)coins.push({x:startX-20+j*30,y:GY-88-Math.sin(j/3*Math.PI)*36,taken:false});
+    }else if(r<0.7){
+      items.push({type:"bar",x:startX,w:110,h:0,y:0});
+      for(j=0;j<4;j++)coins.push({x:startX+14+j*26,y:GY-14,taken:false});
+    }else{
+      for(j=0;j<4;j++)coins.push({x:startX+j*28,y:GY-24,taken:false});
+      if(Math.random()<0.4)items.push({type:"rock",x:startX+150,w:24,h:30,y:0});
+    }
+    if(Math.random()<0.16)items.push({type:"magnet",x:startX+260,y:GY-95,taken:false});
+    nextGap=330+Math.random()*240;
+  }
+  b=pbox();
+  for(i=items.length-1;i>=0;i--){
+    o=items[i];o.x-=speed*s;
+    if(o.x<-160){items.splice(i,1);continue;}
+    if(o.type==="magnet"){
+      if(!o.taken&&circleHit(o.x,o.y,13,b)){
+        o.taken=true;magT=6;score+=50;
+      }
+    }else{
+      var oy=o.type==="bar"?136:GY-o.h;
+      var oh=o.type==="bar"?96:o.h;
+      if(o.type==="bar")oh=90;
+      if(b.x+b.w>o.x+3&&b.x<o.x+(o.w||26)-3&&b.y+b.h>oy+3&&b.y<oy+oh-3){gameOver();return;}
+    }
+  }
+  for(i=coins.length-1;i>=0;i--){
+    c=coins[i];c.x-=speed*s;
+    if(c.x<-30){coins.splice(i,1);continue;}
+    if(magT>0){
+      var dx=b.x+b.w/2-c.x,dy=b.y+b.h/2-c.y,dd=Math.sqrt(dx*dx+dy*dy);
+      if(dd<150&&dd>1){
+        c.x+=dx/dd*430*s;c.y+=dy/dd*430*s;
+      }
+    }
+    if(circleHit(c.x,c.y,11,b)){
+      coins.splice(i,1);coinN++;score+=15;
+    }
+  }
+  score+=Math.round(speed*s*0.05);
+  updateHud();
+}
+function drawCoin(c){
+  ctx.fillStyle="#fbbf24";
+  ctx.beginPath();ctx.arc(c.x,c.y,9,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#fde68a";
+  ctx.beginPath();ctx.arc(c.x-2,c.y-2,4,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#b47a10";
+  ctx.beginPath();ctx.arc(c.x,c.y,9,0,Math.PI*2);ctx.stroke();
+}
+function draw(){
+  var i,o,grd,mt;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#1d1626");grd.addColorStop(1,"#2a2032");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(251,191,36,.06)";
+  for(i=0;i<10;i++)ctx.fillRect((i*137+dist*0.1%W+W)%W,(i*83)%180+10,44,44);
+  ctx.fillStyle="#2c2438";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#fbbf24";ctx.globalAlpha=0.35;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%70;
+  ctx.fillStyle="rgba(255,255,255,.07)";
+  for(i=0;i<11;i++)ctx.fillRect(i*70-dsh,GY+14,32,3);
+  for(i=0;i<items.length;i++){
+    o=items[i];
+    if(o.type==="rock"){
+      ctx.fillStyle="#6b6455";
+      rr(o.x,GY-o.h,o.w,o.h,5);ctx.fill();
+      ctx.fillStyle="#544e42";
+      ctx.fillRect(o.x+4,GY-o.h+5,o.w-8,4);
+    }else if(o.type==="bar"){
+      ctx.fillStyle="#4c4360";
+      ctx.fillRect(o.x,0,o.w,12);
+      ctx.fillStyle="#7a6f92";
+      ctx.fillRect(o.x,136,o.w,8);
+      ctx.fillStyle="#8f84a8";
+      ctx.fillRect(o.x,12,o.w,4);
+    }else if(!o.taken){
+      mt=Math.sin(dist*0.02+o.x*0.05)*4;
+      ctx.strokeStyle="#f87171";ctx.lineWidth=6;
+      ctx.beginPath();ctx.arc(o.x,o.y+mt,11,Math.PI*0.15,Math.PI*0.85,true);ctx.stroke();
+      ctx.lineWidth=1;
+      ctx.fillStyle="#fef2f2";
+      ctx.fillRect(o.x-12,o.y+mt-2,7,7);
+      ctx.fillRect(o.x+5,o.y+mt-2,7,7);
+      if(magT>0){
+        ctx.strokeStyle="rgba(248,113,113,.35)";
+        ctx.beginPath();ctx.arc(px+13,py+21,150,0,Math.PI*2);ctx.stroke();
+      }
+    }
+  }
+  for(i=0;i<coins.length;i++)drawCoin(coins[i]);
+  if(sliding){
+    ctx.fillStyle="#fbbf24";
+    rr(px-8,GY-18,42,16,7);ctx.fill();
+    ctx.fillStyle="#2e2004";
+    ctx.fillRect(px+22,GY-15,6,3);
+  }else{
+    ctx.fillStyle="#fbbf24";
+    rr(px,py+12,26,28,6);ctx.fill();
+    rr(px+7,py,19,17,5);ctx.fill();
+    ctx.fillStyle="#2e2004";
+    ctx.fillRect(px+16,py+5,3,4);
+    ctx.fillStyle="#d99a1b";
+    ctx.fillRect(px+4,py+38,8,5);ctx.fillRect(px+15,py+38,8,5);
+  }
+  if(magT>0){
+    ctx.fillStyle="rgba(248,113,113,.9)";
+    ctx.beginPath();ctx.arc(px+36,py-6,5,0,Math.PI*2);ctx.fill();
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function jumpKey(k){return k===" "||k==="ArrowUp"||k==="w"||k==="W";}
+function slideKey(k){return k==="ArrowDown"||k==="s"||k==="S";}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(jumpKey(k)){jumpHeld=true;if(!e.repeat)doJump();}
+  if(slideKey(k))slideHeld=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(jumpKey(k))jumpHeld=false;
+  if(slideKey(k))slideHeld=false;
+});
+function zoneJump(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientX-rect.left)>rect.width*0.45;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  if(zoneJump(t)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();jumpHeld=false;slideHeld=false;},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  if(zoneJump(e)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+});
+document.addEventListener("mouseup",function(){jumpHeld=false;slideHeld=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

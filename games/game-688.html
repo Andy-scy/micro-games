@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>凌空垫球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>凌空垫球</h1>
+  <p class="tips">点击气球把它垫向空中,别让它落地!风力会不断把气球吹偏,每次垫球都更难,看你能连续垫多少下。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">垫球次数</div><div class="big" id="bn">0</div></div>
+      <div class="stat"><div class="mut">最高纪录</div><div class="big" id="bs">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">凌空垫球</h2><p id="ovp">玩法说明:<br>· 气球受重力下坠,风把它左右乱吹<br>· 点击气球即可把它向上垫起,点侧面还会横向弹开<br>· 气球落地一次 -1 条生命,共 3 条<br>· 每垫 10 下风力和重力都会增强<br>· 冲击最高连续垫球纪录吧!</p><button class="btn" id="obtn">开始垫球</button></div></div>
+<script>
+'use strict';
+var W=420,H=520,FLOOR=500;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var b={x:210,y:200,vx:0,vy:0,r:27};
+var bounces=0,best=0,lives=3;
+var wind=0,windT=0,grav=240,running=false,lastT=0;
+var parts=[],floats=[],flashT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('bn').textContent=bounces;
+  $i('bs').textContent=best;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function reset(){
+  bounces=0;lives=3;grav=240;parts=[];floats=[];flashT=0;
+  b={x:210,y:180,vx:rnd(-30,30),vy:0,r:27};
+  wind=0;windT=0;
+  upd();
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(40,160);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+function hit(p){
+  var dx=p.x-b.x,dy=p.y-b.y;
+  return dx*dx+dy*dy<=(b.r+10)*(b.r+10);
+}
+function bounce(p){
+  var off=(p.x-b.x)/b.r;
+  b.vy=-Math.min(560,330+bounces*3);
+  b.vx+=off*160;
+  if(b.vx>260)b.vx=260;if(b.vx<-260)b.vx=-260;
+  bounces++;
+  if(bounces>best)best=bounces;
+  if(bounces%10===0){
+    grav+=14;
+    addFloat(W/2,90,'风变大了!','#4cc9f0');
+  }
+  addFloat(b.x,b.y-34,''+bounces,'#ffd166');
+  burst(b.x,b.y+b.r, '#ffd166',8);
+  upd();
+}
+function drop(){
+  lives--;flashT=0.4;upd();
+  addFloat(b.x,FLOOR-16,'落地!','#ff5c5c');
+  if(lives<=0){
+    running=false;
+    $i('ovt').textContent='气球落地啦!';
+    $i('ovp').innerHTML='本局连续垫球:<b>'+bounces+'</b> 下<br>历史最高纪录:'+best+' 下';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+    return;
+  }
+  b.x=210;b.y=180;b.vx=rnd(-30,30);b.vy=0;
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=150*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+  if(flashT>0)flashT-=dt;
+  if(!running)return;
+  windT-=dt;
+  if(windT<=0){
+    windT=rnd(1.2,2.6);
+    wind=rnd(-1,1)*(60+bounces*2.2);
+  }
+  b.vy+=grav*dt;
+  b.vx+=wind*dt*0.4;
+  b.x+=b.vx*dt;b.y+=b.vy*dt;
+  if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx)*0.85;}
+  if(b.x>W-b.r){b.x=W-b.r;b.vx=-Math.abs(b.vx)*0.85;}
+  if(b.y<b.r+4){b.y=b.r+4;b.vy=Math.abs(b.vy)*0.6;}
+  if(b.y>FLOOR-b.r){
+    burst(b.x,FLOOR,'#ff5c5c',14);
+    drop();
+  }
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,FLOOR,W,H-FLOOR);
+  ctx.strokeStyle='rgba(255,209,102,.5)';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,FLOOR);ctx.lineTo(W,FLOOR);ctx.stroke();
+  var i;
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.2832);
+  ctx.fillStyle='#ff6b9d';ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.4)';ctx.stroke();
+  ctx.beginPath();ctx.arc(b.x-b.r*0.32,b.y-b.r*0.32,b.r*0.26,0,6.2832);
+  ctx.fillStyle='rgba(255,255,255,.55)';ctx.fill();
+  ctx.beginPath();ctx.moveTo(b.x,b.y+b.r);
+  ctx.quadraticCurveTo(b.x+8,b.y+b.r+16,b.x-3,b.y+b.r+30);
+  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1.5;ctx.stroke();
+  var wl=Math.max(-1,Math.min(1,wind/200));
+  ctx.font='13px system-ui';ctx.fillStyle='#9aa3c0';
+  ctx.textAlign='left';ctx.fillText('风',16,26);
+  ctx.fillStyle='#4cc9f0';
+  ctx.fillRect(32,20,60*Math.abs(wl),8);
+  if(wl>0)ctx.fillText('→',96,28);else if(wl<0)ctx.fillText('←',16+46,28);
+  if(flashT>0){
+    ctx.globalAlpha=flashT*1.4;ctx.fillStyle='#ff5c5c';
+    ctx.fillRect(0,FLOOR,W,6);ctx.globalAlpha=1;
+  }
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e);
+  if(hit(p))bounce(p);
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星穹拖语</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#a06cd5;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#a06cd5;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a06cd5}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#a06cd5;color:#241038;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星穹拖语</h1>
+  <p class="hint">点空白消耗能量孕育星尘 · 拖动星球叠上同级星球合成<br>150 秒内拖合出「恒星」即点亮星穹!</p>
+  <div class="hud">
+    <span>能量 <b id="energy">0</b></span>
+    <span>时间 <b id="time">150</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="340" height="400"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">星穹拖语</h2>
+      <p id="ovP">星尘 → 陨石 → 彗星 → 卫星 → 行星 → 巨星 → 恒星\n拖动一颗星球放到同级星球上完成合成</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var W=340,H=400;
+var RAD=[13,18,24,30,37,44,52];
+var COL=['#9aa7c7','#b8a08a','#7fd4ff','#cdd8e3','#7ed957','#f9d71c','#ffb347'];
+var NAME=['星尘','陨石','彗星','卫星','行星','巨星','恒星'];
+var planets=[],score=0,energy=5,drag=null,timeLeft=150,state='ready',pops=[],tG=0;
+function addScore(n){score+=n;$('score').textContent=score;}
+function pop(x,y,lvl){pops.push({x:x,y:y,r:RAD[lvl],t:0,c:COL[lvl]});}
+function spawnPlanet(x,y){
+  var lvl=Math.random()<0.12?1:0;
+  var a=Math.random()*6.28,s=14+Math.random()*22;
+  planets.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,lvl:lvl});
+}
+function planetAt(x,y){
+  var i;
+  for(i=planets.length-1;i>=0;i--){
+    var p=planets[i],dx=x-p.x,dy=y-p.y;
+    if(dx*dx+dy*dy<RAD[p.lvl]*RAD[p.lvl])return i;
+  }
+  return -1;
+}
+function update(dt){
+  var i,j,p,q;
+  timeLeft-=dt;
+  if(timeLeft<=0){finish(false);return;}
+  $('time').textContent=Math.ceil(timeLeft);
+  energy=Math.min(9,energy+dt/2.2);
+  $('energy').textContent=Math.floor(energy);
+  for(i=0;i<planets.length;i++){
+    p=planets[i];
+    if(drag&&drag.i===i)continue;
+    p.x+=p.vx*dt;p.y+=p.vy*dt;
+    if(p.x<RAD[p.lvl]||p.x>W-RAD[p.lvl])p.vx=-p.vx;
+    if(p.y<RAD[p.lvl]+30||p.y>H-RAD[p.lvl])p.vy=-p.vy;
+    p.x=Math.max(RAD[p.lvl],Math.min(W-RAD[p.lvl],p.x));
+    p.y=Math.max(RAD[p.lvl]+30,Math.min(H-RAD[p.lvl],p.y));
+  }
+  for(i=0;i<pops.length;i++)pops[i].t+=dt;
+  var k=[];
+  for(i=0;i<pops.length;i++)if(pops[i].t<0.45)k.push(pops[i]);
+  pops=k;
+}
+function tryMerge(i,j){
+  var a=planets[i],b=planets[j];
+  var nl=a.lvl+1;
+  planets.splice(i,1);
+  var idx=planets.indexOf(b);
+  planets[idx]={x:b.x,y:b.y,vx:(Math.random()-0.5)*20,vy:(Math.random()-0.5)*20,lvl:nl};
+  addScore((nl+1)*30);
+  pop(b.x,b.y,nl);
+  if(nl>=6)finish(true);
+}
+function finish(win){
+  state='over';drag=null;
+  $('ovT').textContent=win?'星穹点亮!':'时间耗尽';
+  $('ovP').textContent=win?'你成功合成出了恒星,宇宙为你闪耀!':'恒星的诞生还需要一点时间……';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  planets=[];pops=[];score=0;energy=5;timeLeft=150;drag=null;
+  var i;
+  for(i=0;i<5;i++)spawnPlanet(60+Math.random()*220,90+Math.random()*260);
+  $('score').textContent='0';$('energy').textContent='5';$('time').textContent='150';
+  $('ov').classList.add('hide');state='play';
+}
+function posOf(e){
+  var t=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  var rc=cv.getBoundingClientRect();
+  return {x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};
+}
+function onDown(e){
+  if(state!=='play')return;
+  var p=posOf(e);
+  var i=planetAt(p.x,p.y);
+  if(i>=0){drag={i:i};}
+  else if(energy>=1&&planets.length<9){
+    energy-=1;spawnPlanet(p.x,p.y);
+  }
+  e.preventDefault();
+}
+function onMove(e){
+  if(state!=='play'||!drag)return;
+  var p=posOf(e);
+  var pl=planets[drag.i];
+  pl.x=Math.max(RAD[pl.lvl],Math.min(W-RAD[pl.lvl],p.x));
+  pl.y=Math.max(RAD[pl.lvl]+30,Math.min(H-RAD[pl.lvl],p.y));
+  if(e.type!=='mousemove')e.preventDefault();
+}
+function onUp(e){
+  if(state!=='play')return;
+  if(drag){
+    var a=planets[drag.i],j=-1,i;
+    for(i=0;i<planets.length;i++){
+      if(i===drag.i)continue;
+      var b=planets[i],dx=b.x-a.x,dy=b.y-a.y,rr=(RAD[a.lvl]+RAD[b.lvl])*0.8;
+      if(dx*dx+dy*dy<rr*rr){j=i;break;}
+    }
+    if(j>=0&&a.lvl===planets[j].lvl){
+      var di=drag.i;
+      drag=null;
+      tryMerge(Math.min(di,j),Math.max(di,j));
+    }else{
+      a.vx=(Math.random()-0.5)*24;a.vy=(Math.random()-0.5)*24;
+      drag=null;
+    }
+  }
+  if(e.type!=='mousemove')e.preventDefault();
+}
+$('btn').addEventListener('click',start);
+cv.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('touchstart',onDown,{passive:false});
+cv.addEventListener('touchmove',onMove,{passive:false});
+cv.addEventListener('touchend',onUp,{passive:false});
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,W,H);
+  var i,j;
+  for(i=0;i<26;i++){
+    var sx=(i*73+((i*i*37)%140))%W,sy=(i*127+((i*i*61)%230))%H;
+    ctx.fillStyle='rgba(255,255,255,'+(0.12+((i*29)%10)/40)+')';
+    ctx.fillRect(sx,sy,2,2);
+  }
+  ctx.strokeStyle='rgba(160,108,213,.35)';
+  ctx.strokeRect(1.5,1.5,W-3,H-3);
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=p.t/0.45;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r*(1+pr*1.6),0,7);
+    ctx.strokeStyle=p.c;ctx.globalAlpha=1-pr;ctx.lineWidth=3;ctx.stroke();ctx.globalAlpha=1;
+  }
+  for(i=0;i<planets.length;i++){
+    var pl=planets[i],r=RAD[pl.lvl];
+    ctx.save();
+    var g=ctx.createRadialGradient(pl.x-r*0.3,pl.y-r*0.3,r*0.2,pl.x,pl.y,r);
+    g.addColorStop(0,'#ffffff');g.addColorStop(0.35,COL[pl.lvl]);g.addColorStop(1,'#1c2038');
+    ctx.beginPath();ctx.arc(pl.x,pl.y,r,0,7);ctx.fillStyle=g;ctx.fill();
+    if(pl.lvl>=4){
+      ctx.beginPath();ctx.ellipse(pl.x,pl.y,r*1.45,r*0.42,-0.4,0,7);
+      ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=2;ctx.stroke();
+    }
+    ctx.fillStyle='rgba(255,255,255,.92)';
+    ctx.font='700 '+Math.min(19,10+pl.lvl*1.6)+'px system-ui';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(NAME[pl.lvl],pl.x,pl.y);
+    ctx.restore();
+  }
+  if(drag){
+    var dp=planets[drag.i];
+    ctx.save();ctx.setLineDash([4,6]);ctx.strokeStyle='rgba(255,255,255,.25)';
+    ctx.beginPath();ctx.arc(dp.x,dp.y,RAD[dp.lvl]+6,0,7);ctx.stroke();ctx.restore();
+  }
+  if(state==='play'){
+    ctx.fillStyle='rgba(160,108,213,.8)';
+    ctx.font='12px system-ui';ctx.textAlign='left';
+    ctx.fillText('空位 '+planets.length+'/9 · 点空白孕育星尘(耗 1 能量)',8,H-8);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;tG+=dt;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

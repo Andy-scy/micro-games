@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>急停色轮</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:420px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+canvas{display:block;margin:0 auto;width:100%;max-width:300px}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:22px;margin-top:8px;line-height:1.6}
+#tgtchip{display:inline-block;min-width:40px;height:22px;border-radius:6px;vertical-align:-5px}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>急停色轮</h1>
+  <p class="tips">六色转盘越转越快!在指针位于目标色扇区时按下「急停」。停对 +100 连击加成并加速,停错 -1 生命(共 3 条)。成功 10 次通关。操作:按钮 / 空格 / 点转盘。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">成功</div><div class="big" id="win">0/10</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:8px"><span class="mut">目标:</span><span id="tgtchip"></span><b id="tgtn" style="font-size:16px"></b></div>
+    <canvas id="cv" width="300" height="300"></canvas>
+    <div class="row" style="margin-top:10px"><button class="btn" id="stop">急 停 !</button></div>
+    <div id="msg">按 空格 或点「急停」让指针留在目标色里!</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">急停色轮</h2><p id="ovp">玩法:六色转盘匀速旋转,顶部金色指针固定不动。<br>· 记住目标色,当指针扫过目标扇区时按下急停<br>· 停对:+100+连击加成,转盘提速<br>· 停错:-1 生命,共 3 条命<br>· 成功 10 次通关;越到后面转速越快,考验动态视力!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var SECT=[['红','#ff5c5c'],['橙','#ff9f43'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var a=0,omega=260,mode='idle',targetIdx=0,lives=3,score=0,combo=0,wins=0;
+var decT=0,resT=0,evaluated=false,playing=false,over=false,last=0;
+function $(id){return document.getElementById(id)}
+function draw(){
+  var c=$('cv').getContext('2d');
+  c.clearRect(0,0,300,300);
+  c.save();c.translate(150,150);
+  for(var i=0;i<6;i++){
+    var a0=(i*60+a-90)*Math.PI/180,a1=a0+60*Math.PI/180;
+    c.beginPath();c.moveTo(0,0);c.arc(0,0,128,a0,a1);c.closePath();
+    c.fillStyle=SECT[i][1];c.fill();
+    c.strokeStyle='#0f1220';c.lineWidth=3;c.stroke();
+  }
+  c.beginPath();c.arc(0,0,52,0,Math.PI*2);
+  c.fillStyle='#141933';c.fill();
+  c.strokeStyle=SECT[targetIdx][1];c.lineWidth=4;c.stroke();
+  c.fillStyle=SECT[targetIdx][1];
+  c.font='bold 30px system-ui,sans-serif';
+  c.textAlign='center';c.textBaseline='middle';
+  c.fillText(SECT[targetIdx][0],0,0);
+  c.restore();
+  c.fillStyle='#ffd166';
+  c.beginPath();c.moveTo(138,4);c.lineTo(162,4);c.lineTo(150,34);c.closePath();c.fill();
+}
+function drawTop(){
+  $('win').textContent=wins+'/10';
+  $('sc').textContent=score;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+}
+function setTargetDom(){
+  $('tgtchip').style.background=SECT[targetIdx][1];
+  $('tgtn').textContent=SECT[targetIdx][0];
+  $('tgtn').style.color=SECT[targetIdx][1];
+}
+function resolve(){
+  var u=((360-a)%360+360)%360;
+  var idx=Math.floor(u/60);
+  if(idx===targetIdx){
+    wins++;combo++;
+    score+=100+combo*10;
+    omega=Math.min(560,omega+28);
+    $('msg').textContent='漂亮!正中'+SECT[idx][0]+'色扇区!';
+  }else{
+    lives--;combo=0;
+    $('msg').textContent='停在了'+SECT[idx][0]+'色,-1 生命……';
+  }
+  mode='result';resT=0;
+  drawTop();
+}
+function nextRound(){
+  if(wins>=10){finish(true);return;}
+  if(lives<=0){finish(false);return;}
+  targetIdx=Math.floor(Math.random()*6);
+  setTargetDom();
+  mode='idle';evaluated=false;decT=0;
+  $('msg').textContent='盯紧指针,在'+SECT[targetIdx][0]+'色处急停!';
+}
+function press(){
+  if(!playing||over||mode!=='idle')return;
+  mode='stopping';decT=0;
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'指尖急停,十发十中!':'轮盘不遂人愿…';
+  $('ovp').innerHTML=(win?'10 次急停全部命中!':'最终 ')+ '得分 <b>'+score+'</b> · 成功 <b>'+wins+'</b> 次<br>预判扇区提前半拍按键,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('stop').addEventListener('click',press);
+$('cv').addEventListener('click',press);
+$('cv').addEventListener('touchstart',function(e){e.preventDefault();press()},{passive:false});
+document.addEventListener('keydown',function(e){
+  if(e.code==='Space'&&!e.repeat){e.preventDefault();press();}
+});
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    if(mode==='idle'){
+      a=(a+omega*dt)%360;
+    }else if(mode==='stopping'){
+      decT+=dt;
+      var k=Math.min(1,decT/0.45);
+      a=(a+omega*(1-k)*dt)%360;
+      if(k>=1&&!evaluated){evaluated=true;resolve();}
+    }else if(mode==='result'){
+      resT+=dt;
+      if(resT>=1)nextRound();
+    }
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+function startGame(){
+  a=0;omega=260;lives=3;score=0;combo=0;wins=0;
+  playing=true;over=false;evaluated=false;
+  targetIdx=Math.floor(Math.random()*6);
+  setTargetDom();drawTop();
+  $('msg').textContent='盯紧指针,在'+SECT[targetIdx][0]+'色处急停!';
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+setTargetDom();drawTop();draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

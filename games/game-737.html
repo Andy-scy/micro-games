@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双向隧道</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#241a4d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双向隧道</h1>
+  <p class="hint">← → 或 A D 左右移动 · 触屏按住左右半屏 · 空格开始</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>距离 <b id="dist">0 m</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双向隧道</h2>
+      <p id="ovDesc">狭窄隧道双向通车:左半幅车辆迎面冲来,右半幅是慢吞吞的同向货车,顶部还有落石!虚影圆圈是落石预警,冲出 1000 米即可驶出隧道。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">驶入隧道</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elDist=$("dist"),elBest=$("best");
+var LANES=[128,203,278,353],CARY=H-130,V=340;
+var COLORS=["#e05252","#5297e0","#7ed957","#e0a052","#52d9c7","#c07ee0"];
+var state="menu",best=0;
+try{best=parseInt(localStorage.getItem("mg_737")||"0",10)||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg_737",String(best));}catch(e){}}
+var px,cars,rocks,dist,score,oncT,sameT,rockT,keys,touchDir,flashRed;
+function reset(){
+  px=240;cars=[];rocks=[];dist=0;score=0;oncT=1;sameT=2;rockT=2.5;keys={};touchDir=0;flashRed=0;
+  elScore.textContent="0";elDist.textContent="0 m";elBest.textContent=best;
+}
+function endGame(title,win){
+  state="over";
+  if(score>best){best=score;saveBest();elBest.textContent=best;}
+  ovTitle.textContent=title;
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=win?"前方就是出口的阳光!":"迎面车道快得吓人,能在右幅慢慢蹭就别逞强。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 距离 "+Math.floor(dist/30)+" m · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");ovTitle.style.color="#a78bfa";}
+function spawnCar(onc){
+  var ln=onc?(((Math.random()*2)|0)):2+((Math.random()*2)|0);
+  cars.push({x:LANES[ln],y:-90,color:COLORS[(Math.random()*COLORS.length)|0],onc:onc});
+}
+function update(dt){
+  var i,st;
+  st=(keys.right?1:0)-(keys.left?1:0);
+  if(touchDir!==0)st=touchDir;
+  px+=st*300*dt;
+  if(px<106){px=106;}
+  if(px>374){px=374;}
+  dist+=V*dt;
+  score=Math.floor(dist/30);
+  elScore.textContent=score;
+  elDist.textContent=Math.floor(dist/30)+" m";
+  oncT-=dt;sameT-=dt;rockT-=dt;
+  if(oncT<=0){spawnCar(true);oncT=0.6+Math.random()*0.35;}
+  if(sameT<=0){spawnCar(false);sameT=1.2+Math.random()*0.7;}
+  if(rockT<=0){
+    rocks.push({x:LANES[(Math.random()*4)|0],sy:-40,warn:0.75});
+    rockT=2+Math.random()*1.4;
+  }
+  for(i=cars.length-1;i>=0;i--){
+    var c=cars[i];
+    c.y+=(c.onc?V+240:V-120)*dt;
+    if(c.y>H+140){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<34&&Math.abs(c.y-CARY)<60){endGame(c.onc?"迎面相撞!":"追尾了!",false);return;}
+  }
+  for(i=rocks.length-1;i>=0;i--){
+    var r=rocks[i];
+    if(r.warn>0){r.warn-=dt;continue;}
+    r.sy+=V*dt;
+    if(r.sy>H+60){rocks.splice(i,1);continue;}
+    if(Math.abs(r.sy-CARY)<26&&Math.abs(r.x-px)<30){endGame("被落石击中!",false);return;}
+  }
+  flashRed=Math.max(0,flashRed-dt);
+  if(dist>=30000){endGame("驶出隧道!",true);return;}
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawCar(x,y,body,flip){
+  ctx.save();ctx.translate(x,y);
+  if(flip)ctx.rotate(Math.PI);
+  rr(-17,-31,34,62,7);ctx.fillStyle=body;ctx.fill();
+  rr(-11,-20,22,18,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(10,12,22,0.9)";
+  ctx.fillRect(-21,-25,4,12);ctx.fillRect(17,-25,4,12);
+  ctx.fillRect(-21,13,4,12);ctx.fillRect(17,13,4,12);
+  ctx.fillStyle="rgba(255,240,180,0.9)";ctx.fillRect(-10,-31,6,3);ctx.fillRect(4,-31,6,3);
+  ctx.restore();
+}
+function draw(){
+  var i,k,k0,k1,w,sy,tex;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#171b2c";ctx.fillRect(0,0,W,H);
+  tex=(dist*0.5)%36;
+  ctx.fillStyle="#222742";
+  for(k=-1;k<H/36+2;k++){ctx.fillRect(0,k*36+tex-36,84,3);ctx.fillRect(396,k*36+tex-36,84,3);}
+  ctx.fillStyle="#20243e";ctx.fillRect(90,0,300,H);
+  ctx.fillStyle="#c7cbe8";ctx.fillRect(88,0,4,H);ctx.fillRect(388,0,4,H);
+  ctx.fillStyle="#f6d35c";ctx.fillRect(238,0,4,H);
+  k0=Math.floor((dist-160)/260);k1=Math.ceil((dist+CARY+160)/260);
+  for(k=k0;k<=k1;k++){
+    w=k*260+130;sy=CARY-(w-dist);
+    if(sy<-30||sy>H+30)continue;
+    var lx=k%2===0?104:376;
+    ctx.fillStyle="rgba(255,230,150,0.16)";ctx.beginPath();ctx.arc(lx,sy,26,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#ffe696";ctx.beginPath();ctx.arc(lx,sy,5,0,Math.PI*2);ctx.fill();
+  }
+  for(i=0;i<rocks.length;i++){
+    var r=rocks[i];
+    if(r.warn>0){
+      if(Math.floor(r.warn*10)%2===0){
+        ctx.strokeStyle="rgba(248,113,113,0.8)";ctx.lineWidth=2;ctx.setLineDash([6,5]);
+        ctx.beginPath();ctx.arc(r.x,40,22,0,Math.PI*2);ctx.stroke();
+        ctx.setLineDash([]);ctx.lineWidth=1;
+      }
+      continue;
+    }
+    ctx.fillStyle="#6b7280";ctx.beginPath();ctx.arc(r.x,r.sy,19,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#8b93a8";ctx.beginPath();ctx.arc(r.x-5,r.sy-5,8,0,Math.PI*2);ctx.fill();
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].color,cars[i].onc);
+  drawCar(px,CARY,"#a78bfa",false);
+  var g=ctx.createLinearGradient(0,0,0,170);
+  g.addColorStop(0,"rgba(4,6,14,0.72)");g.addColorStop(1,"rgba(4,6,14,0)");
+  ctx.fillStyle=g;ctx.fillRect(90,0,300,170);
+  if(flashRed>0){
+    ctx.strokeStyle="rgba(248,113,113,"+flashRed+")";ctx.lineWidth=6;
+    ctx.strokeRect(3,3,W-6,H-6);ctx.lineWidth=1;
+  }
+  if(30000-dist>0&&30000-dist<700){
+    var fy=CARY-(30000-dist);
+    ctx.fillStyle="#4ade80";ctx.fillRect(90,fy-8,300,8);
+    ctx.fillStyle="#4ade80";ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    ctx.fillText("隧道出口",240,fy-14);
+  }
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();keys.left=true;}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();keys.right=true;}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keys.left=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keys.right=false;
+});
+function tdir(t){
+  var rc=cv.getBoundingClientRect();
+  return (t.clientX-rc.left)<rc.width/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state==="playing")touchDir=tdir(e.changedTouches[0]);
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state==="playing")touchDir=tdir(e.changedTouches[0]);
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){touchDir=0;e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

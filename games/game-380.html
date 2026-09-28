@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节拍深渊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#c084fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#c084fc;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#c084fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#c084fc;color:#20083a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>节拍深渊</h1>
+  <p class="hint">光点沿六条辐条坠入深渊核心 · 白=敲 红=忍 金=连敲两下 · 空格 / 点击 / 触屏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>速度 <b id="bpm">84</b></span>
+    <span>生命 <b id="life">3</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">节拍深渊</h2>
+      <p id="ovDesc">六条辐条上的光点正坠向深渊核心,抵达即一拍:
+白点:抵达时敲击!
+红点:禁拍,忍住不敲反而加分;
+金点:要在一拍内连敲两下!
+越到深处节奏越快、花样越多,错 3 次坠入深渊。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elBpm=$("bpm"),elLife=$("life");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,CX=240,CY=300,CORE=44,R0=250,SPOKES=6;
+var BPM0=84,BPMAX=160;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g380");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sTick(){noiseHit(0.04,0.07,6000);}
+function sHit(per){tone("triangle",per?840:620,per?1300:620,0.11,0.22);}
+function sGold(){tone("triangle",660,660,0.08,0.2);}
+function sRest(){tone("sine",330,330,0.1,0.12);}
+function sBad(){tone("sawtooth",190,80,0.28,0.24);}
+
+var state="menu",bpm,notes,pops,score,combo,life,maxCombo,beatNo,nextBeat,depth;
+function beatInt(){return 60000/bpm;}
+function reset(){
+  bpm=BPM0;notes=[];pops=[];
+  score=0;combo=0;life=3;maxCombo=0;beatNo=0;depth=0;
+  nextBeat=performance.now()+1800;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elBpm.textContent=Math.round(bpm);
+  elLife.textContent=life;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function spokeXY(s,r){
+  var a=-Math.PI/2+s*Math.PI*2/SPOKES;
+  return {x:CX+Math.cos(a)*r,y:CY+Math.sin(a)*r};
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g380",best);}
+  upd();
+  ovTitle.textContent="坠入深渊";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="抵达第 "+depth+" 层 · 最高连击 "+maxCombo+"\n白敲红忍金双击,记住口诀再来!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function pickType(){
+  var r=Math.random();
+  if(beatNo<16)return 0;
+  if(beatNo<32)return r<0.28?1:0;
+  if(beatNo<48)return r<0.26?1:(r<0.42?2:0);
+  return r<0.24?1:(r<0.4?2:0);
+}
+function schedule(now){
+  if(now-nextBeat>4000)nextBeat=now+400;
+  while(now>=nextBeat){
+    beatNo++;
+    if(beatNo%16===0&&bpm<BPMAX)bpm=Math.min(BPMAX,bpm+4);
+    depth=Math.floor(beatNo/16)+1;
+    var ap=beatInt()*2;
+    var s1=(Math.random()*SPOKES)|0;
+    notes.push({spoke:s1,t:nextBeat,ap:ap,type:pickType(),first:0,done:false});
+    if(beatNo>=48&&Math.random()<0.4){
+      var s2=(s1+1+((Math.random()*(SPOKES-1))|0))%SPOKES;
+      notes.push({spoke:s2,t:nextBeat,ap:ap,type:pickType(),first:0,done:false});
+    }
+    sTick();
+    nextBeat+=beatInt();
+  }
+}
+function press(){
+  if(state!=="play")return;
+  var now=performance.now(),i,n,dt,bi=-1,bd=1e9,redNear=false;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    if(n.done)continue;
+    dt=now-n.t;
+    if(dt<-190||dt>190)continue;
+    if(n.type===1){redNear=true;continue;}
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0){
+    if(redNear){
+      var rn=null;
+      for(i=0;i<notes.length;i++){
+        n=notes[i];
+        if(n.done||n.type!==1)continue;
+        dt=Math.abs(now-n.t);
+        if(dt<=190){rn=n;break;}
+      }
+      if(rn){
+        rn.done=true;
+        life--;combo=0;sBad();
+        var rp=spokeXY(rn.spoke,CORE+34);
+        addPop(rp.x,rp.y-30,"误触禁拍!","#f87171");
+        upd();
+        if(life<=0)gameOver();
+        return;
+      }
+    }
+    addPop(CX,CY-90,"空拍","#8b90b0");
+    return;
+  }
+  n=notes[bi];
+  var p=spokeXY(n.spoke,CORE+34);
+  if(n.type===2&&!n.first){
+    n.first=now;
+    addPop(p.x,p.y-30,"蓄力!再敲一次","#fbbf24");
+    sGold();
+    return;
+  }
+  n.done=true;
+  if(n.type===2){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=400+combo*10;
+    addPop(p.x,p.y-30,"双击!+"+(400+combo*10),"#fbbf24");
+    sGold();sHit(true);
+  }else if(Math.abs(bd)<=90){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=300+combo*10;
+    addPop(p.x,p.y-30,"完美 +"+(300+combo*10),"#fbbf24");
+    sHit(true);
+  }else{
+    combo++;score+=120;
+    addPop(p.x,p.y-30,"命中 +120","#c084fc");
+    sHit(false);
+  }
+  upd();
+}
+function update(now){
+  var i,n,p;
+  for(i=notes.length-1;i>=0;i--){
+    n=notes[i];
+    if(n.done){notes.splice(i,1);continue;}
+    p=spokeXY(n.spoke,CORE+34);
+    if(n.type===1){
+      if(now>n.t+170){
+        n.done=true;
+        score+=60;
+        addPop(p.x,p.y-30,"稳住 +60","#4ade80");
+        sRest();upd();
+      }
+      continue;
+    }
+    if(n.type===2&&n.first&&now>n.t+300){
+      n.done=true;
+      combo=0;
+      addPop(p.x,p.y-30,"半成","#8b90b0");
+      sBad();upd();
+      continue;
+    }
+    if(now>n.t+200){
+      notes.splice(i,1);
+      combo=0;life--;sBad();
+      addPop(p.x,p.y-30,"坠入深渊","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>600)pops.splice(i,1);}
+}
+function draw(now){
+  var i,n,r,k,p,pulse;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  var ap=beatInt()*2;
+  k=(nextBeat-now)/ap;
+  if(k<0)k=0;if(k>1)k=1;
+  for(i=0;i<SPOKES;i++){
+    p=spokeXY(i,R0);
+    ctx.strokeStyle="rgba(192,132,252,0.12)";
+    ctx.beginPath();ctx.moveTo(CX,CY);ctx.lineTo(p.x,p.y);ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(192,132,252,0.85)";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(CX,CY,CORE,0,Math.PI*2);ctx.stroke();ctx.lineWidth=1;
+  ctx.strokeStyle="rgba(192,132,252,0.3)";
+  ctx.beginPath();ctx.arc(CX,CY,CORE+k*26,0,Math.PI*2);ctx.stroke();
+  pulse=Math.max(0,1-(now-(nextBeat-beatInt()))/220);
+  var g=ctx.createRadialGradient(CX,CY,4,CX,CY,CORE);
+  g.addColorStop(0,"rgba(192,132,252,"+(0.5+pulse*0.4)+")");
+  g.addColorStop(1,"rgba(192,132,252,0.05)");
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.arc(CX,CY,CORE,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(139,144,176,0.9)";
+  ctx.font="bold 15px system-ui";ctx.textAlign="center";
+  ctx.fillText("第 "+depth+" 层",CX,CY+5);
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    r=R0*(n.t-now)/n.ap;
+    if(r<0)r=0;if(r>R0)r=R0;
+    p=spokeXY(n.spoke,r);
+    if(n.type===1){
+      ctx.fillStyle="#f87171";
+      ctx.beginPath();ctx.arc(p.x,p.y,13,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle="#2b0a0a";ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(p.x-6,p.y-6);ctx.lineTo(p.x+6,p.y+6);
+      ctx.moveTo(p.x+6,p.y-6);ctx.lineTo(p.x-6,p.y+6);ctx.stroke();ctx.lineWidth=1;
+    }else if(n.type===2){
+      ctx.fillStyle="#fbbf24";
+      ctx.beginPath();ctx.arc(p.x,p.y,13,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle="rgba(251,191,36,0.7)";
+      ctx.beginPath();ctx.arc(p.x,p.y,19,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle="#2b2303";
+      ctx.font="bold 13px system-ui";
+      ctx.fillText("2",p.x,p.y+5);
+    }else{
+      ctx.fillStyle="#e8eaf6";
+      ctx.beginPath();ctx.arc(p.x,p.y,12,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(11,14,26,0.65)";
+      ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  for(i=0;i<pops.length;i++){
+    var pp=pops[i],pr=(now-pp.t0)/600;
+    ctx.fillStyle=pp.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";
+    ctx.fillText(pp.txt,pp.x,pp.y-pr*24);
+    ctx.globalAlpha=1;
+  }
+}
+function onTap(){press();}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap();});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap();});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();onTap();},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    else press();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

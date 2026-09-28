@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词链不断</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:10px}
+#fill{height:100%;width:100%;background:#2ec27e;transition:width .15s linear}
+#bar.low #fill{background:#ff6b8a}
+.card{background:#151a30;border-radius:14px;padding:14px;text-align:center;margin-bottom:10px}
+#chain{font-size:14px;color:#9aa3c7;min-height:20px;margin-bottom:6px;max-height:40px;overflow:hidden}
+#last{font-size:15px;color:#8ecae6;margin-bottom:4px}
+#last b{color:#ffd166;font-size:20px}
+#input{font-size:28px;font-weight:bold;font-family:Consolas,monospace;color:#fff;min-height:40px;letter-spacing:3px}
+#msg{font-size:13px;color:#ff6b8a;min-height:18px}
+#keys{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;background:#151a30;border-radius:14px;padding:10px;margin-bottom:10px}
+.kk{border:none;border-radius:8px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit;padding:6px 0}
+.kk b{display:block;font-size:15px}
+.kk i{display:block;font-style:normal;font-size:10px;color:#7ee2a8}
+.kk.zero i{color:#5a6189}
+.kk:active{transform:scale(.95)}
+#act{display:flex;gap:10px;justify-content:center}
+#act button{padding:9px 24px;font-size:14px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+#act button.gray{background:#232a4d;color:#e8eaf6}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>词链不断</h1>
+<p id="tip">输入以上一个单词尾字母开头的英文单词完成接龙 · 键盘上数字=该字母剩余可用词数 · 每词限时 15 秒,超时扣一颗心</p>
+<div id="wrap">
+<div id="hud"><span>链长 <b id="chainN">0</b></span><span>得分 <b id="score">0</b></span><span>剩余 <b id="hp" style="color:#ff6b8a">♥♥♥</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div class="card">
+<div id="chain"></div>
+<div id="last">当前词:<b>—</b></div>
+<div id="input">_</div>
+<div id="msg"></div>
+</div>
+<div id="keys"></div>
+<div id="act"><button id="okB">提交</button><button class="gray" id="delB">删除</button></div>
+<div id="ov"><h2 id="ovT">词链不断</h2><p id="ovP">单词接龙:新词必须
+以上一个词的尾字母开头 且在词库中
+每词 15 秒 看你能接多长</p><button id="ovB">开始接龙</button></div>
+</div>
+<script>
+"use strict";
+var DICT = {
+  a:["ant","apple","arm","art","age","ace"],
+  b:["bag","ball","bank","bath","bear","best"],
+  c:["cake","call","camp","card","care","city"],
+  d:["dark","date","dawn","dear","desk","door"],
+  e:["each","earn","east","easy","echo","edge"],
+  f:["face","fact","fall","farm","fast","fear"],
+  g:["gain","game","gate","gift","girl","give"],
+  h:["hair","half","hall","hand","hard","hate"],
+  i:["ice","idea","inch","iron","item"],
+  j:["joke","jump","joy","just"],
+  k:["keep","key","kick","kind","king","kiss"],
+  l:["lake","lamp","land","lane","last","late"],
+  m:["mail","make","many","mark","meal","mind"],
+  n:["name","near","neat","neck","need","news"],
+  o:["ocean","obey","offer","oil","open","oval"],
+  p:["pace","pack","page","pain","park","part"],
+  q:["queen","quest","quiz","quick","quiet"],
+  r:["race","rain","rank","rare","rate","read"],
+  s:["safe","said","sale","salt","sand","save"],
+  t:["tail","take","tale","talk","tall","tank"],
+  u:["uncle","under","unit","upon","use","user"],
+  v:["van","vast","very","view","vote"],
+  w:["wait","wake","walk","wall","want","warm"],
+  x:[],
+  y:["yard","yarn","yawn","year","yell","yoga"],
+  z:["zero","zest","zinc","zone","zoo"]
+};
+var TURNS = 15, TAILRICH = "abdeghklmnprstwy";
+var chainN = 0, score = 0, hp = 3, tail = "", used = [], typed = "";
+var playing = false, timeLeft = TURNS, lastTs = 0, rafId = 0;
+var chainEl = document.getElementById("chain");
+var lastEl = document.getElementById("last");
+var inputEl = document.getElementById("input");
+var msgEl = document.getElementById("msg");
+var fillEl = document.getElementById("fill");
+var barEl = document.getElementById("bar");
+var keysEl = document.getElementById("keys");
+var chainNEl = document.getElementById("chainN");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+
+function availCount(l) {
+  var arr = DICT[l] || [], n = 0;
+  for (var i = 0; i < arr.length; i++) if (used.indexOf(arr[i]) < 0) n++;
+  return n;
+}
+
+function renderKeys() {
+  keysEl.innerHTML = "";
+  for (var i = 0; i < 26; i++) {
+    var l = String.fromCharCode(97 + i);
+    var b = document.createElement("button");
+    b.className = "kk" + (availCount(l) === 0 ? " zero" : "");
+    b.innerHTML = "<b>" + l.toUpperCase() + "</b><i>" + availCount(l) + "</i>";
+    b.onclick = function (ch) {
+      return function () {
+        if (playing && typed.length < 12) { typed += ch; renderInput(); }
+      };
+    }(l);
+    keysEl.appendChild(b);
+  }
+}
+
+function renderInput() {
+  inputEl.textContent = typed.length ? typed.toUpperCase() : "_";
+}
+
+function renderChain() {
+  var s = "";
+  for (var i = Math.max(0, used.length - 5); i < used.length; i++) {
+    s += used[i].toUpperCase() + " → ";
+  }
+  chainEl.textContent = s ? s.slice(0, -3) : "…";
+  lastEl.innerHTML = "当前词尾:<b>" + (tail ? tail.toUpperCase() : "—") + "</b>";
+}
+
+function randomStart() {
+  var pool = [];
+  for (var i = 0; i < TAILRICH.length; i++) {
+    var l = TAILRICH[i];
+    for (var j = 0; j < DICT[l].length; j++) {
+      var w = DICT[l][j];
+      var t = w[w.length - 1];
+      if (availCount(t) > 0 && used.indexOf(w) < 0) pool.push(w);
+    }
+  }
+  if (pool.length === 0) {
+    for (var k = 0; k < DICT.e.length; k++) if (used.indexOf(DICT.e[k]) < 0) pool.push(DICT.e[k]);
+  }
+  return pool[Math.floor(Math.random() * pool.length)] || "ease";
+}
+
+function submit() {
+  if (!playing) return;
+  var w = typed.toLowerCase();
+  if (w.length < 3) { setMsg("至少 3 个字母"); return; }
+  if (w[0] !== tail) { setMsg("必须以 " + tail.toUpperCase() + " 开头"); return; }
+  if (DICT[w[0]] && DICT[w[0]].indexOf(w) >= 0) {
+    if (used.indexOf(w) >= 0) { setMsg("这个词已经用过"); return; }
+    used.push(w);
+    tail = w[w.length - 1];
+    chainN++;
+    score += w.length;
+    chainNEl.textContent = chainN;
+    scoreEl.textContent = score;
+    typed = "";
+    timeLeft = TURNS;
+    setMsg("接上了!+" + w.length);
+    renderChain();
+    renderInput();
+    renderKeys();
+    checkDead();
+  } else {
+    setMsg("词库里没有这个词");
+  }
+}
+
+function checkDead() {
+  if (availCount(tail) === 0) {
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    if (hp <= 0) { end(); return; }
+    setMsg(tail.toUpperCase() + " 开头的词用完了,换新起点");
+    var w = randomStart();
+    used.push(w);
+    tail = w[w.length - 1];
+    renderChain();
+    renderKeys();
+  }
+}
+
+function setMsg(m) {
+  msgEl.textContent = m;
+  setTimeout(function () { if (msgEl.textContent === m) msgEl.textContent = ""; }, 1200);
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    if (hp <= 0) { end(); return; }
+    timeLeft = TURNS;
+    setMsg("超时 -1 心,继续接 " + tail.toUpperCase());
+  }
+  fillEl.style.width = (timeLeft / TURNS * 100) + "%";
+  barEl.className = timeLeft < 5 ? "low" : "";
+  rafId = requestAnimationFrame(loop);
+}
+
+function end() {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  ovT.textContent = "接龙中断";
+  ovP.textContent = "最长链 " + chainN + " 个词\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  chainN = 0; score = 0; hp = 3; used = []; typed = "";
+  chainNEl.textContent = "0";
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  var w = randomStart();
+  used.push(w);
+  tail = w[w.length - 1];
+  timeLeft = TURNS; lastTs = 0; playing = true;
+  msgEl.textContent = "";
+  renderChain();
+  renderInput();
+  renderKeys();
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+document.getElementById("okB").onclick = submit;
+document.getElementById("delB").onclick = function () { if (playing) { typed = typed.slice(0, -1); renderInput(); } };
+ovB.onclick = start;
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") submit();
+  else if (e.key === "Backspace") { if (playing) { typed = typed.slice(0, -1); renderInput(); } }
+  else {
+    var k = e.key.toLowerCase();
+    if (k.length === 1 && k >= "a" && k <= "z" && playing && typed.length < 12) {
+      typed += k;
+      renderInput();
+    }
+  }
+});
+</script>
+</body>
+</html>

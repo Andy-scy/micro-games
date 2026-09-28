@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>烟花夜空</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fde047;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fde047;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #4a3a10;background:#070a14;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(5,6,14,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fde047}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fde047;color:#422b05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>烟花夜空</h1>
+  <p class="hint">点击夜空任意位置发射烟花,炸得越绚得分越高;<br><b style="color:#fde047">2 秒内连炸</b>触发连击倍率,换着颜色炸更赚!45 秒内冲上 300 分。</p>
+  <div class="hud"><span>得分 <b id="score">0</b></span><span>目标 <b>300</b></span><span>连击 <b id="combo">0</b></span><span>时间 <b id="time">45</b>秒</span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">烟花夜空</h2>
+      <p id="ovP">烟火师大赛开幕!点击哪里,烟花就飞到哪里绽放。高频连炸有连击加成,相邻两发颜色差得远还有惊喜分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">点火</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elScore=$("score"),elCombo=$("combo"),elTime=$("time");
+var stars=[],blocks=[],i;
+for(i=0;i<70;i++)stars.push({x:Math.random()*480,y:Math.random()*380,r:Math.random()*1.4+0.4,ph:Math.random()*6,w:1+Math.random()*2});
+var bx=0;
+while(bx<480){var bw=24+Math.random()*46,bh=30+Math.random()*70;blocks.push({x:bx,w:bw,h:bh});bx+=bw+2;}
+var state="menu",score=0,timeLeft=45,combo=0,comboT=0,lastHue=-1,rockets=[],parts=[],pops=[],lastT=0;
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function launch(e){
+  if(state!=="playing")return;
+  var p=pos(e),hue=Math.random()*360;
+  rockets.push({x:Math.max(30,Math.min(450,p.x))+(Math.random()*30-15),y:470,ty:Math.max(50,Math.min(380,p.y)),vy:-(330+Math.random()*130),hue:hue});
+}
+cv.addEventListener("mousedown",launch);
+cv.addEventListener("touchstart",function(e){e.preventDefault();launch(e);},{passive:false});
+function explode(r){
+  var n=34+((Math.random()*26)|0),ring=Math.random()<0.4,k;
+  for(k=0;k<n;k++){
+    var a=k/n*Math.PI*2,sp=ring?150:60+Math.random()*180;
+    parts.push({x:r.x,y:r.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1+Math.random()*0.5,max:1.5,hue:r.hue+Math.random()*40-20});
+  }
+  if(Math.random()<0.35){
+    for(k=0;k<14;k++){
+      var a2=Math.random()*Math.PI*2,sp2=40+Math.random()*120;
+      parts.push({x:r.x,y:r.y,vx:Math.cos(a2)*sp2,vy:Math.sin(a2)*sp2,life:0.9,max:1.2,hue:r.hue+130});
+    }
+  }
+  var base=8+((Math.random()*9)|0);
+  if(lastHue<0||Math.abs(r.hue-lastHue)>60)base+=6;
+  lastHue=r.hue;
+  combo=comboT>0?Math.min(combo+1,9):1;
+  comboT=1.6;
+  var gain=base+combo*4;
+  score+=gain;
+  pops.push({x:r.x,y:r.y,txt:"+"+gain,life:1});
+  elScore.textContent=score;elCombo.textContent=combo;
+}
+function draw(dtt){
+  ctx.fillStyle="#070a14";ctx.fillRect(0,0,480,480);
+  var k;
+  for(k=0;k<stars.length;k++){
+    var st=stars[k];
+    ctx.globalAlpha=0.4+0.6*Math.abs(Math.sin(tt+st.ph));
+    ctx.fillStyle="#e8eaf6";
+    ctx.fillRect(st.x,st.y,st.r,st.r);
+  }
+  ctx.globalAlpha=1;
+  for(k=parts.length-1;k>=0;k--){
+    var p=parts[k];
+    p.life-=dtt;p.x+=p.vx*dtt;p.y+=p.vy*dtt;p.vy+=170*dtt;p.vx*=0.99;
+    if(p.life<=0){parts.splice(k,1);continue;}
+    ctx.globalAlpha=Math.max(0,p.life/p.max);
+    ctx.fillStyle="hsl("+Math.round(p.hue)+",90%,64%)";
+    ctx.fillRect(p.x-1.5,p.y-1.5,3,3);
+  }
+  ctx.globalAlpha=1;
+  for(k=rockets.length-1;k>=0;k--){
+    var r=rockets[k];
+    ctx.fillStyle="#fde047";
+    ctx.fillRect(r.x-1.5,r.y-6,3,8);
+  }
+  for(k=pops.length-1;k>=0;k--){
+    var pp=pops[k];
+    pp.life-=dtt;pp.y-=30*dtt;
+    if(pp.life<=0){pops.splice(k,1);continue;}
+    ctx.globalAlpha=Math.max(0,pp.life);
+    ctx.font="bold 16px system-ui";ctx.textAlign="center";
+    ctx.fillStyle="#fde047";
+    ctx.fillText(pp.txt,pp.x,pp.y);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="#0c0f1c";
+  for(k=0;k<blocks.length;k++){
+    var b=blocks[k];
+    ctx.fillRect(b.x,480-b.h,b.w,b.h);
+    ctx.fillStyle="rgba(253,224,71,0.25)";
+    var w2;
+    for(w2=6;w2<b.w-6;w2+=14){
+      if((b.x+w2+b.h)%3<2)ctx.fillRect(b.x+w2,480-b.h+8,4,5);
+    }
+    ctx.fillStyle="#0c0f1c";
+  }
+}
+var tt=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT)/1000;lastT=t;tt+=dt;
+  if(state!=="playing")return;
+  var k;
+  for(k=rockets.length-1;k>=0;k--){
+    var r=rockets[k];
+    r.y+=r.vy*dt;r.vy+=140*dt;
+    if(r.y<=r.ty){rockets.splice(k,1);explode(r);}
+  }
+  if(comboT>0){comboT-=dt;if(comboT<=0){combo=0;elCombo.textContent=0;}}
+  timeLeft-=dt;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  if(timeLeft<=0){timeLeft=0;finish();return;}
+  draw(dt);
+}
+function finish(){
+  state="over";
+  var win=score>=300;
+  ovT.textContent=win?"烟火之王!":"烟花熄灭";
+  ovP.textContent="45 秒里你放出了 "+Math.max(1,Math.round(score/16))+" 发烟花,共得 "+score+" 分。\n"+(win?"整座城市都为你抬头!":"目标 300 分,下次连击起来!");
+  ovS.style.display="block";ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){
+  score=0;timeLeft=45;combo=0;comboT=0;lastHue=-1;
+  rockets=[];parts=[];pops=[];
+  elScore.textContent=0;elCombo.textContent=0;elTime.textContent=45;
+  state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+});
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

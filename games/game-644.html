@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>地理之最</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#4cc9f0;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#4cc9f0}
+.tbarWrap{height:14px;background:#232a48;border-radius:7px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:7px}
+#tbar.low{background:#ff5c5c}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#4cc9f0}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#4cc9f0;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>地理之最</h1>
+  <p class="tips">共享时间池挑战:整个题组共用 100 秒,答对得 100 分+连击加成;答错或点空立即扣 8 秒并标出答案。答完 12 道"世界与中国之最",剩余时间每秒折 5 分奖励;时间耗尽则失败!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/12</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="st">0</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tl">100 秒</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">地理之最</h2><p id="ovp">· 12 道"之最"题共用一个 100 秒时间池<br>· 没有单题倒计时,想好就点,但要惜时如金<br>· 答对 +100,连击每层额外 +10<br>· 答错扣 8 秒,并标出正确答案<br>· 12 题全部答完:剩余秒数 ×5 计入总分<br>· 时间池耗尽即失败</p><button class="btn" id="obtn">开始抢答</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'世界最高峰是哪一座?',o:['珠穆朗玛峰','乔戈里峰','冈仁波齐峰','乞力马扎罗山']},
+{q:'通常公认的世界第一长河是?',o:['尼罗河','亚马逊河','长江','密西西比河']},
+{q:'世界上面积最大的大洋是?',o:['太平洋','大西洋','印度洋','北冰洋']},
+{q:'世界上面积最大的大洲是?',o:['亚洲','非洲','北美洲','南美洲']},
+{q:'世界上面积最大的热沙漠是?',o:['撒哈拉沙漠','阿拉伯沙漠','戈壁沙漠','卡拉哈里沙漠']},
+{q:'世界上最深的海沟是?',o:['马里亚纳海沟','汤加海沟','爪哇海沟','波多黎各海沟']},
+{q:'世界上面积最大的岛屿是?',o:['格陵兰岛','马达加斯加岛','加里曼丹岛','冰岛']},
+{q:'世界上最长的山脉是?',o:['安第斯山脉','喜马拉雅山脉','阿尔卑斯山脉','落基山脉']},
+{q:'世界上面积最大的淡水湖是?',o:['苏必利尔湖','维多利亚湖','贝加尔湖','密歇根湖']},
+{q:'世界上最深的淡水湖是?',o:['贝加尔湖','坦噶尼喀湖','苏必利尔湖','纳木错']},
+{q:'世界上水量(流量)最大的河流是?',o:['亚马逊河','尼罗河','长江','刚果河']},
+{q:'世界海拔最高的高原是?',o:['青藏高原','帕米尔高原','云贵高原','巴西高原']},
+{q:'世界上面积最大的平原是?',o:['亚马逊平原','东欧平原','西西伯利亚平原','华北平原']},
+{q:'按常见教材说法,世界最大的盆地是?',o:['刚果盆地','塔里木盆地','准噶尔盆地','巴黎盆地']},
+{q:'中国面积最大的岛屿是?',o:['台湾岛','海南岛','崇明岛','舟山岛']},
+{q:'中国最长的河流是?',o:['长江','黄河','珠江','黑龙江']},
+{q:'中国最大的淡水湖是?',o:['鄱阳湖','洞庭湖','太湖','青海湖']},
+{q:'中国最大的咸水湖是?',o:['青海湖','鄱阳湖','纳木错','洞庭湖']},
+{q:'中国面积最大的沙漠是?',o:['塔克拉玛干沙漠','古尔班通古特沙漠','巴丹吉林沙漠','毛乌素沙漠']},
+{q:'中国纬度最高的省会城市是?',o:['哈尔滨','长春','沈阳','乌鲁木齐']},
+{q:'世界上面积最大的半岛是?',o:['阿拉伯半岛','印度半岛','中南半岛','巴尔干半岛']},
+{q:'世界最深的峡谷是?',o:['雅鲁藏布大峡谷','科罗拉多大峡谷','虎跳峡','怒江大峡谷']},
+{q:'世界上最大的珊瑚礁群是?',o:['大堡礁','伯利兹堡礁','马尔代夫环礁','红海珊瑚礁']},
+{q:'世界上落差最大的瀑布是?',o:['安赫尔瀑布','维多利亚瀑布','尼亚加拉瀑布','黄果树瀑布']},
+{q:'世界上面积最大的国家是?',o:['俄罗斯','加拿大','中国','美国']},
+{q:'世界上面积最大的内陆国是?',o:['哈萨克斯坦','蒙古','乍得','玻利维亚']},
+{q:'中国面积最大的省级行政区是?',o:['新疆','西藏','内蒙古','青海']},
+{q:'世界上最长的古代运河是?',o:['京杭大运河','苏伊士运河','巴拿马运河','伊利运河']},
+{q:'世界上最大的群岛国家是?',o:['印度尼西亚','菲律宾','日本','马尔代夫']},
+{q:'中国陆地海拔最低点位于哪个盆地?',o:['吐鲁番盆地','准噶尔盆地','柴达木盆地','四川盆地']}
+];
+var N=12,POOL=100,PEN=8;
+var quiz=[],idx=0,score=0,streak=0,playing=false,over=false,locked=false,pool=POOL,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function paintPool(){
+  var pc=Math.max(0,pool)/POOL*100;
+  var bar=$('tbar');
+  bar.style.width=pc+'%';
+  bar.className=pool<=20?'low':'';
+  $('tl').textContent=Math.max(0,Math.ceil(pool))+' 秒';
+}
+function startGame(){
+  S++;idx=0;score=0;streak=0;over=false;playing=true;locked=false;pool=POOL;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('st').textContent='0';$('pg').textContent='0/'+N;
+  $('overlay').classList.add('hide');
+  paintPool();
+  showQ();
+}
+function showQ(){
+  var it=quiz[idx];
+  locked=false;
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  resolve(btn.dataset.ok==='1',btn);
+}
+function resolve(good,btn){
+  locked=true;
+  var btns=$('opts').children,i;
+  if(good){
+    streak++;
+    var gain=100+Math.min(streak-1,8)*10;
+    score+=gain;
+    if(btn)btn.classList.add('ok');
+    $('msg').textContent='答对了!+'+gain+' 分';
+  }else{
+    streak=0;pool-=PEN;paintPool();
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent='答错了,扣 8 秒!正确答案已标出';
+  }
+  $('sc').textContent=score;$('st').textContent=streak;
+  schedule(function(){
+    if(!playing||over)return;
+    idx++;
+    if(idx>=N){finish(true);return;}
+    showQ();
+  },1100);
+}
+function finish(win){
+  playing=false;over=true;
+  if(win){
+    var bonus=Math.round(Math.max(0,pool))*5;
+    score+=bonus;
+    $('ovt').textContent='通关!抢时成功';
+    $('ovp').innerHTML='12 道"之最"全部完成<br>时间奖励 +'+bonus+' 分<br>最终得分 <b>'+score+'</b> 分';
+  }else{
+    $('ovt').textContent='时间耗尽…';
+    $('ovp').innerHTML='止步第 '+(idx+1)+' 题<br>最终得分 <b>'+score+'</b> 分<br>少犹豫、快决断,再来一局!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    pool-=dt;
+    paintPool();
+    if(pool<=0){finish(false);}
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星舰倒计时</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#60a5fa;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#stage{background:#0b1022;border:1px solid #2e3554;border-radius:12px;padding:12px;margin-bottom:8px;text-align:center}
+#stgName{font-size:15px;font-weight:700;color:#93c5fd}
+#cd{font-size:34px;font-weight:800;color:#e8eaf6;font-variant-numeric:tabular-nums;line-height:1.2}
+#cd.warn{color:#f87171}
+#fuelBar{height:20px;background:#111632;border-radius:10px;overflow:hidden;margin:8px 0 4px;position:relative;border:1px solid #2e3554}
+#fuelFill{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#60a5fa)}
+#fuelTxt{font-size:12px;color:#8b90b0}
+#altBar{height:12px;background:#111632;border-radius:6px;overflow:hidden;margin-top:8px;border:1px solid #2e3554}
+#altFill{height:100%;width:0;background:linear-gradient(90deg,#7c3aed,#c4b5fd)}
+#altTxt{font-size:11.5px;color:#8b90b0;margin-top:3px}
+.acts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:8px}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+.btn.red{background:#7f1d1d;color:#fecaca;border-color:#b91c1c;display:none}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#60a5fa;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星舰倒计时</h1>
+  <p class="hint">倒计时结束前把燃料加满并点火 · 连点「加注」或按空格 · 燃料泄漏要立刻「堵漏」 · 点燃三级引擎即胜利</p>
+  <div class="hud">
+    <span>阶段 <b id="hStage">1</b>/3</span>
+    <span>工程点 <b id="hEp">0</b></span>
+    <span>每次加注 <b id="hPump">2</b></span>
+    <span>自动加注 <b id="hValve">0</b>/秒</span>
+  </div>
+  <div id="msg"></div>
+  <div id="stage">
+    <div id="stgName">一级助推器</div>
+    <div id="cd">40.0</div>
+    <div id="fuelBar"><div id="fuelFill"></div></div>
+    <div id="fuelTxt">燃料 0 / 120</div>
+    <div id="altBar"><div id="altFill"></div></div>
+    <div id="altTxt">总进度 0%</div>
+  </div>
+  <div class="acts">
+    <button class="btn gold" id="btnFuel">加注燃料</button>
+    <button class="btn" id="btnLaunch" disabled>点火升空</button>
+    <button class="btn red" id="btnFix">堵漏!</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">星舰倒计时</h2>
+    <p id="ovDesc">三级火箭逐级点火:每级倒计时内把燃料条加满,按下「点火」才能进入下一级。超时则发射中止,只能拿到安慰性工程点。用工程点升级泵组、自动阀与液冷罐,泄漏警报响起时第一时间堵漏!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">进入发射塔</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elStage=$("hStage"),elEp=$("hEp"),elPump=$("hPump"),elValve=$("hValve"),elMsg=$("msg");
+var stgName=$("stgName"),cd=$("cd"),fuelFill=$("fuelFill"),fuelTxt=$("fuelTxt"),altFill=$("altFill"),altTxt=$("altTxt");
+var btnFuel=$("btnFuel"),btnLaunch=$("btnLaunch"),btnFix=$("btnFix"),shopEl=$("shop");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var stages=[
+ {nm:"一级助推器",need:120,time:40},
+ {nm:"二级推进器",need:260,time:45},
+ {nm:"三级主引擎",need:450,time:50}
+];
+var ups=[
+ {nm:"高压泵组",ds:"每次加注 +2 燃料",base:30,mult:2,max:10},
+ {nm:"自动阀门",ds:"每秒自动加注 +0.7",base:25,mult:2,max:10},
+ {nm:"液冷储罐",ds:"每级倒计时 +8 秒",base:40,mult:2.5,max:3}
+];
+var stage,fuel,timeLeft,ep,upLv,leakOn,leakT,leakNext,state,msgT,rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function pump(){return 2+2*upLv[0];}
+function valve(){return 0.7*upLv[1];}
+function need(){return stages[stage].need;}
+function timeMax(){return stages[stage].time+8*upLv[2];}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildShop(){
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(ep<c){say("工程点不够!");return;}
+  ep-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function addFuel(){
+  if(state!=="play")return;
+  fuel+=pump();
+}
+btnFuel.addEventListener("click",addFuel);
+btnFix.addEventListener("click",function(){
+  if(state!=="play"||!leakOn)return;
+  leakOn=false;btnFix.style.display="none";
+  say("泄漏堵住了!继续加注!");
+});
+btnLaunch.addEventListener("click",function(){
+  if(state!=="play"||fuel<need())return;
+  ep+=30+Math.ceil(timeLeft);
+  stage++;fuel=0;
+  if(stage>=3){
+    state="over";
+    showOv("抵达轨道!","三级引擎轰鸣,星舰刺破云层,地球在脚下变成蓝色弹珠!","剩余时间 "+Math.max(0,timeLeft).toFixed(1)+" 秒 · 工程点 "+ep);
+    return;
+  }
+  timeLeft=timeMax();leakOn=false;btnFix.style.display="none";leakNext=7+Math.random()*6;
+  say("点火成功!进入 "+stages[stage].nm+" 倒计时!");
+});
+document.addEventListener("keydown",function(e){
+  if(state==="play"){
+    if(e.key===" "){e.preventDefault();addFuel();}
+  }else if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+});
+function showOv(t,d,s){
+  ovT.textContent=t;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+function startGame(){
+  stage=0;fuel=0;timeLeft=timeMax();ep=0;upLv=[0,0,0];
+  leakOn=false;leakNext=8;msgT=0;
+  btnFix.style.display="none";
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+function render(){
+  var i;
+  elStage.textContent=stage+1;elEp.textContent=ep;elPump.textContent=pump();elValve.textContent=valve().toFixed(1);
+  stgName.textContent=stages[stage].nm;
+  cd.textContent=Math.max(0,timeLeft).toFixed(1);
+  cd.classList.toggle("warn",timeLeft<10);
+  fuelFill.style.width=Math.min(100,fuel/need()*100)+"%";
+  fuelTxt.textContent="燃料 "+Math.floor(fuel)+" / "+need();
+  var alt=Math.min(100,((stage+Math.min(1,fuel/need()))/3*100));
+  altFill.style.width=alt+"%";altTxt.textContent="总进度 "+Math.floor(alt)+"%";
+  btnLaunch.disabled=fuel<need();
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":c+"点";
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||ep<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  timeLeft-=ds;
+  fuel+=valve()*ds;
+  if(leakOn){
+    fuel=Math.max(0,fuel-4*ds);
+    leakT-=ds;
+    if(leakT<=0){leakOn=false;btnFix.style.display="none";say("泄漏自己止住了,好险!");}
+  }else{
+    leakNext-=ds;
+    if(leakNext<=0&&fuel>5){
+      leakOn=true;leakT=4;leakNext=7+Math.random()*6;
+      btnFix.style.display="inline-block";
+      say("警告:燃料泄漏!立刻堵漏!");
+    }
+  }
+  if(timeLeft<=0){
+    ep+=15+Math.floor(20*fuel/need());
+    fuel=0;timeLeft=timeMax();
+    leakOn=false;btnFix.style.display="none";leakNext=8+Math.random()*6;
+    say("倒计时归零,发射中止…获得安慰工程点,再来!");
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+}
+stage=0;fuel=0;timeLeft=40;ep=0;upLv=[0,0,0];leakOn=false;leakT=0;leakNext=8;state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

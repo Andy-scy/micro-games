@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日街区赛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#3d0f26;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>每日街区赛</h1>
+  <p class="hint">↑ 油门 ↓ 刹车 · ← → 转向 · 触屏按住左右半屏转向 · 空格开始</p>
+  <div class="hud">
+    <span>用时 <b id="time">0.0s</b></span>
+    <span>进度 <b id="prog">0/9</b></span>
+    <span>今日最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">每日街区赛</h2>
+      <p id="ovDesc">每天用日期随机生成一条固定街区路线:从起点按 1→9 的顺序穿过发光检查门,用时越短越好!金色虚线箭头指向下一道门,撞上楼房会被弹回减速。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elTime=$("time"),elProg=$("prog"),elBest=$("best");
+var state="menu";
+var dd=new Date();
+var dateStr=dd.getFullYear()+"-"+("0"+(dd.getMonth()+1)).slice(-2)+"-"+("0"+dd.getDate()).slice(-2);
+var bestKey="mg_739_"+dateStr;
+var dayBest=0;
+try{dayBest=parseFloat(localStorage.getItem(bestKey)||"0")||0;}catch(e){dayBest=0;}
+function saveBest(){try{localStorage.setItem(bestKey,String(dayBest));}catch(e){}}
+function hashStr(s){
+  var h=1779033703,i;
+  for(i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=(h<<13)|(h>>>19);}
+  return h>>>0;
+}
+function mulberry32(a){
+  return function(){
+    a|=0;a=(a+0x6D2B79F5)|0;
+    var t=Math.imul(a^(a>>>15),1|a);
+    t=(t+Math.imul(t^(t>>>7),61|t))^t;
+    return((t^(t>>>14))>>>0)/4294967296;
+  };
+}
+var gates,buildings,x,y,ang,v,prog,raceT,keys,touchDir,bumpT,pulse;
+function genCourse(){
+  var rnd=mulberry32(hashStr("racing739"+dateStr));
+  var i,j;
+  gates=[{x:240,y:505}];
+  var a=-Math.PI/2;
+  for(i=0;i<9;i++){
+    a+=rnd()*1.5-0.75;
+    var step=85+rnd()*45;
+    var nx=gates[i].x+Math.cos(a)*step;
+    var ny=gates[i].y+Math.sin(a)*step;
+    nx=Math.max(55,Math.min(425,nx));
+    ny=Math.max(55,Math.min(505,ny));
+    gates.push({x:nx,y:ny});
+  }
+  gates.shift();
+  buildings=[];
+  var tries=0;
+  while(buildings.length<15&&tries<400){
+    tries++;
+    var bw=40+rnd()*70,bh=40+rnd()*70;
+    var bx=16+rnd()*(448-bw),by=26+rnd()*(508-bh);
+    var ok=true;
+    for(j=0;j<gates.length;j++){
+      var gx=gates[j].x,gy=gates[j].y;
+      var cx=Math.max(bx,Math.min(gx,bx+bw));
+      var cy=Math.max(by,Math.min(gy,by+bh));
+      if((gx-cx)*(gx-cx)+(gy-cy)*(gy-cy)<4900){ok=false;break;}
+    }
+    if(240>bx-24&&240<bx+bw+24&&505>by-24&&505<by+bh+24)ok=false;
+    if(ok)buildings.push({x:bx,y:by,w:bw,h:bh});
+  }
+}
+function bestText(){
+  return dayBest>0?dayBest.toFixed(1)+"s":"--";
+}
+function reset(){
+  genCourse();
+  x=240;y=510;ang=-Math.PI/2;v=0;prog=0;raceT=0;keys={};touchDir=0;bumpT=0;pulse=0;
+  elTime.textContent="0.0s";elProg.textContent="0/9";elBest.textContent=bestText();
+}
+function endGame(){
+  state="over";
+  var newRec=false;
+  if(dayBest<=0||raceT<dayBest){dayBest=raceT;newRec=true;saveBest();}
+  ovTitle.textContent="完成!";
+  ovDesc.textContent=dateStr+" 的街区路线已跑完。"+(newRec?"刷新了今日纪录!":"再跑一趟,把这个街区压进更短的时间。");
+  ovScore.style.display="block";
+  ovScore.textContent="用时 "+raceT.toFixed(1)+"s · 今日最佳 "+bestText();
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var i,ox,oy;
+  raceT+=dt;pulse+=dt;
+  elTime.textContent=raceT.toFixed(1)+"s";
+  if(keys.up)v=Math.min(330,v+380*dt);
+  else if(keys.down)v=Math.max(0,v-520*dt);
+  else v=Math.max(0,v-v*0.5*dt);
+  var st=(keys.right?1:0)-(keys.left?1:0);
+  if(touchDir!==0)st=touchDir;
+  ang+=st*3.0*dt*Math.min(1,v/130);
+  ox=x;oy=y;
+  x+=Math.cos(ang)*v*dt;
+  y+=Math.sin(ang)*v*dt;
+  if(x<14){x=14;v*=0.5;}
+  if(x>W-14){x=W-14;v*=0.5;}
+  if(y<14){y=14;v*=0.5;}
+  if(y>H-14){y=H-14;v*=0.5;}
+  for(i=0;i<buildings.length;i++){
+    var b=buildings[i];
+    if(x>b.x-11&&x<b.x+b.w+11&&y>b.y-11&&y<b.y+b.h+11){
+      x=ox;y=oy;v*=0.2;bumpT=0.3;
+      break;
+    }
+  }
+  if(prog<9){
+    var g=gates[prog];
+    var dx=x-g.x,dy=y-g.y;
+    if(dx*dx+dy*dy<36*36){
+      prog++;
+      elProg.textContent=prog+"/9";
+      if(prog>=9){endGame();return;}
+    }
+  }
+  bumpT=Math.max(0,bumpT-dt);
+}
+function draw(){
+  var i,j;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#131730";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.02)";
+  for(i=0;i<10;i++)ctx.fillRect(0,i*56,W,1);
+  for(i=0;i<buildings.length;i++){
+    var b=buildings[i];
+    ctx.fillStyle="#1c2140";ctx.fillRect(b.x,b.y,b.w,b.h);
+    ctx.strokeStyle="#2a3054";ctx.strokeRect(b.x+0.5,b.y+0.5,b.w,b.h);
+    ctx.fillStyle="#2f3559";
+    for(j=8;j<b.w-8;j+=16){
+      for(var wy=10;wy<b.h-8;wy+=16)ctx.fillRect(b.x+j,b.y+wy,6,6);
+    }
+  }
+  ctx.fillStyle="#3a3f5c";ctx.beginPath();ctx.arc(240,505,10,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#8b90b0";ctx.font="11px system-ui";ctx.textAlign="center";
+  ctx.fillText("起点",240,532);
+  for(i=0;i<gates.length;i++){
+    var g=gates[i];
+    if(i<prog){
+      ctx.strokeStyle="rgba(74,222,128,0.35)";ctx.lineWidth=3;
+    }else if(i===prog){
+      ctx.strokeStyle="#fbbf24";ctx.lineWidth=4;
+    }else{
+      ctx.strokeStyle="rgba(244,114,182,0.4)";ctx.lineWidth=2;
+    }
+    ctx.beginPath();ctx.arc(g.x,g.y,i===prog?34+Math.sin(pulse*5)*3:32,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+    ctx.fillStyle=i===prog?"#fbbf24":(i<prog?"rgba(74,222,128,0.5)":"rgba(167,177,214,0.7)");
+    ctx.font="bold 15px system-ui";
+    ctx.fillText(String(i+1),g.x,g.y+5);
+  }
+  if(prog<9&&state==="playing"){
+    var g2=gates[prog];
+    var da=Math.atan2(g2.y-y,g2.x-x);
+    var gd=Math.max(16,Math.min(90,Math.hypot(g2.x-x,g2.y-y)-40));
+    ctx.strokeStyle="rgba(251,191,36,0.55)";ctx.lineWidth=3;ctx.setLineDash([8,7]);
+    ctx.beginPath();ctx.moveTo(x+Math.cos(da)*30,y+Math.sin(da)*30);
+    ctx.lineTo(x+Math.cos(da)*gd,y+Math.sin(da)*gd);
+    ctx.stroke();ctx.setLineDash([]);ctx.lineWidth=1;
+    var hx=x+Math.cos(da)*(gd+6);
+    var hy=y+Math.sin(da)*(gd+6);
+    ctx.fillStyle="#fbbf24";
+    ctx.save();ctx.translate(hx,hy);ctx.rotate(da);
+    ctx.beginPath();ctx.moveTo(10,0);ctx.lineTo(-4,-6);ctx.lineTo(-4,6);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  ctx.save();ctx.translate(x,y);ctx.rotate(ang+Math.PI/2);
+  ctx.fillStyle=bumpT>0?"#f87171":"#f472b6";
+  ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(11,14);ctx.lineTo(0,8);ctx.lineTo(-11,14);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#141826";ctx.fillRect(-7,-6,14,8);
+  ctx.restore();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();keys.left=true;}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();keys.right=true;}
+  else if(e.key==="ArrowUp"||e.key==="w"||e.key==="W"){e.preventDefault();keys.up=true;}
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S"){e.preventDefault();keys.down=true;}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keys.left=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keys.right=false;
+  if(e.key==="ArrowUp"||e.key==="w"||e.key==="W")keys.up=false;
+  if(e.key==="ArrowDown"||e.key==="s"||e.key==="S")keys.down=false;
+});
+function tdir(t){
+  var rc=cv.getBoundingClientRect();
+  return (t.clientX-rc.left)<rc.width/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state==="playing"){touchDir=tdir(e.changedTouches[0]);keys.up=true;}
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state==="playing")touchDir=tdir(e.changedTouches[0]);
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){touchDir=0;keys.up=false;e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

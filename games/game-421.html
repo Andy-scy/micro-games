@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>恐龙快跑</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>恐龙快跑</h1>
+  <p class="hint">空格 / ↑ / W / 点按画面 起跳 · 长按跳得更高 · 撞到仙人掌即失败</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>速度 <b id="spd">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">恐龙快跑</h2>
+      <p id="ovDesc">荒漠尽头,恐龙狂奔!唯一的动作就是跳跃,节奏会越来越快,看看你能跑多远。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSpd=$("spd"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s421");
+var state="menu",dist,score,speed,obs,px,py,vy,grounded,held,nextGap,phase,dust;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=300;obs=[];px=90;py=GY-42;vy=0;grounded=true;held=false;nextGap=420;phase=0;dust=[];
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elSpd.textContent=Math.round(speed);}
+function dustBurst(){
+  var i;
+  for(i=0;i<6;i++)dust.push({x:px+8,y:GY-3,vx:-60-Math.random()*80,vy:-Math.random()*70,life:0.4});
+}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-530;grounded=false;dustBurst();}
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s421",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="一脚踩进了仙人掌堆,奔跑到此为止。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,o,d;
+  speed=Math.min(640,300+dist*0.02);
+  dist+=speed*s;score=Math.floor(dist/10);
+  phase+=s*(grounded?speed*0.045:3);
+  if(!grounded){
+    vy+=((vy<0&&held)?1150:2200)*s;py+=vy*s;
+    if(py>=GY-42){
+      if(vy>220)dustBurst();
+      py=GY-42;vy=0;grounded=true;
+    }
+  }
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var r=Math.random(),o2={x:W+30};
+    if(r<0.38){o2.w=16;o2.h=34;}
+    else if(r<0.66){o2.w=24;o2.h=52;}
+    else if(r<0.85){o2.w=44;o2.h=34;}
+    else{o2.w=62;o2.h=32;}
+    o2.y=GY-o2.h;obs.push(o2);
+    nextGap=210+Math.random()*260+speed*0.4;
+  }
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-90){obs.splice(i,1);continue;}
+    if(px+26>o.x+3&&px+6<o.x+o.w-3&&py+40>o.y+3){gameOver();return;}
+  }
+  for(i=dust.length-1;i>=0;i--){
+    d=dust[i];d.life-=s;d.x+=d.vx*s-speed*s*0.5;d.y+=d.vy*s;
+    if(d.life<=0)dust.splice(i,1);
+  }
+  updateHud();
+}
+function drawCactus(o){
+  ctx.fillStyle="#39c977";
+  rr(o.x,o.y,o.w,o.h,6);ctx.fill();
+  ctx.fillStyle="#2aa761";
+  if(o.w>=40){ctx.fillRect(o.x-7,o.y+o.h*0.4,7,5);ctx.fillRect(o.x-7,o.y+o.h*0.4-9,5,10);ctx.fillRect(o.x+o.w,o.y+5,8,4);ctx.fillRect(o.x+o.w+4,o.y+5,4,12);}
+  else{ctx.fillRect(o.x-6,o.y+9,6,4);ctx.fillRect(o.x-6,o.y+3,4,9);}
+}
+function drawDino(){
+  var l=grounded?Math.sin(phase)*5:0;
+  ctx.fillStyle="#2fae62";
+  ctx.fillRect(px+2,py+8,4,4);ctx.fillRect(px+9,py+5,4,4);ctx.fillRect(px+16,py+3,4,4);
+  ctx.fillStyle="#4ade80";
+  rr(px,py+12,26,28,6);ctx.fill();
+  rr(px+8,py,22,18,5);ctx.fill();
+  ctx.fillStyle="#0b2a15";
+  ctx.fillRect(px+22,py+5,3,4);
+  ctx.fillStyle="#35c46f";
+  if(grounded){ctx.fillRect(px+3,py+38+Math.max(0,-l),7,6);ctx.fillRect(px+16,py+38+Math.max(0,l),7,6);}
+  else{ctx.fillRect(px+4,py+37,7,5);ctx.fillRect(px+15,py+35,7,5);}
+}
+function draw(){
+  var i,d,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#141a33");grd.addColorStop(1,"#241a38");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,.55)";
+  for(i=0;i<26;i++){
+    ctx.globalAlpha=0.25+0.5*Math.abs(Math.sin(i*2.7+dist*0.002));
+    ctx.fillRect((i*151+40)%W,(i*83)%110,2,2);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#f4e3a1";ctx.globalAlpha=0.85;
+  ctx.beginPath();ctx.arc(544,52,20,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle="#181f3a";
+  var o1=(dist*0.1)%360;
+  for(i=-1;i<3;i++){ctx.beginPath();ctx.arc(i*360-o1+120,GY+8,95,Math.PI,Math.PI*2);ctx.fill();}
+  ctx.fillStyle="#20294c";
+  var o2=(dist*0.22)%280;
+  for(i=-1;i<3;i++){ctx.beginPath();ctx.arc(i*280-o2+200,GY+8,70,Math.PI,Math.PI*2);ctx.fill();}
+  ctx.fillStyle="#2b2244";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#4ade80";ctx.globalAlpha=0.45;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  ctx.fillStyle="rgba(255,255,255,.12)";
+  var dsh=dist%80;
+  for(i=0;i<10;i++)ctx.fillRect(i*80-dsh,GY+16,34,3);
+  for(i=0;i<obs.length;i++)drawCactus(obs[i]);
+  for(i=0;i<dust.length;i++){
+    d=dust[i];ctx.fillStyle="rgba(255,255,255,"+(d.life*1.4)+")";
+    ctx.beginPath();ctx.arc(d.x,d.y,2.4,0,Math.PI*2);ctx.fill();
+  }
+  drawDino();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W"){held=true;if(!e.repeat)doJump();}
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="w"||k==="W")held=false;
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();held=true;doJump();},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();held=false;},{passive:false});
+cv.addEventListener("mousedown",function(){held=true;doJump();});
+document.addEventListener("mouseup",function(){held=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

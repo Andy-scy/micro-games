@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极限九十秒</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#4fd1c5;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#4fd1c5;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#4fd1c5;color:#07202a;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#4fd1c5;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>极限九十秒</h1>
+<p class="tip">←→↑↓/WASD 或按住拖动移动,炮火全自动。一次被击中就出局,坚持整整 90 秒即获胜,难度会随时间持续攀升。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">极限九十秒</h2>
+<p id="ovX">没有护甲、没有补给,只有不断加速的敌潮。撑过 90 秒,你就创造了自己的生存纪录。</p>
+<button id="btn">开始挑战</button>
+</div></div>
+</div>
+<div class="hud"><span>时间<b id="hT">0.0/90</b></span><span>击坠<b id="hK">0</b></span><span>得分<b id="hS">0</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hT=document.getElementById("hT"),hK=document.getElementById("hK"),hS=document.getElementById("hS");
+var GOAL=90;
+var state="ready",score=0,kills=0,timer=0,cool=0.3,spawn=0.6,t=0;
+var ship={x:W/2,y:H-80};
+var bullets=[],ebullets=[],enemies=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*24+8});}
+function reset(){
+  score=0;kills=0;timer=0;cool=0.2;spawn=0.8;t=0;
+  ship.x=W/2;ship.y=H-80;
+  bullets=[];ebullets=[];enemies=[];parts=[];
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"生存达成":"战机损毁";
+  ovX.textContent="坚持了 "+timer.toFixed(1)+" 秒,得分 "+score+(win?" · 你征服了九十秒!":" · 再快一点走位,再来一次。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;timer+=dt;cool-=dt;spawn-=dt;
+  var sp=290;
+  if(keys.ArrowLeft||keys.a)ship.x-=sp*dt;
+  if(keys.ArrowRight||keys.d)ship.x+=sp*dt;
+  if(keys.ArrowUp||keys.w)ship.y-=sp*dt;
+  if(keys.ArrowDown||keys.s)ship.y+=sp*dt;
+  if(pressed){
+    ship.x+=(px-ship.x)*Math.min(1,dt*10);
+    ship.y+=(py-ship.y)*Math.min(1,dt*10);
+  }
+  ship.x=Math.max(20,Math.min(W-20,ship.x));
+  ship.y=Math.max(H*0.4,Math.min(H-40,ship.y));
+  if(cool<=0){
+    cool=Math.max(0.14,0.24-timer*0.001);
+    bullets.push({x:ship.x,y:ship.y-18});
+  }
+  if(spawn<=0){
+    spawn=Math.max(0.32,1.3-timer*0.011);
+    var r=Math.random(),spd=120+timer*1.6;
+    if(r<0.2){
+      enemies.push({x:40+Math.random()*(W-80),y:-40,vy:spd*0.55,hp:6,ph:Math.random()*6.283,kind:2,rock:true});
+    }else if(r<0.6){
+      enemies.push({x:40+Math.random()*(W-80),y:-30,vy:spd,hp:1,ph:Math.random()*6.283,kind:0});
+    }else{
+      enemies.push({x:40+Math.random()*(W-80),y:-30,vy:spd*0.75,hp:2,ph:Math.random()*6.283,kind:1,ft:1+Math.random()});
+    }
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    bullets[bi].y-=540*dt;
+    if(bullets[bi].y<-20)bullets.splice(bi,1);
+  }
+  for(i=enemies.length-1;i>=0;i--){
+    var e=enemies[i];
+    e.y+=e.vy*dt;
+    if(e.kind===0)e.x+=Math.sin(t*3+e.ph)*80*dt;
+    if(e.kind===1){
+      e.ft-=dt;
+      if(e.ft<=0){
+        e.ft=Math.max(1,2.4-timer*0.02);
+        var dx=ship.x-e.x,dy=ship.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+        ebullets.push({x:e.x,y:e.y+12,vx:dx/d*200,vy:dy/d*200});
+      }
+    }
+    if(e.rock)e.x+=Math.sin(t*1.5+e.ph)*30*dt;
+    if(e.y>H+30){enemies.splice(i,1);continue;}
+    if(Math.abs(e.x-ship.x)<(e.rock?34:20)&&Math.abs(e.y-ship.y)<(e.rock?34:20)){
+      boom(ship.x,ship.y,26,"#ff6b6b");
+      gameOver(false);return;
+    }
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var b=ebullets[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-10||b.x>W+10||b.y>H+10){ebullets.splice(i,1);continue;}
+    var bx=b.x-ship.x,by=b.y-ship.y;
+    if(bx*bx+by*by<196){
+      boom(ship.x,ship.y,20,"#ff6b6b");
+      gameOver(false);return;
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    for(j=enemies.length-1;j>=0;j--){
+      var e2=enemies[j];
+      var rr=e2.rock?32:18;
+      var ddx=bl.x-e2.x,ddy=bl.y-e2.y;
+      if(ddx*ddx+ddy*ddy<rr*rr){
+        bullets.splice(bi,1);
+        e2.hp--;
+        if(e2.hp<=0){
+          boom(e2.x,e2.y,10+e2.hp+8,"#ffd166");
+          kills++;
+          score+=e2.rock?50:10;
+          enemies.splice(j,1);
+        }
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(timer>=GOAL){score+=500;gameOver(true);}
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#4fd1c5";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-2,bullets[i].y-10,4,14);
+  ctx.fillStyle="#ffd166";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4,0,6.283);ctx.fill();
+  }
+  for(i=0;i<enemies.length;i++){
+    var e=enemies[i];
+    ctx.save();ctx.translate(e.x,e.y);
+    if(e.rock){
+      ctx.rotate(e.ph+t);
+      ctx.fillStyle="#7d6b58";
+      ctx.beginPath();
+      for(var k=0;k<7;k++){
+        var a=k/7*6.283;
+        if(k===0)ctx.moveTo(Math.cos(a)*32,Math.sin(a)*32);
+        else ctx.lineTo(Math.cos(a)*32,Math.sin(a)*32);
+      }
+      ctx.closePath();ctx.fill();
+    }else if(e.kind===0){
+      ctx.fillStyle="#ff6b6b";
+      ctx.beginPath();ctx.moveTo(0,12);ctx.lineTo(-10,-9);ctx.lineTo(10,-9);
+      ctx.closePath();ctx.fill();
+    }else{
+      ctx.fillStyle="#c0456c";
+      ctx.fillRect(-14,-12,28,24);
+    }
+    ctx.restore();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state==="play"){
+    ctx.font="bold 34px system-ui";ctx.textAlign="center";
+    ctx.fillStyle=GOAL-timer<10?"#ff6b6b":"#4fd1c5";
+    ctx.fillText(Math.max(0,GOAL-timer).toFixed(1),W/2,52);
+    ctx.font="12px system-ui";ctx.fillStyle="#9aa3c0";
+    ctx.fillText("剩余秒数",W/2,70);
+  }
+  if(state!=="over"){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle="#4fd1c5";
+    ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(-14,14);ctx.lineTo(0,6);ctx.lineTo(14,14);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  for(var k=0;k<stars.length;k++){
+    var st=stars[k];
+    st.y+=st.v*dt;
+    if(st.y>H){st.y=-2;st.x=Math.random()*W;}
+  }
+  if(state==="play")update(dt);
+  draw();
+  hT.textContent=Math.min(timer,GOAL).toFixed(1)+"/"+GOAL;
+  hK.textContent=kills;hS.textContent=score;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

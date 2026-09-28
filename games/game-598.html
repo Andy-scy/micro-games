@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词归其类</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:10px}
+#hud b{color:#ffd166}
+#hud .hp{color:#ff6b8a}
+.card{background:#151a30;border-radius:14px;padding:18px;text-align:center}
+#catHint{font-size:13px;color:#9aa3c7;margin-bottom:14px}
+#word{font-size:44px;font-weight:bold;color:#fff;font-family:Consolas,monospace;letter-spacing:2px;min-height:56px;margin-bottom:16px}
+#word.pop{animation:pop .3s}
+@keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+#btns{display:flex;flex-direction:column;gap:10px}
+#btns button{padding:14px;font-size:18px;font-weight:bold;border:none;border-radius:12px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit}
+#btns button.good{background:#2ec27e;color:#08131c}
+#btns button.err{background:#ff6b8a;color:#1a1d33}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px;margin-top:10px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>词归其类</h1>
+<p id="tip">屏幕上出现一个英文单词 快点中它所属的分类按钮 · 连对加分 答错扣一颗心 · 三轮 30 词 全对到底</p>
+<div id="wrap">
+<div id="hud"><span>第 <b id="round">1</b>/3 轮</span><span>进度 <b id="prog">1</b>/10</span><span>得分 <b id="score">0</b></span><span class="hp" id="hp">♥♥♥</span></div>
+<div class="card">
+<div id="catHint"></div>
+<div id="word"></div>
+<div id="btns">
+<button id="b0"></button>
+<button id="b1"></button>
+<button id="b2"></button>
+</div>
+</div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">词归其类</h2><p id="ovP">单词出现后
+快速点击它所属的分类
+连对越多 单词分越高</p><button id="ovB">开始分类</button></div>
+</div>
+<script>
+"use strict";
+var CATS = {
+  animal: "动物", fruit: "水果", color: "颜色", trans: "交通工具"
+};
+var POOL = {
+  animal: ["tiger", "lion", "bear", "horse", "sheep", "monkey", "rabbit", "mouse", "snake", "eagle", "whale", "zebra", "wolf", "camel", "shark", "panda"],
+  fruit: ["apple", "lemon", "mango", "grape", "peach", "melon", "banana", "cherry", "olive", "plum", "fig", "kiwi", "pear", "date"],
+  color: ["red", "blue", "green", "black", "white", "pink", "brown", "gray", "gold", "amber", "ivory", "coral"],
+  trans: ["train", "plane", "ship", "truck", "boat", "taxi", "bus", "bike", "metro", "ferry", "jeep", "van"]
+};
+var ROUNDN = 3, PERN = 10;
+var roundEl = document.getElementById("round");
+var progEl = document.getElementById("prog");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var catHintEl = document.getElementById("catHint");
+var wordEl = document.getElementById("word");
+var btns = [document.getElementById("b0"), document.getElementById("b1"), document.getElementById("b2")];
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var round = 0, qi = 0, score = 0, combo = 0, hp = 3;
+var activeCats = [], queue = [], answer = "", playing = false, lock = false;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function startRound() {
+  var keys = ["animal", "fruit", "color", "trans"];
+  shuffle(keys);
+  activeCats = keys.slice(0, 3);
+  var mixed = [];
+  for (var r = 0; r < PERN; r++) {
+    var c = activeCats[Math.floor(Math.random() * 3)];
+    var w = POOL[c][Math.floor(Math.random() * POOL[c].length)];
+    mixed.push({ w: w, c: c });
+  }
+  queue = mixed;
+  qi = 0;
+  roundEl.textContent = round + 1;
+  progEl.textContent = 1;
+  nextWord();
+}
+
+function nextWord() {
+  var item = queue[qi];
+  answer = item.c;
+  lock = false;
+  catHintEl.textContent = "这个单词属于哪一类?";
+  wordEl.textContent = item.w.toUpperCase();
+  wordEl.classList.remove("pop");
+  void wordEl.offsetWidth;
+  wordEl.classList.add("pop");
+  for (var b = 0; b < 3; b++) {
+    btns[b].textContent = CATS[activeCats[b]];
+    btns[b].className = "";
+  }
+}
+
+function pick(idx) {
+  if (!playing || lock) return;
+  lock = true;
+  var ok = activeCats[idx] === answer;
+  if (ok) {
+    combo++;
+    score += 10 + Math.min(15, (combo - 1) * 3);
+    scoreEl.textContent = score;
+    btns[idx].className = "good";
+    msgEl.textContent = "连对 x" + combo;
+  } else {
+    combo = 0;
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    btns[idx].className = "err";
+    for (var b = 0; b < 3; b++) if (activeCats[b] === answer) btns[b].className = "good";
+    msgEl.textContent = "正确分类:" + CATS[answer];
+    if (hp <= 0) {
+      playing = false;
+      setTimeout(lose, 900);
+      return;
+    }
+  }
+  setTimeout(function () {
+    if (!playing) return;
+    qi++;
+    if (qi >= PERN) {
+      round++;
+      if (round >= ROUNDN) {
+        playing = false;
+        ovT.textContent = "分类达人!";
+        ovP.textContent = "三轮单词全部归类完成\n得分 " + score;
+        ovB.textContent = "再来一局";
+        ov.classList.remove("hide");
+      } else {
+        msgEl.textContent = "第 " + round + " 轮开始!分类换了";
+        startRound();
+      }
+    } else {
+      progEl.textContent = qi + 1;
+      nextWord();
+    }
+  }, ok ? 350 : 1000);
+}
+
+function lose() {
+  ovT.textContent = "心用完了";
+  ovP.textContent = "进行到第 " + round + " 轮第 " + (qi + 1) + " 词\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  round = 0; qi = 0; score = 0; combo = 0; hp = 3;
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  progEl.textContent = "1";
+  msgEl.textContent = "";
+  playing = true;
+  ov.classList.add("hide");
+  startRound();
+}
+
+for (var i = 0; i < 3; i++) {
+  (function (idx) {
+    btns[idx].onclick = function () { pick(idx); };
+  })(i);
+}
+ovB.onclick = start;
+</script>
+</body>
+</html>

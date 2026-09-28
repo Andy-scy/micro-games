@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>步步高升</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#4ade80;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#4ade80;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.timebar i{display:block;height:100%;background:#4ade80;width:100%}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.grid button{background:#232949;color:#e8eaf6;border:2px solid #2a3054;border-radius:12px;padding:22px 0;font-size:24px;font-weight:800;cursor:pointer;font-family:inherit}
+.grid button:active{transform:scale(.93)}
+.grid button.hit{background:#14351f;border-color:#4ade80;color:#4ade80;opacity:.45}
+.grid button.err{background:#3a1620;border-color:#f87171;color:#f87171}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:12px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+@keyframes wob{0%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}100%{transform:translateX(0)}}
+.wob{animation:wob .25s}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>步步高升</h1>
+  <p class="hint">把数字从小到大依次点掉 · 点错一次 -2 秒 · 60 秒内冲击更高波次</p>
+  <div class="hud">
+    <span>第 <b id="wave">1</b> 波</span>
+    <span>时间 <b id="time">60</b>s</span>
+    <span>连对 <b id="combo">0</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="grid" id="grid"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">步步高升</h2>
+      <p id="ovD">每一波都有一群乱序数字,请从最小的开始,按从小到大的顺序把它们逐个点掉。全部点完立刻进入下一波,数字越来越多、越来越大!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始冲刺</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elWave=$("wave"),elTime=$("time"),elCombo=$("combo"),elScore=$("score"),elTbar=$("tbar");
+var elGrid=$("grid"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var TOTAL_MS=60000;
+var state,wave,score,combo,timeLeft,nums,sorted,clicked,btns,lastT;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function updHud(){
+  elWave.textContent=wave;elScore.textContent=score;elCombo.textContent=combo;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function build(){
+  var n=Math.min(4+Math.floor((wave-1)/2),8);
+  var hi=20+wave*8;
+  var set=[],tries=0;
+  while(set.length<n&&tries<400){
+    tries++;
+    var v=rnd(1,hi);
+    if(set.indexOf(v)<0)set.push(v);
+  }
+  nums=set.slice();
+  sorted=set.slice().sort(function(a,b){return a-b;});
+  clicked=0;
+  elGrid.innerHTML="";
+  btns=[];
+  var order=set.slice();
+  var i;
+  for(i=order.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=order[i];order[i]=order[j];order[j]=t;}
+  for(i=0;i<order.length;i++){
+    var b=document.createElement("button");
+    b.textContent=order[i];
+    (function(val,el){
+      el.addEventListener("click",function(){tap(val,el);});
+    })(order[i],b);
+    elGrid.appendChild(b);
+    btns.push({v:order[i],el:b});
+  }
+  setMsg("从 "+sorted[0]+" 开始,从小到大点","good");
+}
+function tap(v,el){
+  if(state!=="playing")return;
+  if(v===sorted[clicked]){
+    clicked++;
+    el.className="hit";
+    combo++;
+    score+=8+combo;
+    updHud();
+    if(clicked>=sorted.length){
+      score+=15;
+      wave++;
+      updHud();
+      setMsg("第 "+(wave-1)+" 波完成!+15 奖励","good");
+      setTimeout(function(){if(state==="playing")build();},650);
+    }
+  }else{
+    combo=0;
+    timeLeft=Math.max(0.1,timeLeft-2);
+    el.classList.add("err","wob");
+    setMsg("顺序错了!现在该点 "+sorted[clicked],  "badc");
+    updHud();
+    var elRef=el;
+    setTimeout(function(){elRef.classList.remove("err","wob");},400);
+  }
+}
+function gameOver(){
+  state="over";
+  ovT.textContent="时间到!";
+  ovD.textContent="你冲到了第 "+wave+" 波,步步高升!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";wave=1;score=0;combo=0;timeLeft=TOTAL_MS;lastT=0;
+  ovS.style.display="none";
+  build();updHud();
+  ov.classList.add("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+  }
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;gameOver();}
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elTbar.style.width=(timeLeft/TOTAL_MS*100)+"%";
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

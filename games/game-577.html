@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>定数挑战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:500px}
+h1{font-size:25px;text-align:center;color:#b892ff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:14px;background:#b892ff;color:#1c1033;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+input{background:#101426;border:1px solid #333c63;border-radius:9px;color:#e8eaf6;padding:10px 12px;font-size:15px;width:150px;font-family:inherit}
+.die{position:relative;width:58px;height:58px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.die.sm{width:36px;height:36px;border-radius:7px}
+.die.dim{opacity:.35}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#b892ff}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:40px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#b892ff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>定数挑战</h1>
+  <p class="tips">全网同题的骰子运气对决!输入一个种子号,同一颗种子在任何人手里都会掷出<b>完全相同的 5 颗骰</b>——比的就是留下谁、弃掉谁的决策。5 轮内总分 ≥20 获胜,≥24 属于神级操作;每局限弃 2 颗。</p>
+  <div class="card" style="text-align:center">
+    <div class="row">
+      <span class="mut">种子号</span>
+      <input id="seedin" type="number" min="1" max="999999" value="20260927">
+      <button class="btn" id="go">以此种子开局</button>
+      <button class="btn sec" id="lucky">随机种子</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="card stat"><div class="mut">回合</div><div class="big" id="rd">0/5</div></div>
+    <div class="card stat"><div class="mut">总分</div><div class="big" id="tt">0</div></div>
+    <div class="card stat"><div class="mut">剩余弃额</div><div class="big" id="sk">2</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="die" id="die"></div>
+    <div class="big" id="curtx" style="margin-top:8px">—</div>
+    <div class="row" style="margin-top:10px" id="hist"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="keep" disabled>计入总分</button>
+      <button class="btn sec" id="drop" disabled>弃掉这颗</button>
+    </div>
+  </div>
+  <div class="card log" id="log">默认种子已加载,骰子马上掷出!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="retry">同种子再来一局</button> <button class="btn sec" id="newseed">换个种子</button></div></div>
+<script>
+'use strict';
+var seed=0,st=0,round=1,total=0,skips=2,hist=[],curVal=0,over=false;
+function $(id){return document.getElementById(id)}
+function setDie(el,v,dim){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+  el.classList.toggle('dim',!!dim);
+}
+function drawHist(){
+  var H=$('hist');H.innerHTML='';
+  for(var i=0;i<hist.length;i++){
+    var d=document.createElement('div');d.className='die sm';
+    setDie(d,hist[i][0],!hist[i][1]);
+    H.appendChild(d);
+  }
+  if(hist.length===0)H.innerHTML='<span class="mut">本局序列(暗色为已弃)</span>';
+}
+function draw(){
+  $('rd').textContent=Math.min(round-1,5)+'/5';
+  $('tt').textContent=total;
+  $('sk').textContent=skips;
+  drawHist();
+  $('keep').disabled=over||round>5;
+  $('drop').disabled=over||round>5||skips<=0;
+}
+function say(m){$('log').textContent=m}
+function lcg(){st=(st*1664525+1013904223)>>>0;return st/4294967296}
+function nextRound(){
+  if(over)return;
+  if(round>5){finish();return}
+  curVal=1+Math.floor(lcg()*6);
+  setDie($('die'),curVal,false);
+  $('curtx').textContent='第 '+round+' 颗:'+curVal+' 点';
+  draw();
+  say('这颗 '+curVal+' 点,计入还是弃掉?(剩 '+skips+' 次弃额)');
+}
+function start(sd){
+  seed=sd;st=(sd*2654435761)>>>0;
+  round=1;total=0;skips=2;hist=[];over=false;curVal=0;
+  $('seedin').value=sd;
+  draw();setDie($('die'),0,false);
+  $('curtx').textContent='—';
+  nextRound();
+}
+function finish(){
+  over=true;draw();
+  var t=total>=24?'神级操作!':total>=20?'胜利!':'运气留不住';
+  $('ovt').textContent=t;
+  var seq='';
+  for(var i=0;i<hist.length;i++)seq+=hist[i][0]+(hist[i][1]?'':'弃')+(i<hist.length-1?' · ':'');
+  $('ovp').innerHTML='种子 '+seed+' · 总分 <b>'+total+'</b><br>序列:'+seq+'<br>把种子号分享给好友,看看谁的决策更强!';
+  $('overlay').classList.add('show');
+}
+$('keep').onclick=function(){
+  if(over||round>5)return;
+  total+=curVal;hist.push([curVal,true]);round++;
+  draw();nextRound();
+};
+$('drop').onclick=function(){
+  if(over||round>5||skips<=0)return;
+  hist.push([curVal,false]);skips--;round++;
+  draw();nextRound();
+};
+$('go').onclick=function(){
+  var n=parseInt($('seedin').value,10);
+  if(!n||n<1)n=20260927;
+  if(n>999999)n=n%999999+1;
+  start(n);
+};
+$('lucky').onclick=function(){
+  start(1+Math.floor(Math.random()*999999));
+};
+$('retry').onclick=function(){start(seed)};
+$('newseed').onclick=function(){
+  $('overlay').classList.remove('show');
+  say('输入新的种子号,再点「以此种子开局」!');
+};
+start(20260927);
+</script>
+</body>
+</html>

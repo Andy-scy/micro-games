@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抽乌龟 鬼牌别落手</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:720px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+.row{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;min-height:64px}
+.card{width:40px;height:56px;border-radius:6px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.45);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:12px;font-weight:800}
+.card .s{font-size:18px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63);cursor:pointer}
+.card.back span{visibility:hidden}
+.card.back:hover{outline:2px solid #4cc9f0}
+.card.ghost{outline:3px solid #ff6b6b}
+#msg{min-height:40px;font-size:14px;color:#ffd166;text-align:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>抽乌龟 · 鬼牌别落手</h1>
+<p id="how">黑桃 Q 已抽走，剩下的三张 Q 里最后必有一张落单成「乌龟」。开局自动配好对子，轮流从对方手里抽一张：抽到能配对的牌可再抽一次。先清空手牌的人安全，乌龟在谁手里谁输。</p>
+<div id="bar"><span>你的对子 <b id="pp">0</b></span><span>AI 的对子 <b id="ap">0</b></span><span>你的牌 <b id="pn">26</b></span><span>AI 的牌 <b id="an">25</b></span></div>
+<div id="table">
+  <div class="lab">AI 的手牌（轮到你时点一张抽走）</div>
+  <div class="row" id="arow"></div>
+  <div class="lab">你的手牌</div>
+  <div class="row" id="prow"></div>
+  <div id="msg"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var hands=[[],[]],pairs=[0,0],phase='p',aiTimer=null;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function cardHTML(c,back,ghost){
+  if(back)return '<div class="card back" data-i="'+c._i+'"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+(ghost?' ghost':'')+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('pp').textContent=pairs[0];$('ap').textContent=pairs[1];
+  $('pn').textContent=hands[0].length;$('an').textContent=hands[1].length;
+  var ar='';
+  for(var i=0;i<hands[1].length;i++){
+    var c={_i:i};
+    ar+=cardHTML(c,true,false);
+  }
+  $('arow').innerHTML=ar;
+  var pr='';
+  for(var k=0;k<hands[0].length;k++)pr+=cardHTML(hands[0][k],false,false);
+  $('prow').innerHTML=pr;
+}
+function msg(s){$('msg').innerHTML=s;}
+function layPairs(who){
+  var h=hands[who],n=0,changed=true;
+  while(changed){
+    changed=false;
+    for(var i=0;i<h.length&&!changed;i++)for(var j=i+1;j<h.length;j++){
+      if(h[i].r===h[j].r){h.splice(j,1);h.splice(i,1);pairs[who]++;n++;changed=true;break;}
+    }
+  }
+  return n;
+}
+function checkEnd(){
+  if(hands[0].length===0&&hands[1].length===0){end(true,'双方同时清空，奇迹平局（算你赢）');return true;}
+  if(hands[0].length===0){end(true,'你清空手牌，乌龟在 AI 手里！');return true;}
+  if(hands[1].length===0){end(false,'AI 清空手牌，乌龟落在你手里');return true;}
+  return false;
+}
+function pick(who,idx){
+  var other=1-who,from=hands[other];
+  if(from.length===0)return;
+  var i=(idx===null||idx===undefined)?Math.floor(Math.random()*from.length):idx;
+  var c=from.splice(i,1)[0];
+  var before=hands[who].length;
+  hands[who].push(c);
+  var made=layPairs(who);
+  var whoName=(who===0?'你':'AI');
+  if(made>0){
+    msg(whoName+' 抽到 '+c.r+'，当场配对！'+(made>1?'连爆 '+made+' 对！':'')+(who===0?' 再抽一次':''));
+  }else{
+    msg(whoName+' 抽到一张没用的牌，换对方行动');
+  }
+  render();
+  if(checkEnd())return;
+  if(made>0){
+    if(who===0){phase='p';return;}
+    else{aiTimer=setTimeout(function(){aiMove();},900);return;}
+  }
+  if(who===0){phase='a';aiTimer=setTimeout(function(){aiMove();},900);}
+  else{phase='p';}
+  render();
+}
+function aiMove(){
+  if(phase==='done')return;
+  if(hands[0].length===0){checkEnd();return;}
+  phase='a';pick(1,null);
+}
+$('arow').addEventListener('click',function(e){
+  if(phase!=='p')return;
+  var t=e.target;
+  while(t&&!t.classList.contains('card'))t=t.parentElement;
+  if(!t)return;
+  var i=parseInt(t.getAttribute('data-i'),10);
+  if(isNaN(i))return;
+  phase='busy';
+  pick(0,i);
+});
+$('again').onclick=newGame;
+function end(win,info){
+  phase='done';if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 对子数 你 '+pairs[0]+' : AI '+pairs[1];
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++){
+    if(i===0&&j===11)continue;
+    d.push({s:SUITS[i],r:RANKS[j]});
+  }
+  shuffle(d);
+  hands=[d.slice(0,26),d.slice(26)];
+  pairs=[0,0];
+  layPairs(0);layPairs(1);
+  phase='p';
+  $('over').classList.add('hide');
+  msg('对子已配好，点 AI 的牌墙抽一张');render();
+  checkEnd();
+}
+newGame();
+})();
+</script>
+</body>
+</html>

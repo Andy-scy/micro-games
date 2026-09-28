@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黑洞边缘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#818cf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#818cf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#818cf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#818cf8;color:#1a1a4d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>黑洞边缘</h1>
+  <p class="hint">方向键 / WASD 点燃推进器 · 触屏按住朝手指方向推进 · 借黑洞引力滑翔</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>能量球 <b id="orbs">0</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">黑洞边缘</h2>
+      <p id="ovDesc">深空中没有任何摩擦,只有黑洞的引力在拉扯你的探测球。用推进器(方向键)控制航向,巧妙借助黑洞引力弯道滑翔,收集全部能量球后进入闪烁的虫洞。越靠近黑洞引力越强,但碰到视界即被吞噬!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=8,K=8;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elOrbs=$("orbs"),elLives=$("lives"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s395");
+var LEVELS=[
+ {holes:[{x:240,y:270,r:14}],orbs:[{x:120,y:110},{x:360,y:110},{x:110,y:410},{x:370,y:410}],exit:{x:240,y:60}},
+ {holes:[{x:150,y:260,r:14},{x:330,y:260,r:14}],orbs:[{x:60,y:80},{x:420,y:80},{x:60,y:450},{x:420,y:450},{x:240,y:130}],exit:{x:240,y:480}},
+ {holes:[{x:120,y:160,r:18},{x:360,y:160,r:18},{x:240,y:410,r:14}],orbs:[{x:40,y:60},{x:440,y:60},{x:240,y:270},{x:60,y:480},{x:420,y:480},{x:150,y:310}],exit:{x:240,y:60}}
+];
+var state,lv,lives,score,ship,holes,orbs,exitP,trail,keys,touchP,pulse;
+function reset(){lv=0;lives=3;score=0;loadLevel();updateHud();}
+function loadLevel(){
+  var L=LEVELS[lv],i;
+  holes=[];
+  for(i=0;i<L.holes.length;i++)holes.push({x:L.holes[i].x,y:L.holes[i].y,r:L.holes[i].r});
+  orbs=[];
+  for(i=0;i<L.orbs.length;i++)orbs.push({x:L.orbs[i].x,y:L.orbs[i].y,got:false});
+  exitP={x:L.exit.x,y:L.exit.y};
+  ship={x:40,y:490,vx:0,vy:0};
+  trail=[];keys={};touchP=null;
+  elLv.textContent=lv+1;updateHud();
+}
+function orbsLeft(){var n=0,i;for(i=0;i<orbs.length;i++)if(!orbs[i].got)n++;return n;}
+function updateHud(){
+  elOrbs.textContent=(orbs.length-orbsLeft())+"/"+orbs.length;
+  elLives.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+}
+function death(){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"探测球被黑洞吞噬…生命耗尽!");return;}
+  loadLevel();
+  state="playing";
+}
+function clearLevel(){
+  score+=200;updateHud();
+  if(lv<LEVELS.length-1){
+    lv++;state="transition";
+    window.setTimeout(function(){if(state==="transition"){loadLevel();state="playing";}},900);
+  }else finish(true,"穿越全部虫洞,引力大师!");
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s395",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k.indexOf("Arrow")===0||k===" ")e.preventDefault();
+  if((k===" "||k==="Enter")&&(state==="menu"||state==="over")){startGame();return;}
+  if(k==="ArrowUp"||k==="w"||k==="W")keys.up=true;
+  if(k==="ArrowDown"||k==="s"||k==="S")keys.down=true;
+  if(k==="ArrowLeft"||k==="a"||k==="A")keys.left=true;
+  if(k==="ArrowRight"||k==="d"||k==="D")keys.right=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")keys.up=false;
+  if(k==="ArrowDown"||k==="s"||k==="S")keys.down=false;
+  if(k==="ArrowLeft"||k==="a"||k==="A")keys.left=false;
+  if(k==="ArrowRight"||k==="d"||k==="D")keys.right=false;
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchP={x:(t.clientX-r.left)*W/r.width,y:(t.clientY-r.top)*H/r.height};
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing"||!touchP)return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchP={x:(t.clientX-r.left)*W/r.width,y:(t.clientY-r.top)*H/r.height};
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchP=null;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  pulse+=dt*0.004;
+  if(state==="playing"){
+    var ax=(keys.right?1:0)-(keys.left?1:0);
+    var ay=(keys.down?1:0)-(keys.up?1:0);
+    if(touchP){
+      var tdx=touchP.x-ship.x,tdy=touchP.y-ship.y,td=Math.sqrt(tdx*tdx+tdy*tdy);
+      if(td>10){ax=tdx/td;ay=tdy/td;}
+    }
+    ship.vx+=ax*0.0009*dt;ship.vy+=ay*0.0009*dt;
+    var i;
+    for(i=0;i<holes.length;i++){
+      var h=holes[i];
+      var dx=h.x-ship.x,dy=h.y-ship.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<h.r+BR){death();return;}
+      if(d>1){
+        var f=K/(d*d+1500);
+        if(f>0.004)f=0.004;
+        ship.vx+=dx/d*f*dt;ship.vy+=dy/d*f*dt;
+      }
+    }
+    ship.vx*=1-0.0002*dt;ship.vy*=1-0.0002*dt;
+    ship.x+=ship.vx*dt;ship.y+=ship.vy*dt;
+    if(ship.x<BR+6){ship.x=BR+6;ship.vx=Math.abs(ship.vx)*0.5;}
+    if(ship.x>W-BR-6){ship.x=W-BR-6;ship.vx=-Math.abs(ship.vx)*0.5;}
+    if(ship.y<BR+6){ship.y=BR+6;ship.vy=Math.abs(ship.vy)*0.5;}
+    if(ship.y>H-BR-6){ship.y=H-BR-6;ship.vy=-Math.abs(ship.vy)*0.5;}
+    trail.push({x:ship.x,y:ship.y,life:420});
+    if(trail.length>40)trail.shift();
+    for(i=0;i<trail.length;i++)trail[i].life-=dt;
+    for(i=0;i<orbs.length;i++){
+      var o=orbs[i];
+      if(!o.got){
+        var ox=o.x-ship.x,oy=o.y-ship.y;
+        if(ox*ox+oy*oy<(BR+10)*(BR+10)){o.got=true;score+=50;updateHud();}
+      }
+    }
+    if(orbsLeft()===0){
+      var ex=exitP.x-ship.x,ey=exitP.y-ship.y;
+      if(ex*ex+ey*ey<16*16)clearLevel();
+    }
+  }
+  draw();
+}
+function draw(){
+  var i,j;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#070a18";ctx.fillRect(0,0,W,H);
+  for(i=0;i<40;i++){
+    var sx=(i*127)%W,sy=(i*211)%H;
+    ctx.globalAlpha=0.2+0.2*Math.sin(pulse*2+i);
+    ctx.fillStyle="#c7cbe8";ctx.fillRect(sx,sy,1.6,1.6);
+  }
+  ctx.globalAlpha=1;
+  for(i=0;i<holes.length;i++){
+    var h=holes[i];
+    ctx.save();
+    ctx.translate(h.x,h.y);
+    ctx.rotate(pulse);
+    for(j=0;j<3;j++){
+      ctx.strokeStyle="rgba(129,140,248,"+(0.5-j*0.15)+")";
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(0,0,h.r+5+j*6,j*2,j*2+Math.PI*1.4);ctx.stroke();
+    }
+    ctx.restore();
+    var gr=ctx.createRadialGradient(h.x,h.y,2,h.x,h.y,h.r+22);
+    gr.addColorStop(0,"#000000");
+    gr.addColorStop(0.72,"#05030f");
+    gr.addColorStop(1,"rgba(129,140,248,0.05)");
+    ctx.fillStyle=gr;
+    ctx.beginPath();ctx.arc(h.x,h.y,h.r+22,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#000";
+    ctx.beginPath();ctx.arc(h.x,h.y,h.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="rgba(244,114,182,0.7)";ctx.lineWidth=1.5;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.arc(h.x,h.y,h.r+BR+2,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for(i=0;i<orbs.length;i++){
+    var o=orbs[i];
+    if(o.got)continue;
+    ctx.fillStyle="#4ade80";
+    ctx.shadowColor="#4ade80";ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(o.x,o.y,7+Math.sin(pulse*3+i)*1.2,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  if(orbsLeft()===0){
+    ctx.save();
+    ctx.translate(exitP.x,exitP.y);
+    ctx.rotate(pulse*2);
+    ctx.strokeStyle="#a78bfa";ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*1.4);ctx.stroke();
+    ctx.rotate(2.2);
+    ctx.strokeStyle="#f0abfc";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*1.2);ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle="#a78bfa";ctx.font="11px system-ui";ctx.textAlign="center";
+    ctx.fillText("虫洞已开启",exitP.x,exitP.y-24);
+    ctx.textAlign="left";
+  }
+  for(i=0;i<trail.length;i++){
+    var tr=trail[i];
+    ctx.globalAlpha=tr.life/420*0.5;
+    ctx.fillStyle="#818cf8";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#e0e7ff";
+  ctx.shadowColor="#818cf8";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(ship.x,ship.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

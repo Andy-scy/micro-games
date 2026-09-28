@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风车险境</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb923c;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb923c;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb923c}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb923c;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>风车险境</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 拍翅膀 · 看准旋转叶片的空隙穿过去!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">风车险境</h2>
+      <p id="ovDesc">峡谷里立满了巨大的旋转风车:三片长叶绕轴飞转,有的装在地面,有的倒挂崖顶。点按拍翅上升,掐准叶片扫过的节奏从空隙中穿行,擦到叶片、立柱或坠地都会坠落。每过一台风车 +1 分!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,R=86,GRAV=1480,FLAP=-380,BX=120,BR=13,SPEED=140;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,mills,popups,score,best=0,tick;
+function newMill(x){
+  var mount=Math.random()<0.5?"floor":"ceil";
+  var hy=mount==="floor"?(172+Math.random()*(GROUND-R-72-172)):(158+Math.random()*(GROUND-172-158));
+  return{x:x,hy:hy,mount:mount,ang:Math.random()*6.28,spd:(Math.random()<0.5?-1:1)*(1.3+Math.random()*1.1),passed:false};
+}
+function reset(){
+  bird={y:280,vy:0,fl:0};
+  mills=[newMill(W+170)];
+  popups=[];score=0;tick=0;
+  elScore.textContent="0";
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function distSeg(px,py,x1,y1,x2,y2){
+  var dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;
+  var t=l2>0?((px-x1)*dx+(py-y1)*dy)/l2:0;
+  t=Math.max(0,Math.min(1,t));
+  var qx=x1+t*dx,qy=y1+t*dy,ex=px-qx,ey=py-qy;
+  return Math.sqrt(ex*ex+ey*ey);
+}
+function update(dt){
+  var i,m,k;
+  tick+=dt;
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("坠落在风车塔下!");return;}
+  for(i=0;i<mills.length;i++){
+    m=mills[i];
+    m.x-=SPEED*dt;
+    m.ang+=m.spd*dt;
+  }
+  if(mills[mills.length-1].x<W-302)mills.push(newMill(W+30));
+  if(mills[0].x<-R-30)mills.shift();
+  for(i=0;i<mills.length;i++){
+    m=mills[i];
+    if(!m.passed&&m.x<BX-105){
+      m.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    var py0=m.mount==="floor"?m.hy:0,ph=m.mount==="floor"?GROUND-m.hy:m.hy;
+    if(circleRect(BX,bird.y,BR,m.x-5,py0,10,ph)){die("撞上了风车立柱!");return;}
+    for(k=0;k<3;k++){
+      var a=m.ang+k*2.094;
+      var tx=m.x+Math.cos(a)*R,ty=m.hy+Math.sin(a)*R;
+      if(distSeg(BX,bird.y,m.x,m.hy,tx,ty)<BR+5){die("被风车叶片扫中了!");return;}
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawMill(m){
+  var k;
+  ctx.fillStyle="#7c4a21";
+  ctx.beginPath();
+  ctx.arc(m.x,m.hy,R,0,Math.PI*2);
+  ctx.strokeStyle="rgba(251,146,60,0.12)";ctx.lineWidth=2;
+  ctx.stroke();
+  ctx.fillStyle="#8a5527";
+  if(m.mount==="floor")ctx.fillRect(m.x-5,m.hy,10,GROUND-m.hy);
+  else ctx.fillRect(m.x-5,0,10,m.hy);
+  for(k=0;k<3;k++){
+    var a=m.ang+k*2.094;
+    ctx.save();
+    ctx.translate(m.x,m.hy);
+    ctx.rotate(a);
+    ctx.fillStyle="#fb923c";
+    ctx.beginPath();
+    ctx.moveTo(-4,0);ctx.lineTo(0,-R);ctx.lineTo(4,0);ctx.lineTo(0,6);ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle="#fed7aa";
+    ctx.fillRect(-4,-R,8,12);
+    ctx.restore();
+  }
+  ctx.fillStyle="#431407";
+  ctx.beginPath();ctx.arc(m.x,m.hy,9,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#fdba74";
+  ctx.beginPath();ctx.arc(m.x,m.hy,4,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#1a120c";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,214,170,0.25)";
+  for(i=0;i<30;i++)ctx.fillRect((i*151)%W,(i*197)%GROUND,1.3,1.3);
+  for(i=0;i<mills.length;i++)drawMill(mills[i]);
+  ctx.fillStyle="#33241a";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#4a3628";
+  var off=(tick*SPEED)%26;
+  for(i=-1;i<W/26+1;i++)ctx.fillRect(i*26-off,GROUND,13,6);
+  ctx.fillStyle="#fdba74";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#ea580c";
+  ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a120c";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f97316";
+  ctx.beginPath();ctx.moveTo(BX+BR-2,bird.y);ctx.lineTo(BX+BR+8,bird.y+2);ctx.lineTo(BX+BR-2,bird.y+6);ctx.closePath();ctx.fill();
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(253,186,116,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

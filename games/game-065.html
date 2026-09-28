@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深海潜航</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#22d3ee;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>深海潜航</h1>
+  <p class="hint">按住空格 / 鼠标 / 触屏 = 排水上浮 · 松开 = 下潜 · 小心水雷!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">深海潜航</h2>
+      <p id="ovDesc">驾驶深海潜艇:按住 = 排水上浮,松开 = 缓缓下沉,水里全是惯性与阻力,潜艇会滑翔漂移!穿过珊瑚拱门 +1 分,碰到漂浮水雷或触底即结束。轻按细调,感受浮力。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始下潜</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=66,GAP=178,SPACE=254,BX=110,BR=15;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,arches,mines,bubbles,popups,score,best=0,tick,hold;
+function newArch(x){return{x:x,gy:80+Math.random()*(GROUND-200-GAP),passed:false};}
+function reset(){
+  bird={y:270,vy:0};
+  arches=[newArch(W+150)];
+  mines=[];bubbles=[];popups=[];
+  score=0;tick=0;hold=false;
+  elScore.textContent="0";
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,a,m;
+  tick+=dt;
+  bird.vy+=(hold?-760:560)*dt;
+  bird.vy-=bird.vy*1.5*dt;
+  if(bird.vy<-270)bird.vy=-270;
+  if(bird.vy>270)bird.vy=270;
+  bird.y+=bird.vy*dt;
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("潜艇触底搁浅了!");return;}
+  if(Math.random()<0.3)bubbles.push({x:Math.random()*W,y:GROUND+8,r:1.5+Math.random()*3,v:26+Math.random()*36});
+  for(i=bubbles.length-1;i>=0;i--){
+    bubbles[i].y-=bubbles[i].v*dt;bubbles[i].x+=Math.sin(tick*2+i)*12*dt;
+    if(bubbles[i].y<-10)bubbles.splice(i,1);
+  }
+  for(i=0;i<arches.length;i++)arches[i].x-=120*dt;
+  if(arches[arches.length-1].x<W-SPACE){
+    arches.push(newArch(W+24));
+    if(Math.random()<0.7)mines.push({x:W+24+160,y:120+Math.random()*(GROUND-250),r:15,ph:Math.random()*6.28});
+  }
+  if(arches[0].x<-PW-12)arches.shift();
+  for(i=mines.length-1;i>=0;i--){
+    mines[i].x-=120*dt;
+    if(mines[i].x<-30)mines.splice(i,1);
+  }
+  for(i=0;i<arches.length;i++){
+    a=arches[i];
+    if(!a.passed&&a.x+PW<BX-BR){
+      a.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+36,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    if(circleRect(BX,bird.y,BR,a.x,0,PW,a.gy)||circleRect(BX,bird.y,BR,a.x,a.gy+GAP,PW,GROUND-a.gy-GAP)){
+      die("潜艇撞上了珊瑚礁!");return;
+    }
+  }
+  for(i=0;i<mines.length;i++){
+    m=mines[i];
+    var my=m.y+Math.sin(tick*1.8+m.ph)*10;
+    var dx=BX-m.x,dy=bird.y-my,rr=BR+m.r;
+    if(dx*dx+dy*dy<rr*rr){die("轰!撞上了水雷!");return;}
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawCoral(x,gy,down){
+  var i;
+  ctx.fillStyle=down?"#c2637d":"#e08a5a";
+  ctx.fillRect(x,down?gy+GAP:0,PW,down?GROUND-gy-GAP:gy);
+  ctx.fillStyle=down?"#e08a9b":"#f3b08a";
+  ctx.fillRect(x+7,down?gy+GAP:0,8,down?GROUND-gy-GAP:gy);
+  ctx.fillStyle=down?"#f0a6b8":"#f7c9a5";
+  for(i=0;i<3;i++){
+    ctx.beginPath();
+    ctx.arc(x+12+i*20,down?gy+GAP+6:gy-6,6,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+function drawMine(m){
+  var my=m.y+Math.sin(tick*1.8+m.ph)*10,i;
+  ctx.strokeStyle="#64748b";ctx.lineWidth=2.5;
+  for(i=0;i<8;i++){
+    var an=i*Math.PI/4;
+    ctx.beginPath();
+    ctx.moveTo(m.x+Math.cos(an)*m.r,my+Math.sin(an)*m.r);
+    ctx.lineTo(m.x+Math.cos(an)*(m.r+6),my+Math.sin(an)*(m.r+6));
+    ctx.stroke();
+  }
+  ctx.fillStyle="#334155";
+  ctx.beginPath();ctx.arc(m.x,my,m.r,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=Math.sin(tick*6+m.ph)>0?"#f87171":"#7f1d1d";
+  ctx.beginPath();ctx.arc(m.x,my,4,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var i;
+  var grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#0c3350");grd.addColorStop(1,"#061a2c");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(103,232,249,0.18)";
+  for(i=0;i<bubbles.length;i++){
+    ctx.beginPath();ctx.arc(bubbles[i].x,bubbles[i].y,bubbles[i].r,0,Math.PI*2);ctx.fill();
+  }
+  for(i=0;i<arches.length;i++){
+    drawCoral(arches[i].x,arches[i].gy,false);
+    drawCoral(arches[i].x,arches[i].gy,true);
+  }
+  for(i=0;i<mines.length;i++)drawMine(mines[i]);
+  ctx.fillStyle="#123549";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#1d526e";
+  var off=(tick*120)%28;
+  for(i=-1;i<W/28+1;i++)ctx.fillRect(i*28-off,GROUND+6,14,5);
+  ctx.save();
+  ctx.translate(BX,bird.y);
+  ctx.rotate(bird.vy*0.0011);
+  ctx.fillStyle="#facc15";
+  ctx.beginPath();ctx.ellipse(14,0,7,4,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#22d3ee";
+  ctx.beginPath();ctx.ellipse(0,0,20,11,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0e7490";
+  ctx.beginPath();ctx.moveTo(-14,-9);ctx.lineTo(-24,-15);ctx.lineTo(-24,15);ctx.lineTo(-14,9);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#e0f2fe";
+  ctx.beginPath();ctx.arc(6,-1,4.5,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#94a3b8";ctx.lineWidth=2;
+  var pr=hold?Math.sin(tick*30)*5:Math.sin(tick*8)*5;
+  ctx.beginPath();ctx.moveTo(-26,-pr);ctx.lineTo(-26,pr);ctx.stroke();
+  ctx.restore();
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(250,204,21,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function setHold(v){
+  if(state==="playing")hold=v;
+  else hold=false;
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)setHold(true);}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "||e.key==="ArrowUp")setHold(false);
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();setHold(true);});
+document.addEventListener("mouseup",function(){setHold(false);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();setHold(true);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();setHold(false);},{passive:false});
+cv.addEventListener("touchcancel",function(){setHold(false);});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

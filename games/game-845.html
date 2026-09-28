@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>狼羊菜渡河</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:470px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.scene{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px;display:flex;gap:8px;min-height:230px}
+.bank{flex:1;background:#20264a;border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.btitle{color:#8f97c0;font-size:12px}
+.river{width:86px;background:#14204a;border-radius:10px;position:relative;overflow:hidden}
+.river::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(180deg,transparent 0 10px,rgba(80,110,220,.12) 10px 20px)}
+.wave{position:absolute;left:0;right:0;bottom:4px;text-align:center;color:#3d5599;font-size:11px;z-index:1}
+.boat{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:66px;background:#5a4632;border:2px solid #8a6a45;border-radius:8px;padding:5px 3px;text-align:center;z-index:2;transition:transform .55s ease}
+.boat.right{transform:translateX(-50%) translateY(-92px)}
+.chip{display:inline-block;padding:7px 12px;border-radius:9px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;color:#0f1220}
+.chip.lock{opacity:.45;cursor:default}
+.chip:hover{filter:brightness(1.15)}
+#boatIn{min-height:24px;font-size:13px;font-weight:700;color:#ffe9c9}
+#msg{text-align:center;min-height:20px;font-size:14px;color:#ff9aa8;margin-bottom:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>狼羊菜渡河</h1>
+<p class="tip">农夫带狼、羊、菜过河,小船每次只能载一样东西。<br>无人看管时:狼吃羊、羊吃菜。点击物品上/下船,再点渡河。</p>
+<div class="hud"><span id="hC">渡河 0 次</span><span>最少 7 次</span></div>
+<div class="scene">
+  <div class="bank" id="bankL"><div class="btitle">左岸(起点)</div></div>
+  <div class="river">
+    <div class="wave">河</div>
+    <div class="boat" id="boat"><div id="boatIn">农夫</div></div>
+  </div>
+  <div class="bank" id="bankR"><div class="btitle">右岸(终点)</div></div>
+</div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn pri" id="bCross">渡河</button><button class="btn" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const ITEMS=[["wolf","狼","#b7c0e8"],["sheep","羊","#f2f4ff"],["cabbage","菜","#7ee787"]];
+const NAMES={wolf:"狼",sheep:"羊",cabbage:"菜"};
+let side={},farmer=0,boat=null,cross=0,over=false;
+function chipEl(name){
+  const it=ITEMS.find(x=>x[0]===name);
+  const b=document.createElement("button");
+  b.className="chip";b.style.background=it[2];
+  b.textContent=NAMES[name];
+  b.addEventListener("click",()=>clickItem(name));
+  return b;
+}
+function render(){
+  const bl=document.getElementById("bankL"),br=document.getElementById("bankR");
+  bl.innerHTML='<div class="btitle">左岸(起点)</div>';
+  br.innerHTML='<div class="btitle">右岸(终点)</div>';
+  for(const it of ITEMS){
+    const name=it[0];
+    if(boat===name)continue;
+    const b=chipEl(name);
+    if(over||(side[name]!==farmer)||boat!==null){b.classList.add("lock");}
+    (side[name]===0?bl:br).appendChild(b);
+  }
+  const boatEl=document.getElementById("boat");
+  boatEl.classList.toggle("right",farmer===1);
+  const bi=document.getElementById("boatIn");
+  bi.textContent="农夫"+(boat?("·"+NAMES[boat]):"");
+  bi.style.cursor=(boat&&!over)?"pointer":"default";
+  bi.onclick=()=>{if(boat&&!over){side[boat]=farmer;boat=null;document.getElementById("msg").textContent="";render();}};
+  document.getElementById("hC").textContent="渡河 "+cross+" 次";
+}
+function clickItem(name){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(boat!==null){msg.textContent="船上已有东西,先卸下或渡河";return;}
+  if(side[name]!==farmer){msg.textContent="它在河对岸,够不着";return;}
+  boat=name;msg.textContent="";render();
+}
+function doCross(){
+  if(over)return;
+  farmer=1-farmer;
+  if(boat){side[boat]=farmer;boat=null;}
+  cross++;
+  render();
+  check();
+}
+function check(){
+  for(let b=0;b<2;b++){
+    if(farmer===b)continue;
+    const on=n=>side[n]===b;
+    if(on("wolf")&&on("sheep"))return lose("狼把羊吃了!");
+    if(on("sheep")&&on("cabbage"))return lose("羊把菜吃了!");
+  }
+  if(side.wolf===1&&side.sheep===1&&side.cabbage===1){
+    over=true;
+    show("渡河成功!","全部安全过河 · 共渡河 "+cross+" 次(最少 7 次)");
+  }
+}
+function lose(reason){over=true;show("失败……",reason+" 想想该先带谁走?");}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  side={wolf:0,sheep:0,cabbage:0};farmer=0;boat=null;cross=0;over=false;
+  document.getElementById("msg").textContent="";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+document.getElementById("bCross").addEventListener("click",doCross);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

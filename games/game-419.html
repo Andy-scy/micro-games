@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重力方块</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#91a7ff}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.tb{margin-top:8px;display:flex;gap:8px}
+.tb button{background:#2e3660;color:#e8eaf6;border:none;border-radius:12px;padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.tb button:active{transform:scale(.95);background:#3c4680}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#91a7ff;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+#ovB{background:#91a7ff;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;color:#141933;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>重力方块</h1>
+<p class="hint">方向键移动/旋转/软降,空格直落 · 像素方块受重力堆叠,拼满整行即消除</p>
+<div class="tb">
+  <button id="bL">← 左移</button>
+  <button id="bR">右移 →</button>
+  <button id="bT">旋转</button>
+  <button id="bD">直落</button>
+</div>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">重力方块</h2><p id="ovM">像素方块从天而降,受重力堆进井中。<br>横向拼满一整行就会消除得分;方块堆到井口就结束。<br>键盘:←→ 移动,↑ 旋转,↓ 软降,空格直落;下方按钮供触屏使用。</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height;
+var COLS=10,ROWS=18,CS=22,GX=100,GY=112;
+var SHAPES=[
+  {m:[[1,1,1,1]],c:'#4dabf7'},
+  {m:[[1,1],[1,1]],c:'#ffd166'},
+  {m:[[1,1,1],[0,1,0]],c:'#b197fc'},
+  {m:[[1,0],[1,0],[1,1]],c:'#ffa94d'},
+  {m:[[1,1],[1,0],[1,0]],c:'#74c0fc'},
+  {m:[[0,1,1],[1,1,0]],c:'#69db7c'},
+  {m:[[1,1,0],[0,1,1]],c:'#ff8787'}
+];
+var grid,pc,nx,bag,fall,fallInt,pieces,lines,score,state='ready',cleared,clearT;
+
+function newRow(){var a=[],i;for(i=0;i<COLS;i++)a.push(0);return a;}
+function rot(m){var r=[],i,j;for(i=0;i<m[0].length;i++){r[i]=[];for(j=m.length-1;j>=0;j--)r[i][j]=m[j][i];}return r;}
+function refill(){bag=[0,1,2,3,4,5,6];var i,j,t;for(i=bag.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=bag[i];bag[i]=bag[j];bag[j]=t;}}
+function nextIdx(){if(bag.length===0)refill();return bag.pop();}
+function copyM(m){return m.map(function(r){return r.slice();});}
+function reset(){
+  grid=[];var i;for(i=0;i<ROWS;i++)grid.push(newRow());
+  bag=[];refill();pieces=0;lines=0;score=0;fall=0;fallInt=0.55;cleared=0;clearT=0;
+  nx=SHAPES[nextIdx()];
+  spawn();
+}
+function spawn(){
+  pc={m:copyM(nx.m),c:nx.c};
+  nx=SHAPES[nextIdx()];
+  var px=3,py=0;
+  if(hit(px,py,pc.m)){finish();return;}
+  pc.x=px;pc.y=py;fall=0;
+}
+function hit(px,py,m){
+  var r,c;
+  for(r=0;r<m.length;r++)for(c=0;c<m[r].length;c++){
+    if(m[r][c]){
+      var gx=px+c,gy=py+r;
+      if(gx<0||gx>=COLS||gy>=ROWS)return true;
+      if(gy>=0&&grid[gy][gx])return true;
+    }
+  }
+  return false;
+}
+function move(dx){if(state==='play'&&pc&&!hit(pc.x+dx,pc.y,pc.m))pc.x+=dx;}
+function rotateP(){
+  if(state!=='play'||!pc)return;
+  var r=rot(pc.m),ks=[0,-1,1,-2,2],k;
+  for(k=0;k<ks.length;k++){
+    if(!hit(pc.x+ks[k],pc.y,r)){pc.m=r;pc.x+=ks[k];return;}
+  }
+}
+function lock(){
+  var r,c,topOut=false,nl=0,y;
+  for(r=0;r<pc.m.length;r++)for(c=0;c<pc.m[r].length;c++){
+    if(pc.m[r][c]){
+      var gy=pc.y+r;
+      if(gy<0){topOut=true;continue;}
+      grid[gy][pc.x+c]=pc.c;
+    }
+  }
+  if(topOut){finish();return;}
+  for(y=ROWS-1;y>=0;y--){
+    var full=true,c2;
+    for(c2=0;c2<COLS;c2++)if(!grid[y][c2]){full=false;break;}
+    if(full){grid.splice(y,1);grid.push(newRow());nl++;y++;}
+  }
+  if(nl>0){
+    score+=[0,100,300,500,800][nl]* (1+Math.floor(lines/10));
+    lines+=nl;cleared=nl;clearT=1.4;
+    pop('消除 '+nl+' 行!');
+  }
+  pieces++;
+  fallInt=Math.max(0.16,0.55-pieces*0.005);
+  spawn();
+}
+function hardDrop(){
+  if(state!=='play'||!pc)return;
+  while(!hit(pc.x,pc.y+1,pc.m))pc.y++;
+  lock();
+}
+function softStep(){
+  if(!hit(pc.x,pc.y+1,pc.m))pc.y++;
+  else lock();
+}
+var pops=[];
+function pop(t){pops.push({t:t,life:1});}
+function finish(){
+  state='over';
+  window.setTimeout(function(){
+    ovT.textContent='堆到井口了!';
+    ovS.textContent='消除 '+lines+' 行 · 得分 '+score;
+    ovM.textContent='留出竖井,给 I 型长条一个机会';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },600);
+}
+function start(){reset();pops=[];state='play';ov.style.display='none';}
+function step(dt){
+  if(state==='play'&&pc){
+    fall+=dt;
+    if(fall>=fallInt){fall=0;softStep();}
+  }
+  var i;
+  if(clearT>0)clearT-=dt;
+  for(i=pops.length-1;i>=0;i--){pops[i].life-=dt;if(pops[i].life<=0)pops.splice(i,1);}
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function cell(gx,gy,c){ctx.fillStyle=c;rr(GX+gx*CS+1,GY+gy*CS+1,CS-2,CS-2,4);ctx.fill();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#181c3f');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#0b0e1e';ctx.fillRect(GX,GY,COLS*CS,ROWS*CS);
+  ctx.strokeStyle='rgba(255,255,255,.05)';ctx.lineWidth=1;
+  var i,j;
+  for(i=1;i<COLS;i++){ctx.beginPath();ctx.moveTo(GX+i*CS,GY);ctx.lineTo(GX+i*CS,GY+ROWS*CS);ctx.stroke();}
+  for(j=1;j<ROWS;j++){ctx.beginPath();ctx.moveTo(GX,GY+j*CS);ctx.lineTo(GX+COLS*CS,GY+j*CS);ctx.stroke();}
+  for(i=0;i<ROWS;i++)for(j=0;j<COLS;j++)if(grid[i][j])cell(j,i,grid[i][j]);
+  if(pc&&state==='play'){
+    var r,c;
+    for(r=0;r<pc.m.length;r++)for(c=0;c<pc.m[r].length;c++){
+      if(pc.m[r][c]&&pc.y+r>=0)cell(pc.x+c,pc.y+r,pc.c);
+    }
+  }
+  ctx.strokeStyle='#39406e';ctx.lineWidth=3;
+  ctx.strokeRect(GX-2,GY-2,COLS*CS+4,ROWS*CS+4);
+  ctx.fillStyle='#9aa3c0';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('下一个',349,128);
+  ctx.strokeStyle='#39406e';ctx.strokeRect(326,138,46,46);
+  if(nx){
+    var bm=nx.m,bw=bm[0].length,bh=bm.length,ox=349-bw*CS/2,oy=161-bh*CS/2;
+    ctx.fillStyle=nx.c;
+    for(i=0;i<bh;i++)for(j=0;j<bw;j++)if(bm[i][j])rr(ox+j*CS+1,oy+i*CS+1,CS-2,CS-2,4),ctx.fill();
+  }
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('得分 '+score,14,32);
+  ctx.fillStyle='#c3cae6';ctx.font='14px system-ui,sans-serif';
+  ctx.fillText('消除行数 '+lines,14,58);
+  ctx.fillText('速度档 '+ (1+Math.floor(pieces/12)),14,80);
+  if(cleared>0&&clearT>0&&state==='play'){
+    ctx.fillStyle='#7ee0a3';ctx.font='bold 15px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('刚刚消除 '+cleared+' 行!',210,GY-14);
+  }
+  var k;
+  ctx.textAlign='center';
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle='#ffd166';ctx.font='bold 22px system-ui,sans-serif';ctx.fillText(p.t,210,300-(pops.length-i)*30);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+ovB.addEventListener('click',start);
+document.getElementById('bL').addEventListener('click',function(){move(-1);});
+document.getElementById('bR').addEventListener('click',function(){move(1);});
+document.getElementById('bT').addEventListener('click',rotateP);
+document.getElementById('bD').addEventListener('click',hardDrop);
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'){e.preventDefault();move(-1);}
+  else if(e.code==='ArrowRight'){e.preventDefault();move(1);}
+  else if(e.code==='ArrowUp'){e.preventDefault();rotateP();}
+  else if(e.code==='ArrowDown'){e.preventDefault();if(state==='play'&&pc)softStep();}
+  else if(e.code==='Space'){e.preventDefault();hardDrop();}
+});
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

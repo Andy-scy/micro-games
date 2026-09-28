@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>神机妙炮</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#241145;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>神机妙炮</h1>
+  <p class="hint">本回合点击画面或按空格,在力度条摆到合适位置时果断开炮 · 共 10 回合</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>回合 <b id="round">1/10</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">神机妙炮</h2>
+      <p id="ovDesc">角度已由炮手固定,你只负责一件事:掐时机!
+力度条来回摆动,越摆越快,在它等于目标所需力度的瞬间开炮。
+落点越接近靶心得分越高,10 回合冲击 450 分。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,GY=322,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elRound=$("round"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12;
+var best=loadBest("mg_s469");
+var state="menu",ang=45,pow=30,dir=1,rate=1.6;
+var ball=null,trail=[],round=1,score=0,tx=300,mark=-1,lastOff=0,parts=[],txts=[];
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function newRound(){
+  tx=rnd(150,452);
+  ang=Math.round(rnd(32,62));
+  rate=1.5+round*0.14;
+  pow=15;dir=1;
+}
+function reset(){
+  round=1;score=0;ball=null;trail=[];parts=[];txts=[];mark=-1;lastOff=0;
+  newRound();hud();
+}
+function hud(){elScore.textContent=score;elRound.textContent=Math.min(round,10)+"/10";elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball;}
+function shoot(){
+  if(!canFire())return;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2,2),vy:rnd(-3,0.5),l:rnd(16,36),c:col});
+}
+function floatTxt(x,y,s,col){txts.push({x:x,y:y,s:s,c:col,l:55});}
+function tick(){
+  var i;
+  if(!ball){pow+=dir*rate;if(pow>=100){pow=100;dir=-1;}if(pow<=15){pow=15;dir=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.l--;if(p.l<=0)parts.splice(i,1);}
+  for(i=txts.length-1;i>=0;i--){txts[i].y-=0.6;txts[i].l--;if(txts[i].l<=0)txts.splice(i,1);}
+  if(ball){
+    for(var s=0;s<2;s++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      if(ball.y>=GY-3){
+        var off=Math.abs(ball.x-tx);
+        var pts=off<14?100:(off<34?60:(off<64?25:5));
+        score+=pts;lastOff=Math.round(ball.x-tx);mark=ball.x;
+        boom(ball.x,GY-4,pts===100?"#fbbf24":"#8b93c8",pts===100?16:8);
+        floatTxt(ball.x,GY-26,pts===100?"完美 +100":(pts===60?"很准 +60":(pts===25?"尚可 +25":"打偏 +5")),pts>=60?"#4ade80":"#94a3b8");
+        ball=null;
+        if(round>=10){finish();return;}
+        round++;newRound();hud();break;
+      }
+      if(ball.x>W+40||ball.x<-40||ball.t>700){ball=null;if(round>=10){finish();return;}round++;newRound();hud();break;}
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+    }
+  }
+}
+function finish(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s469",best);}
+  var win=score>=450;
+  ovTitle.textContent=win?"掐点大师!":"10 回合结束";
+  ovDesc.textContent="最终得分 "+score+" 分。\n"+(win?"力度条快成闪电也难不倒你!":"多瞄几眼力度条中段的节奏,再战一回。");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  hud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function ring(x,y,r,col){ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();}
+function drawBar(){
+  var bx=20,by=16,bw=180,bh=16;
+  ctx.fillStyle="#20263f";rr(bx,by,bw,bh,8);ctx.fill();
+  var w=(bw-8)*(pow-15)/85;
+  ctx.fillStyle=pow>82?"#f87171":"#a78bfa";
+  rr(bx+4,by+4,Math.max(2,w),bh-8,5);ctx.fill();
+  ctx.strokeStyle="rgba(232,234,246,0.25)";ctx.lineWidth=1;
+  for(var i=1;i<4;i++){ctx.beginPath();ctx.moveTo(bx+bw*i/4,by);ctx.lineTo(bx+bw*i/4,by+bh);ctx.stroke();}
+  ctx.fillStyle="#8b90b0";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("力度 "+Math.round(pow),bx,by+30);
+  ctx.textAlign="right";
+  ctx.fillText("炮击目标 · 掐准力度",bx+bw,by+30);
+  ctx.textAlign="left";
+}
+function draw(){
+  var i;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  if(mark>0){ctx.strokeStyle="rgba(148,163,184,0.6)";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(mark,GY);ctx.lineTo(mark,GY-14);ctx.stroke();}
+  ring(tx,GY-24,22,"#e8eaf6");ring(tx,GY-24,14,"#f87171");ring(tx,GY-24,6,"#fbbf24");
+  ctx.fillStyle="rgba(251,191,36,0.25)";
+  ctx.fillRect(tx-14,GY-8,28,8);
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  ctx.fillStyle="#8b90b0";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("固定角度 "+ang+"°",20,GY+18);
+  drawBar();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  for(i=0;i<txts.length;i++){var t=txts[i];ctx.globalAlpha=Math.min(1,t.l/30);ctx.fillStyle=t.c;ctx.font="bold 15px system-ui";ctx.textAlign="center";ctx.fillText(t.s,t.x,t.y);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key===" "){e.preventDefault();shoot();}
+});
+cv.addEventListener("mousedown",function(e){if(state==="playing"){shoot();e.preventDefault();}});
+cv.addEventListener("touchstart",function(e){if(state==="playing"){shoot();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

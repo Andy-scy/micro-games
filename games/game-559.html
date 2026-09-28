@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拉火车 接龙吃牌</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:720px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 20px;font-size:16px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:740px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+#deckinfo{display:flex;gap:24px;align-items:center}
+.dstack{position:relative;width:44px;height:62px}
+.mini{position:absolute;width:44px;height:62px;border-radius:6px;background:linear-gradient(135deg,#2c4a8a,#1a2f63);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+#train{display:flex;justify-content:center;align-items:flex-end;min-height:74px;width:100%;overflow:hidden}
+.tcard{width:34px;height:48px;border-radius:5px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,.45);user-select:none;margin-left:-16px;animation:pop .2s ease;flex-shrink:0}
+@keyframes pop{from{transform:translateY(-8px);opacity:.3}to{transform:translateY(0);opacity:1}}
+.tcard.red{color:#d62839}
+.tcard .r{font-size:11px;font-weight:800}
+.tcard .s{font-size:16px;line-height:1}
+#msg{min-height:36px;font-size:14px;color:#ffd166;text-align:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>拉火车 · 接龙吃牌</h1>
+<p id="how">双方轮流向火车尾挂一张牌：一旦你挂出的牌与车上某张同点，从那张起直到车尾全部归你（洗乱后垫回牌堆底）。对方没牌挂时你获胜，点「出牌」推进游戏。</p>
+<div id="bar"><span>你的牌 <b id="pn">26</b></span><span>AI 的牌 <b id="an">26</b></span><span>车长 <b id="ln">0</b></span><span>回合 <b id="rd">0</b></span></div>
+<div id="table">
+  <div id="deckinfo">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div class="dstack" id="astack"></div><span class="lab">AI 牌堆</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div class="dstack" id="pstack"></div><span class="lab">你的牌堆</span></div>
+  </div>
+  <div id="train"></div>
+  <div id="msg"></div>
+  <button id="play" class="acc">出牌</button>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var pDeck=[],aDeck=[],line=[],turn=0,rounds=0,phase='play',aiTimer=null;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function cardHTML(c){
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="tcard'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('pn').textContent=pDeck.length;$('an').textContent=aDeck.length;$('ln').textContent=line.length;$('rd').textContent=rounds;
+  var ph='';for(var i=0;i<Math.min(4,pDeck.length);i++)ph+='<div class="mini" style="left:'+(i*3)+'px;top:'+(i*-3)+'px"></div>';
+  $('pstack').innerHTML=ph||'<div class="mini" style="opacity:.15"></div>';
+  var ah='';for(var k=0;k<Math.min(4,aDeck.length);k++)ah+='<div class="mini" style="left:'+(k*3)+'px;top:'+(k*-3)+'px"></div>';
+  $('astack').innerHTML=ah||'<div class="mini" style="opacity:.15"></div>';
+  var show=line.slice(-16);
+  var th='';for(var m=0;m<show.length;m++)th+=cardHTML(show[m]);
+  $('train').innerHTML=th||'<span class="lab">火车空空，等你发车</span>';
+  $('play').disabled=!(phase==='play'&&turn===0);
+}
+function msg(s){$('msg').innerHTML=s;}
+function playCard(who){
+  var deck=(who===0)?pDeck:aDeck;
+  if(deck.length===0){finish(who);return;}
+  var c=deck.shift();
+  line.push(c);rounds++;
+  var idx=-1;
+  for(var i=0;i<line.length-1;i++){
+    if(line[i].r===c.r){idx=i;break;}
+  }
+  var whoName=(who===0?'你':'AI');
+  if(idx>=0){
+    var got=line.slice(idx);
+    line=line.slice(0,idx);
+    shuffle(got);
+    var target=(who===0)?pDeck:aDeck;
+    for(var k=0;k<got.length;k++)target.push(got[k]);
+    msg(whoName+'打出 '+c.r+c.s+'，与车上的 '+c.r+' 呼应，吃走 '+got.length+' 张！');
+  }else{
+    msg(whoName+'打出 '+c.r+c.s+'，车上没有同点');
+  }
+  render();
+  if(rounds>=400){finish(pDeck.length>=aDeck.length?1:0);return;}
+  if(pDeck.length===0){finish(0);return;}
+  if(aDeck.length===0){finish(1);return;}
+  turn=1-who;
+  if(turn===1)aiTimer=setTimeout(function(){aiPlay();},850);
+  render();
+}
+function aiPlay(){
+  if(phase!=='play'||turn!==1)return;
+  playCard(1);
+}
+function finish(loser){
+  phase='done';if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  render();
+  var win=(loser===1);
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=(win?'AI 无牌可挂！':'你的牌挂光了。')+' 历时 '+rounds+' 回合，你手握 '+pDeck.length+' 张';
+  $('over').classList.remove('hide');
+}
+$('play').onclick=function(){
+  if(phase==='play'&&turn===0)playCard(0);
+};
+$('again').onclick=newGame;
+function newGame(){
+  if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});
+  shuffle(d);
+  pDeck=d.slice(0,26);aDeck=d.slice(26);
+  line=[];turn=0;rounds=0;phase='play';
+  $('over').classList.add('hide');msg('点「出牌」挂上第一张，祝好运');render();
+}
+newGame();
+})();
+</script>
+</body>
+</html>

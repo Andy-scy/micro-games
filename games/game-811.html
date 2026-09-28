@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>耐心出餐口</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative;background:#221425;border:2px solid #3c2038;border-radius:12px;padding:12px}
+.counter{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;min-height:118px}
+.cust{background:#2c1a30;border:2px solid #43284a;border-radius:10px;padding:6px 4px;text-align:center;cursor:pointer;user-select:none}
+.cust .cic{font-size:24px}
+.cust .cdish{font-size:18px;margin:2px 0}
+.cust .pbar{height:8px;border-radius:4px;background:#111527;overflow:hidden}
+.cust .pbar i{display:block;height:100%;background:#4ade80}
+.cust.empty{opacity:.35;cursor:default}
+.cust.angry{border-color:#f87171;box-shadow:0 0 10px rgba(248,113,113,.6)}
+.cust.shake{animation:shk .3s}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.tray{display:flex;gap:10px;justify-content:center;margin-top:12px}
+.dishb{width:64px;background:#301a36;border:2px solid #4d2a58;border-radius:10px;padding:6px 2px;text-align:center;cursor:pointer;user-select:none;position:relative}
+.dishb .dic{font-size:24px}
+.dishb .cdbar{height:6px;border-radius:3px;background:#111527;overflow:hidden;margin-top:4px}
+.dishb .cdbar i{display:block;height:100%;width:0;background:#f472b6}
+.dishb.cd{opacity:.45}
+.dishb.cur{border-color:#f472b6;box-shadow:0 0 10px rgba(244,114,182,.55)}
+.handline{text-align:center;font-size:13px;color:#c7cbe8;margin-top:8px;min-height:18px}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:4px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#3a0a24;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>耐心出餐口</h1>
+  <p class="hint">点餐盘按键备菜(有冷却)→ 点想要该菜的顾客送出<br><b style="color:#f472b6">耐心条越空越要先伺候</b>,气跑 3 位客人就关店!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="counter" id="counter"></div>
+    <div class="tray" id="tray"></div>
+    <div class="handline" id="handline">备餐:先点下方餐盘</div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">耐心出餐口</h2>
+      <p id="ovDesc">每位顾客头上有耐心条,站得越久掉得越快。先点餐盘备好菜(每盘有冷却),再点对应顾客送餐:耐心越足分越高,连着送对还有连击加成。上错菜或让人气走都麻烦!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var DISH=[["🍜","汤面"],["🍣","寿司"],["🥟","煎饺"],["🍤","天妇罗"]];
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var counterEl=$("counter"),trayEl=$("tray"),handline=$("handline"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s811");
+var state="menu",custs,cd,spawnT,score,combo,lives,lastT,msgT,held;
+var custEls=[],dishEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  var i;
+  for(i=0;i<5;i++){
+    var d=document.createElement("div");
+    d.className="cust empty";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<div class="cic">💺</div><div class="cdish">·</div><div class="pbar"><i></i></div>';
+    counterEl.appendChild(d);
+    custEls.push(d);
+  }
+  for(i=0;i<DISH.length;i++){
+    var b=document.createElement("div");
+    b.className="dishb";
+    b.setAttribute("data-i",String(i));
+    b.innerHTML='<div class="dic">'+DISH[i][0]+'</div><div class="dnm" style="font-size:11px;color:#8b90b0">'+DISH[i][1]+'</div><div class="cdbar"><i></i></div>';
+    trayEl.appendChild(b);
+    dishEls.push(b);
+  }
+}
+function rate(){return Math.min(20,6.5+score*0.12);}
+function reset(){
+  custs=[null,null,null,null,null];
+  cd=[0,0,0,0];
+  held=null;
+  spawnT=0.5;score=0;combo=0;lives=3;
+  msg.textContent="";msgT=0;render();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function newCust(){
+  return {dish:(Math.random()*DISH.length)|0,patience:100};
+}
+function render(){
+  var i;
+  for(i=0;i<5;i++){
+    var c=custs[i],e=custEls[i];
+    if(!c){e.className="cust empty";e.children[1].textContent="·";e.children[2].children[0].style.width="0";}
+    else{
+      e.className="cust";
+      e.children[1].textContent=DISH[c.dish][0];
+      var p=Math.max(0,c.patience);
+      e.children[2].children[0].style.width=p+"%";
+      e.children[2].children[0].style.background=p>50?"#4ade80":(p>22?"#fbbf24":"#f87171");
+    }
+  }
+  for(i=0;i<DISH.length;i++){
+    var b=dishEls[i];
+    b.className="dishb"+(cd[i]>0?" cd":"")+(held===i?" cur":"");
+    b.children[2].children[0].style.width=Math.max(0,cd[i]/1.6*100)+"%";
+  }
+  handline.textContent=held===null?"备餐:先点下方餐盘":"已备好:"+DISH[held][0]+" "+DISH[held][1]+" · 点顾客送出";
+}
+function serve(i){
+  if(state!=="playing")return;
+  var c=custs[i];
+  if(held===null){showMsg("先点餐盘备菜!","#e8b06a");return;}
+  if(!c)return;
+  if(c.dish===held){
+    var pts=10+Math.round(c.patience/5)+combo*4;
+    score+=pts;combo++;
+    showMsg("上菜 +"+pts,"#4ade80");
+    custs[i]=null;
+    held=null;
+  }else{
+    score=Math.max(0,score-8);combo=0;
+    showMsg("上错菜了! -8","#f87171");
+    var e=custEls[i];
+    e.classList.add("shake");
+    setTimeout(function(){e.classList.remove("shake");},320);
+  }
+  updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s811",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="三位客人被气跑了,今天的大堂难辞其咎。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  var i;
+  for(i=0;i<DISH.length;i++)if(cd[i]>0)cd[i]=Math.max(0,cd[i]-dts);
+  spawnT-=dts;
+  if(spawnT<=0){
+    spawnT=Math.max(1.3,2.6-score*0.02);
+    for(i=0;i<5;i++)if(!custs[i]){custs[i]=newCust();break;}
+  }
+  for(i=0;i<5;i++){
+    var c=custs[i];
+    if(c){
+      c.patience-=rate()*dts;
+      if(c.patience<=0){
+        custs[i]=null;lives--;combo=0;
+        showMsg("客人气走了!","#f87171");
+        updateHud();
+        if(lives<=0){render();gameOver();return;}
+      }
+    }
+  }
+  render();
+}
+counterEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==counterEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==counterEl)serve(parseInt(n.getAttribute("data-i"),10));
+});
+trayEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==trayEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==trayEl){
+    var i=parseInt(n.getAttribute("data-i"),10);
+    if(state==="playing"&&cd[i]<=0){held=i;render();}
+  }
+});
+document.addEventListener("keydown",function(e){
+  var map={"1":0,"2":1,"3":2,"4":3};
+  if(map[e.key]!==undefined&&state==="playing"){
+    if(cd[map[e.key]]<=0){held=map[e.key];render();}
+    e.preventDefault();
+  }else if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();
+  }
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>热感搜寻</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb923c;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#fb923c;font-size:16px}
+.bar{flex:1;min-width:90px;height:10px;background:#0b0e1a;border-radius:5px;overflow:hidden}
+.bar i{display:block;height:100%;background:#fb923c;width:100%}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb923c}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb923c;color:#431407;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>热感搜寻</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏滑动 · 出口隐形,靠体感温度寻它,限时 90 秒</p>
+  <div class="hud">
+    <span>剩余</span>
+    <div class="bar"><i id="tbar"></i></div>
+    <span><b id="tleft">90s</b></span>
+    <span>体感 <b id="heat">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">热感搜寻</h2>
+      <p id="ovDesc">这座迷宫的出口是隐形的,眼睛帮不了你——但你的热感能:离出口越近,画面边缘越灼热(冰冷→凉爽→温热→炙热)。90 秒内凭着温度的变化把隐形出口摸出来,踩上去即胜利!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始感知</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elBar=$("tbar"),elLeft=$("tleft"),elHeat=$("heat");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s278");
+var state="menu";
+var grid,player,exitCell,distField,timeLeft,steps,elapsed,pulse;
+
+function loadBest(k){try{return parseFloat(localStorage.getItem(k)||"0")||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function bfs(sx,sy){
+  var dist=[],i,j,q=[],head=0,dirs=[[1,0],[-1,0],[0,1],[0,-1]],k;
+  for(j=0;j<ROWS;j++){dist.push(new Array(COLS));for(i=0;i<COLS;i++)dist[j][i]=-1;}
+  dist[sy][sx]=0;q.push([sx,sy]);
+  while(head<q.length){
+    var c=q[head];head++;
+    for(k=0;k<4;k++){
+      var nx=c[0]+dirs[k][0],ny=c[1]+dirs[k][1];
+      if(nx<0||ny<0||nx>=COLS||ny>=ROWS)continue;
+      if(grid[ny][nx]===1||dist[ny][nx]!==-1)continue;
+      dist[ny][nx]=dist[c[1]][c[0]]+1;
+      q.push([nx,ny]);
+    }
+  }
+  return dist;
+}
+function heatInfo(){
+  var d=distField[player.y][player.x];
+  if(d<=3)return{t:"炙热!",c:"#ef4444"};
+  if(d<=8)return{t:"温热",c:"#fb923c"};
+  if(d<=15)return{t:"凉爽",c:"#fde047"};
+  return{t:"冰冷",c:"#38bdf8"};
+}
+function reset(){
+  grid=genMaze(10,10);
+  player={x:1,y:1};
+  exitCell={x:COLS-2,y:ROWS-2};
+  distField=bfs(exitCell.x,exitCell.y);
+  timeLeft=90;steps=0;elapsed=0;pulse=0;
+  updateHud();
+}
+function updateHud(){
+  elBar.style.width=Math.max(0,timeLeft/90*100)+"%";
+  elLeft.textContent=Math.max(0,Math.ceil(timeLeft))+"s";
+  elHeat.textContent=heatInfo().t;
+  elHeat.style.color=heatInfo().c;
+}
+function tryMove(dx,dy){
+  if(state!=="playing")return;
+  var nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return;
+  if(grid[ny][nx]===1)return;
+  player.x=nx;player.y=ny;
+  steps++;
+  updateHud();
+  if(nx===exitCell.x&&ny===exitCell.y)win();
+}
+function win(){
+  state="over";
+  var used=90-timeLeft;
+  var isNew=false;
+  if(best===0||used<best){best=used;saveBest("mg_s278",best);isNew=true;}
+  ovTitle.textContent="摸到出口了!";
+  ovDesc.textContent=isNew?"新纪录!你的热感雷达天下第一。":"掌心传来一阵温热,隐形的门应声而开。";
+  ovScore.style.display="block";
+  ovScore.textContent="用时 "+used.toFixed(1)+"s · 步数 "+steps+" · 最快 "+(best>0?best.toFixed(1)+"s":"--");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function lose(){
+  state="over";
+  ovTitle.textContent="时间耗尽";
+  ovDesc.textContent="出口其实一直藏在右下角附近。跟随温度的变化:每走近一步它就更热一分。";
+  ovScore.style.display="block";
+  ovScore.textContent="找了 90s · 步数 "+steps;
+  btnGo.textContent="再试一次";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#232a4d";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#2c3560";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function draw(){
+  var x,y;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1)drawWall(x,y);
+  }
+  var hi=heatInfo();
+  var edge=0.20+Math.sin(pulse*3)*0.06;
+  var gN=ctx.createLinearGradient(0,0,0,80);
+  gN.addColorStop(0,hexA(hi.c,edge));
+  gN.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=gN;ctx.fillRect(0,0,W,80);
+  var gS=ctx.createLinearGradient(0,H,0,H-80);
+  gS.addColorStop(0,hexA(hi.c,edge));
+  gS.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=gS;ctx.fillRect(0,H-80,W,80);
+  var gW=ctx.createLinearGradient(0,0,80,0);
+  gW.addColorStop(0,hexA(hi.c,edge));
+  gW.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=gW;ctx.fillRect(0,0,80,H);
+  var gE=ctx.createLinearGradient(W,0,W-80,0);
+  gE.addColorStop(0,hexA(hi.c,edge));
+  gE.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=gE;ctx.fillRect(W-80,0,80,H);
+  var px=player.x*CELL+CELL/2,py=player.y*CELL+CELL/2;
+  ctx.fillStyle="#e8eaf6";
+  ctx.shadowColor=hi.c;ctx.shadowBlur=16;
+  ctx.beginPath();ctx.arc(px,py,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle=hexA(hi.c,0.5+Math.sin(pulse*4)*0.2);
+  ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(px,py,13+Math.sin(pulse*4)*2,0,Math.PI*2);ctx.stroke();
+  ctx.lineWidth=1;
+}
+function hexA(hex,a){
+  var r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);
+  return "rgba("+r+","+g+","+b+","+a.toFixed(3)+")";
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(state==="playing"){
+    timeLeft-=dt/1000;
+    if(timeLeft<=0){timeLeft=0;updateHud();lose();draw();return;}
+    updateHud();
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))tryMove(dx>0?1:-1,0);
+  else tryMove(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

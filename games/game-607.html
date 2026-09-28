@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>运算迷宫</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#a78bfa;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#a78bfa;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:10px}
+.timebar i{display:block;height:100%;background:#a78bfa;width:100%}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px}
+.pads{display:grid;grid-template-columns:repeat(3,64px);gap:6px;justify-content:center;margin-top:10px}
+.pads button{background:#232949;color:#e8eaf6;border:none;border-radius:10px;padding:12px 0;font-size:18px;cursor:pointer;font-family:inherit}
+.pads button:active{transform:scale(.93)}
+.pads .sp{visibility:hidden}
+.quiz{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;z-index:4}
+.quiz.hide{display:none}
+.quiz h3{font-size:17px;color:#fbbf24}
+.quiz .eq{font-size:30px;font-weight:800}
+.quiz .ops2{display:flex;gap:10px}
+.quiz .ops2 button{background:#232949;color:#e8eaf6;border:2px solid transparent;border-radius:10px;padding:10px 20px;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit}
+.quiz .ops2 button.right{background:#14351f;border-color:#4ade80;color:#4ade80}
+.quiz .ops2 button.wrong{background:#3a1620;border-color:#f87171;color:#f87171}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:6}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#241a4d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>运算迷宫</h1>
+  <p class="hint">方向键 / WASD / 屏上方向钮移动 · 算对门上的题才能通过 · 走到右上角出口</p>
+  <div class="hud">
+    <span>时间 <b id="time">100</b>s</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>开门 <b id="gates">0/3</b></span>
+    <span>步数 <b id="steps">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <canvas id="cv" width="360" height="360"></canvas>
+    <div class="quiz hide" id="quiz">
+      <h3>运算之门 · 答对开门,答错扣 3 秒</h3>
+      <div class="eq" id="qEq">6 × 7 = ?</div>
+      <div class="ops2" id="qOps"></div>
+    </div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">运算迷宫</h2>
+      <p id="ovD">迷宫里有三道运算之门,挡在通往出口的路上。走到门前答对口算题即可开门;限时 100 秒内抵达右上角出口即胜利,剩余时间都会变成分数!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">进入迷宫</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button class="sp"></button><button data-m="up">▲</button><button class="sp"></button>
+    <button data-m="left">◀</button><button data-m="down">▼</button><button data-m="right">▶</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var elTime=$("time"),elScore=$("score"),elGates=$("gates"),elSteps=$("steps"),elTbar=$("tbar");
+var quiz=$("quiz"),qEq=$("qEq"),qOps=$("qOps");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var N=9,CELL=40;
+var state,pc,pr,walls,gates,gateOpen,score,steps,timeLeft,lastT,curGate;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function idx(c,r){return r*N+c;}
+function carve(){
+  var vis=[],i;
+  for(i=0;i<N*N;i++)vis.push(false);
+  walls=[];
+  for(i=0;i<N*N;i++)walls.push({t:1,r:1,b:1,l:1});
+  var stack=[{c:0,r:0}];
+  vis[idx(0,0)]=true;
+  while(stack.length){
+    var cur=stack[stack.length-1];
+    var nb=[],d;
+    if(cur.r>0&&!vis[idx(cur.c,cur.r-1)])nb.push({c:cur.c,r:cur.r-1,w:"t",o:"b"});
+    if(cur.c<N-1&&!vis[idx(cur.c+1,cur.r)])nb.push({c:cur.c+1,r:cur.r,w:"r",o:"l"});
+    if(cur.r<N-1&&!vis[idx(cur.c,cur.r+1)])nb.push({c:cur.c,r:cur.r+1,w:"b",o:"t"});
+    if(cur.c>0&&!vis[idx(cur.c-1,cur.r)])nb.push({c:cur.c-1,r:cur.r,w:"l",o:"r"});
+    if(!nb.length){stack.pop();continue;}
+    var nx=nb[(Math.random()*nb.length)|0];
+    walls[idx(cur.c,cur.r)][nx.w]=0;
+    walls[idx(nx.c,nx.r)][nx.o]=0;
+    vis[idx(nx.c,nx.r)]=true;
+    stack.push({c:nx.c,r:nx.r});
+  }
+}
+function bfsPath(){
+  var prev=[],i,qu=[idx(0,8)];
+  for(i=0;i<N*N;i++)prev.push(-1);
+  prev[idx(0,8)]=idx(0,8);
+  while(qu.length){
+    var cur=qu.shift();
+    if(cur===idx(8,0))break;
+    var c=cur%N,r=(cur/N)|0,w=walls[cur];
+    if(!w.t&&prev[idx(c,r-1)]<0){prev[idx(c,r-1)]=cur;qu.push(idx(c,r-1));}
+    if(!w.r&&prev[idx(c+1,r)]<0){prev[idx(c+1,r)]=cur;qu.push(idx(c+1,r));}
+    if(!w.b&&prev[idx(c,r+1)]<0){prev[idx(c,r+1)]=cur;qu.push(idx(c,r+1));}
+    if(!w.l&&prev[idx(c-1,r)]<0){prev[idx(c-1,r)]=cur;qu.push(idx(c-1,r));}
+  }
+  var path=[],cur2=idx(8,0);
+  while(cur2!==idx(0,8)){path.push(cur2);cur2=prev[cur2];}
+  path.push(idx(0,8));
+  path.reverse();
+  return path;
+}
+function makeGateQ(){
+  var op=["+","-","×"][(Math.random()*3)|0],a,b,c;
+  if(op==="+"){a=rnd(6,30);b=rnd(6,30);c=a+b;}
+  else if(op==="-"){a=rnd(10,40);b=rnd(2,a-1);c=a-b;}
+  else{a=rnd(3,9);b=rnd(3,9);c=a*b;}
+  var opts=[c],t=0;
+  while(opts.length<3&&t<100){
+    t++;
+    var v=c+(Math.random()<0.5?-1:1)*rnd(1,6);
+    if(v>=0&&opts.indexOf(v)<0)opts.push(v);
+  }
+  for(var i=opts.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t2=opts[i];opts[i]=opts[j];opts[j]=t2;}
+  return {t:a+" "+op+" "+b+" = ?",ans:c,opts:opts};
+}
+function placeGates(){
+  var path=bfsPath();
+  gates=[];
+  gateOpen=[];
+  var want=3,len=path.length;
+  var i,step=Math.max(2,Math.floor(len/4));
+  var used=[];
+  i=step;
+  while(gates.length<want&&i<len-2){
+    var cell=path[i];
+    if(used.indexOf(cell)<0){gates.push(cell);used.push(cell);}
+    i+=step;
+  }
+  while(gates.length<want){
+    var c2=path[rnd(2,len-2)];
+    if(used.indexOf(c2)<0){gates.push(c2);used.push(c2);}
+  }
+  for(i=0;i<gates.length;i++)gateOpen.push(false);
+}
+function draw(){
+  ctx.clearRect(0,0,360,360);
+  var c,r,w,x,y;
+  ctx.strokeStyle="#39406b";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    w=walls[idx(c,r)];
+    x=c*CELL;y=r*CELL;
+    if(w.t){ctx.moveTo(x,y);ctx.lineTo(x+CELL,y);}
+    if(w.l){ctx.moveTo(x,y);ctx.lineTo(x,y+CELL);}
+  }
+  ctx.moveTo(360,0);ctx.lineTo(360,360);
+  ctx.moveTo(0,360);ctx.lineTo(360,360);
+  ctx.stroke();
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    var gi=gates.indexOf(idx(c,r));
+    if(gi>=0){
+      ctx.fillStyle=gateOpen[gi]?"rgba(74,222,128,0.18)":"rgba(251,191,36,0.28)";
+      ctx.fillRect(c*CELL+3,r*CELL+3,CELL-6,CELL-6);
+      if(!gateOpen[gi]){
+        ctx.fillStyle="#fbbf24";
+        ctx.font="bold 18px system-ui";
+        ctx.textAlign="center";ctx.textBaseline="middle";
+        ctx.fillText("?",c*CELL+CELL/2,r*CELL+CELL/2+1);
+      }
+    }
+  }
+  ctx.fillStyle="rgba(96,165,250,0.25)";
+  ctx.fillRect(0*CELL+4,8*CELL+4,CELL-8,CELL-8);
+  ctx.fillStyle="#4ade80";
+  ctx.fillRect(8*CELL+8,0*CELL+8,CELL-16,CELL-16);
+  ctx.fillStyle="#a78bfa";
+  ctx.beginPath();
+  ctx.arc(pc*CELL+CELL/2,pr*CELL+CELL/2,12,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(pc*CELL+CELL/2-3,pr*CELL+CELL/2-2,2,0,Math.PI*2);
+  ctx.arc(pc*CELL+CELL/2+3,pr*CELL+CELL/2-2,2,0,Math.PI*2);
+  ctx.fill();
+}
+function updHud(){
+  elScore.textContent=score;
+  elSteps.textContent=steps;
+  var g=0,i;
+  for(i=0;i<gateOpen.length;i++)if(gateOpen[i])g++;
+  elGates.textContent=g+"/"+gates.length;
+}
+function tryMove(dc,dr){
+  if(state!=="playing")return;
+  var w=walls[idx(pc,pr)];
+  var nc=pc+dc,nr=pr+dr;
+  if(dc===1&&w.r)return;
+  if(dc===-1&&w.l)return;
+  if(dr===1&&w.b)return;
+  if(dr===-1&&w.t)return;
+  if(nc<0||nc>=N||nr<0||nr>=N)return;
+  var gi=gates.indexOf(idx(nc,nr));
+  if(gi>=0&&!gateOpen[gi]){
+    openQuiz(gi);
+    return;
+  }
+  pc=nc;pr=nr;steps++;
+  updHud();
+  if(idx(pc,pr)===idx(8,0))win();
+}
+function openQuiz(gi){
+  curGate=gi;
+  state="quiz";
+  var q=makeGateQ();
+  quiz.setAttribute("data-gi",gi);
+  qEq.textContent=q.t;
+  qOps.innerHTML="";
+  var i;
+  for(i=0;i<3;i++){
+    var b=document.createElement("button");
+    b.textContent=q.opts[i];
+    b.addEventListener("click",function(ev){
+      var v=parseInt(ev.currentTarget.textContent,10);
+      var g=parseInt(quiz.getAttribute("data-gi"),10);
+      if(v===q.ans){
+        ev.currentTarget.className="right";
+        gateOpen[g]=true;
+        score+=20;
+        updHud();
+        setTimeout(function(){quiz.classList.add("hide");state="playing";},450);
+      }else{
+        ev.currentTarget.className="wrong";
+        timeLeft=Math.max(0.1,timeLeft-3);
+        setTimeout(function(){quiz.classList.add("hide");state="playing";},450);
+      }
+    });
+    qOps.appendChild(b);
+  }
+  quiz.classList.remove("hide");
+}
+function win(){
+  state="over";
+  var bonus=Math.ceil(timeLeft);
+  score+=bonus;
+  ovT.textContent="走出迷宫!";
+  ovT.style.color="#4ade80";
+  ovD.textContent="用时内抵达出口,剩余时间奖励 +"+bonus+"。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function timeout(){
+  state="over";
+  ovT.textContent="迷宫困住了你…";
+  ovT.style.color="#f87171";
+  ovD.textContent="100 秒内没能抵达出口,再练练口算再来!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";pc=0;pr=8;score=0;steps=0;timeLeft=100;lastT=0;
+  carve();placeGates();
+  quiz.classList.add("hide");
+  updHud();
+  ov.classList.add("hide");
+  ovT.style.color="#a78bfa";
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(state!=="quiz"&&(e.key==="Enter"||e.key===" ")){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+document.querySelectorAll(".pads button").forEach(function(b){
+  b.addEventListener("click",function(){
+    var m=b.getAttribute("data-m");
+    if(!m)return;
+    if(m==="up")tryMove(0,-1);
+    else if(m==="down")tryMove(0,1);
+    else if(m==="left")tryMove(-1,0);
+    else if(m==="right")tryMove(1,0);
+  });
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt/1000;
+    if(timeLeft<=0){timeLeft=0;timeout();}
+    elTime.textContent=Math.ceil(timeLeft);
+    elTbar.style.width=(timeLeft/100*100)+"%";
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

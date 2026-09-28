@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双人竞速百点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:25px;text-align:center;color:#7bd88f;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#7bd88f;color:#0c2417;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:52px;height:52px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:24px;font-weight:800;color:#7bd88f}
+.mut{color:#9aa3c0;font-size:13px}
+.sc{flex:1;text-align:center;min-width:150px;padding:12px}
+.nm{font-size:15px;color:#cdd6f4;margin-bottom:2px}
+.active{outline:2px solid #7bd88f}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#7bd88f;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>双人竞速百点</h1>
+  <p class="tips">同一台设备,两位玩家轮流冲刺 100 分!每回合二选一:<b>掷 1 骰</b>(掷出 1 白忙一场)或<b>掷 2 骰</b>(点数全拿,但掷出双 1 倒扣 10 分)。先到 100 分者获胜——稳扎稳打还是豪赌双骰?</p>
+  <div class="row">
+    <div class="card sc" id="c0"><div class="nm">玩家 1</div><div class="big" id="t0">0</div><div class="mut">已掷 <b id="n0">0</b> 次</div></div>
+    <div class="card sc" id="c1"><div class="nm">玩家 2</div><div class="big" id="t1">0</div><div class="mut">已掷 <b id="n1">0</b> 次</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="big" id="whos">轮到玩家 1</div>
+    <div class="row" style="margin:10px 0;min-height:56px"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
+    <div class="row">
+      <button class="btn" id="one">掷 1 骰</button>
+      <button class="btn sec" id="two">掷 2 骰</button>
+    </div>
+  </div>
+  <div class="card log" id="log">玩家 1 先行,选择你的掷法!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var GOAL=100;
+var tot=[0,0],cnt=[0,0],turn=0,busy=false,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function anim(n,cb){
+  busy=true;setBtns();
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<600){
+      if(t-last>75){last=t;setDie($('d1'),rnd());if(n===2)setDie($('d2'),rnd())}
+      requestAnimationFrame(step);
+    }else{
+      var a=rnd(),b=n===2?rnd():0;
+      setDie($('d1'),a);
+      if(n===2)setDie($('d2'),b);
+      busy=false;
+      cb(a,b);
+    }
+  }
+  requestAnimationFrame(step);
+}
+function draw(){
+  $('t0').textContent=tot[0];$('t1').textContent=tot[1];
+  $('n0').textContent=cnt[0];$('n1').textContent=cnt[1];
+  $('c0').classList.toggle('active',turn===0&&!over);
+  $('c1').classList.toggle('active',turn===1&&!over);
+  $('whos').textContent='轮到玩家 '+(turn+1);
+}
+function say(m){$('log').textContent=m}
+function setBtns(){
+  var on=!busy&&!over;
+  $('one').disabled=!on;$('two').disabled=!on;
+}
+function gain(g,txt){
+  tot[turn]=Math.max(0,tot[turn]+g);
+  cnt[turn]++;
+  draw();
+  if(tot[turn]>=GOAL){win(turn);return}
+  turn=1-turn;
+  draw();setBtns();
+  say(txt+' 玩家 '+(turn+1)+' 请接招!');
+}
+$('one').onclick=function(){
+  if(busy||over)return;
+  anim(1,function(a){
+    if(a===1)gain(0,'玩家 '+(turn+1)+' 掷出 1 点,一无所获!');
+    else gain(a,'玩家 '+(turn+1)+' 单骰稳收 '+a+' 分!');
+  });
+};
+$('two').onclick=function(){
+  if(busy||over)return;
+  anim(2,function(a,b){
+    if(a===1&&b===1)gain(-10,'双 1 惊魂!玩家 '+(turn+1)+' 倒扣 10 分!');
+    else gain(a+b,'玩家 '+(turn+1)+' 双骰豪取 '+(a+b)+' 分!');
+  });
+};
+function win(w){
+  over=true;draw();setBtns();
+  $('ovt').textContent='玩家 '+(w+1)+' 获胜!';
+  $('ovp').innerHTML='最终比分 — 玩家 1 <b>'+tot[0]+'</b> : 玩家 2 <b>'+tot[1]+'</b><br>总掷骰 '+ (cnt[0]+cnt[1])+' 次,再来复仇一局?';
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  tot=[0,0];cnt=[0,0];turn=0;busy=false;over=false;
+  $('overlay').classList.remove('show');
+  setDie($('d1'),1);setDie($('d2'),1);
+  draw();setBtns();
+  say('新的对决,玩家 1 先行!');
+};
+setDie($('d1'),1);setDie($('d2'),1);
+draw();setBtns();
+</script>
+</body>
+</html>

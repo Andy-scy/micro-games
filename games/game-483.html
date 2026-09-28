@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>御风之箭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#80cbc4;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#80cbc4;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#80cbc4}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#80cbc4;color:#00332c;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>御风之箭</h1>
+  <p class="hint">箭会被气流抬升或压低 · 预判偏移再出手 · 十箭拿 60 分</p>
+  <div class="hud">
+    <span>箭 <b id="ar">0</b>/10</span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>目标 <b>60</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">御风之箭</h2>
+      <p id="ovD">靶子就在远处,可场上有一股垂直气流:箭飞行的途中会被抬升或压低。看顶部气标,箭头朝上是上升气流,朝下是下沉气流,格子越多风越强——瞄准时主动让出这段偏移,才算真正御风而射。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">开弓</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elAr=$("ar"),elSc=$("sc"),elMsg=$("msg");
+const SX=50,SY=300,TX=410,TY=300,TR=78,SPEED=560;
+const RING=["#eceff1","#eceff1","#455a64","#455a64","#1e88e5","#1e88e5","#e53935","#e53935","#ffc107","#ffc107"];
+let state="menu",score=0,used=0,tp=0,endT=-1;
+let wind=0,windTarget=0,windTimer=2;
+let mouse={x:300,y:300},flies=[],marks=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function ringVal(d){if(d>TR)return 0;return Math.max(1,10-Math.floor(d/(TR/10)));}
+function fire(){
+  if(state!=="play"||used>=10||flies.length>=2)return;
+  const dx=mouse.x-SX,dy=mouse.y-SY,d=Math.max(1,Math.hypot(dx,dy));
+  flies.push({x:SX,y:SY,px:SX,py:SY,vx:dx/d*SPEED,vy:dy/d*SPEED});
+}
+function resolve(y){
+  const v=ringVal(Math.abs(y-TY));
+  used++;score+=v;
+  marks.push({x:TX,y:y,v:v});
+  elMsg.textContent=v>0?(v+" 环"+(v>=9?"!":"")):"箭偏出了靶面";
+  elAr.textContent=used;elSc.textContent=score;
+  if(used>=10)endT=0.7;
+}
+function startGame(){
+  score=0;used=0;flies=[];marks=[];endT=-1;tp=0;
+  wind=0;windTarget=(Math.random()*2-1)*240;windTimer=3;
+  elMsg.textContent="";elAr.textContent="0";elSc.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=60;
+  ovT.textContent=win?"御风者!":"风没借到";
+  ovD.textContent=win?"气流在你眼里只是一条可以踏上去的路。":"记住:风会把箭推走多少,就提前把准星让出多少。";
+  ovS.textContent="总分 "+score+" · 目标 60 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    windTimer-=dt;
+    if(windTimer<=0){windTarget=(Math.random()*2-1)*240;windTimer=3+Math.random()*2;}
+    wind+=(windTarget-wind)*Math.min(1,dt*1.5);
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];
+      f.px=f.x;f.py=f.y;
+      f.vy+=wind*dt;
+      f.x+=f.vx*dt;f.y+=f.vy*dt;
+      if(f.x>=TX){
+        const k=(TX-f.px)/Math.max(0.0001,f.x-f.px);
+        resolve(f.py+(f.y-f.py)*k);
+        flies.splice(i,1);
+      }else if(f.y<-40||f.y>H+40||f.x>W+30){
+        used++;elMsg.textContent="箭飞丢了";elAr.textContent=used;
+        if(used>=10)endT=0.7;
+        flies.splice(i,1);
+      }
+    }
+    if(endT>0){endT-=dt;if(endT<=0)finish();}
+  }
+  draw();
+}
+function drawWind(){
+  const up=wind<0,n=Math.min(5,Math.ceil(Math.abs(wind)/60));
+  ctx.save();ctx.translate(240,42);
+  ctx.fillStyle="rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(-80,-22,160,44,10);else ctx.rect(-80,-22,160,44);
+  ctx.fill();
+  ctx.fillStyle="#80cbc4";ctx.font="bold 14px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  let s="气流 ";
+  for(let i=0;i<n;i++)s+=up?"↑":"↓";
+  if(n===0)s+="·无风";
+  ctx.fillText(s,0,1);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#14303a");g.addColorStop(1,"#0e1c2a");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(128,203,196,0.12)";ctx.lineWidth=2;
+  for(let i=0;i<5;i++){
+    const yy=60+i*110+Math.sin(tp*1.2+i)*8;
+    ctx.beginPath();ctx.moveTo(0,yy);
+    for(let x=0;x<=W;x+=24)ctx.lineTo(x,yy+Math.sin(x/40+tp*2+i)*4);
+    ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  for(let i=10;i>=1;i--){
+    ctx.fillStyle=RING[10-i];
+    ctx.beginPath();ctx.arc(TX,TY,TR*i/10,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  ctx.strokeStyle="#6d5535";ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(TX-30,TY+TR+8);ctx.lineTo(TX-58,520);ctx.moveTo(TX+30,TY+TR+8);ctx.lineTo(TX+58,520);ctx.stroke();
+  for(let i=0;i<marks.length;i++){
+    const m=marks[i];
+    ctx.strokeStyle=m.v>=9?"#00e676":"#ffffff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(m.x-5,m.y-5);ctx.lineTo(m.x+5,m.y+5);ctx.moveTo(m.x+5,m.y-5);ctx.lineTo(m.x-5,m.y+5);ctx.stroke();
+  }
+  ctx.fillStyle="#5d8aa8";
+  ctx.beginPath();ctx.arc(SX,SY,16,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(SX+10,SY-6,20,Math.PI*1.1,Math.PI*1.9);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i];
+    const ang=Math.atan2(f.vy,f.vx);
+    ctx.save();ctx.translate(f.x,f.y);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-22,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.fillStyle="#f5f5f5";
+    ctx.beginPath();ctx.moveTo(6,0);ctx.lineTo(-3,-4);ctx.lineTo(-3,4);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  drawWind();
+  if(state==="play"&&used<10){
+    ctx.strokeStyle="#80cbc4";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,11,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-16,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+    ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+16,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-16);ctx.lineTo(mouse.x,mouse.y-5);
+    ctx.moveTo(mouse.x,mouse.y+5);ctx.lineTo(mouse.x,mouse.y+16);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

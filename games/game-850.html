@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>修道士与野人</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:470px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.scene{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:10px;display:flex;gap:8px;min-height:210px}
+.bank{flex:1;background:#20264a;border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.btitle{color:#8f97c0;font-size:12px}
+.crow{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
+.fig{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#0f1220}
+.river{width:92px;background:#14204a;border-radius:10px;position:relative;overflow:hidden}
+.river::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(180deg,transparent 0 10px,rgba(80,110,220,.12) 10px 20px)}
+.boat{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);width:70px;background:#5a4632;border:2px solid #8a6a45;border-radius:8px;padding:5px 3px;text-align:center;z-index:2;transition:transform .55s ease}
+.boat.right{transform:translateX(-50%) translateY(-88px)}
+#boatIn{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;min-height:30px}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#ff9aa8;margin-bottom:6px}
+.caps{text-align:center;font-size:14px;color:#e8eaf6;margin-bottom:8px}
+.caps b{color:#fbbf24}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>修道士与野人</h1>
+<p class="tip">3 名修道士和 3 名野人过河,船最多载 2 人、至少 1 人划船。<br>任何一岸只要野人多过修道士(且有修道士),就会出事!</p>
+<div class="hud"><span id="hC">渡河 0 次</span><span>最少 11 次</span></div>
+<div class="scene">
+  <div class="bank"><div class="btitle">左岸(起点)</div><div class="crow" id="bankL"></div></div>
+  <div class="river"><div class="boat" id="boat"><div id="boatIn"></div></div></div>
+  <div class="bank"><div class="btitle">右岸(终点)</div><div class="crow" id="bankR"></div></div>
+</div>
+<div class="caps">船上:修道士 <b id="cbm">0</b> 人 · 野人 <b id="cbc">0</b> 人</div>
+<div id="msg"></div>
+<div class="btnrow">
+  <button class="btn" id="bmP">修 +</button><button class="btn" id="bmM">修 −</button>
+  <button class="btn" id="bcP">野 +</button><button class="btn" id="bcM">野 −</button>
+</div>
+<div class="btnrow"><button class="btn pri" id="bGo">渡河</button><button class="btn" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+let lm=3,lc=3,boatSide=0,bm=0,bc=0,cross=0,over=false;
+function figs(n,color,label){
+  const arr=[];
+  for(let i=0;i<n;i++){const d=document.createElement("div");d.className="fig";d.style.background=color;d.textContent=label;arr.push(d);}
+  return arr;
+}
+function render(){
+  const rm=3-lm,rc=3-lc;
+  const bl=document.getElementById("bankL"),br=document.getElementById("bankR");
+  bl.innerHTML="";br.innerHTML="";
+  figs(lm,"#7ea6ff","修").forEach(x=>bl.appendChild(x));
+  figs(lc,"#ff9a8a","野").forEach(x=>bl.appendChild(x));
+  figs(rm,"#7ea6ff","修").forEach(x=>br.appendChild(x));
+  figs(rc,"#ff9a8a","野").forEach(x=>br.appendChild(x));
+  const bi=document.getElementById("boatIn");
+  bi.innerHTML="";
+  figs(bm,"#7ea6ff","修").forEach(x=>bi.appendChild(x));
+  figs(bc,"#ff9a8a","野").forEach(x=>bi.appendChild(x));
+  document.getElementById("boat").classList.toggle("right",boatSide===1);
+  document.getElementById("cbm").textContent=String(bm);
+  document.getElementById("cbc").textContent=String(bc);
+  document.getElementById("hC").textContent="渡河 "+cross+" 次";
+  const mAvail=(boatSide===0)?lm:rm,cAvail=(boatSide===0)?lc:rc;
+  document.getElementById("bmP").disabled=over||!(bm+bc<2&&bm<mAvail);
+  document.getElementById("bmM").disabled=over||bm===0;
+  document.getElementById("bcP").disabled=over||!(bm+bc<2&&bc<cAvail);
+  document.getElementById("bcM").disabled=over||bc===0;
+  document.getElementById("bGo").disabled=over;
+}
+function adjust(delta,isM){
+  if(over)return;
+  if(isM)bm+=delta;else bc+=delta;
+  document.getElementById("msg").textContent="";
+  render();
+}
+function go(){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(bm+bc===0){msg.textContent="至少要有 1 人上船划桨";return;}
+  if(boatSide===0){lm-=bm;lc-=bc;}else{lm+=bm;lc+=bc;}
+  boatSide=1-boatSide;cross++;bm=0;bc=0;
+  render();check();
+}
+function check(){
+  const rm=3-lm,rc=3-lc;
+  if(lm>0&&lc>lm)return lose();
+  if(rm>0&&rc>rm)return lose();
+  if(lm===0&&lc===0){
+    over=true;
+    show("渡河成功!","全员安全过河 · 共渡河 "+cross+" 次(最少 11 次)");
+  }
+}
+function lose(){
+  over=true;render();
+  show("出事了……","某岸的野人比修道士多。先把部分野人送过去,再让修道士返回?");
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  lm=3;lc=3;boatSide=0;bm=0;bc=0;cross=0;over=false;
+  document.getElementById("msg").textContent="";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+document.getElementById("bmP").addEventListener("click",()=>adjust(1,true));
+document.getElementById("bmM").addEventListener("click",()=>adjust(-1,true));
+document.getElementById("bcP").addEventListener("click",()=>adjust(1,false));
+document.getElementById("bcM").addEventListener("click",()=>adjust(-1,false));
+document.getElementById("bGo").addEventListener("click",go);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

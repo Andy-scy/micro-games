@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同异快断</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:460px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+#lamps{display:flex;gap:26px;justify-content:center;margin:10px 0}
+.lamp{width:104px;height:104px;border-radius:50%;border:4px solid #232a48;transition:background .05s}
+#btns{display:flex;gap:14px;justify-content:center}
+.ans{border:0;border-radius:12px;padding:14px 30px;font-size:17px;font-weight:800;cursor:pointer}
+#bSame{background:#51d88a;color:#0f1220}
+#bDiff{background:#ff5c5c;color:#fff}
+#hint{text-align:center;font-size:12px;color:#9aa3c0;margin-top:10px}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.shake{animation:shake .25s}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>同异快断</h1>
+  <p class="tips">两盏彩灯同时亮起,它们的颜色相同吗?相同按「同色」(S 键),不同按「异色」(D 键)。限时 30 秒:答对 +1 分并回 0.25 秒,答错 -2.5 秒。手比眼快才算色彩达人!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+      <div class="stat" style="flex:2"><div class="mut">剩余时间 <span id="tleft">30.0s</span></div><div class="tbarWrap"><div id="tbar"></div></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="lamps"><div class="lamp" id="lampA"></div><div class="lamp" id="lampB"></div></div>
+    <div id="btns"><button class="ans" id="bSame">同色 (S)</button><button class="ans" id="bDiff">异色 (D)</button></div>
+    <div id="hint">六种颜色随机点亮,大约一半概率同色</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">同异快断</h2><p id="ovp">玩法:反应类色彩判断。<br>· 两盏灯同时亮起,判断颜色是否相同<br>· 同色按「同色」或 S 键;异色按「异色」或 D 键<br>· 答对 +1 分、回 0.25 秒;答错 -2.5 秒、连击清零<br>· 30 秒倒计时结束即结算,越快越准分越高</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var COLS=['#ff5c5c','#ff9f43','#ffd166','#51d88a','#4da3ff','#b07cff'];
+var score=0,streak=0,maxStreak=0,hits=0,misses=0,timeLeft=30;
+var lock=0,cA=0,cB=1,playing=false,over=false,last=0;
+function $(id){return document.getElementById(id)}
+function showPair(){
+  cA=Math.floor(Math.random()*6);
+  cB=Math.random()<0.42?cA:(cA+1+Math.floor(Math.random()*5))%6;
+  $('lampA').style.background=COLS[cA];
+  $('lampB').style.background=COLS[cB];
+}
+function drawTop(){
+  $('sc').textContent=score;
+  $('ck').textContent=streak;
+  $('tbar').style.width=(Math.max(0,timeLeft)/30*100)+'%';
+  $('tleft').textContent=Math.max(0,timeLeft).toFixed(1)+'s';
+}
+function answer(same){
+  if(!playing||over)return;
+  var now=performance.now();
+  if(now<lock)return;
+  var isSame=cA===cB;
+  if(same===isSame){
+    hits++;score++;streak++;
+    maxStreak=Math.max(maxStreak,streak);
+    timeLeft=Math.min(30,timeLeft+0.25);
+    lock=now+90;
+  }else{
+    misses++;streak=0;
+    timeLeft=Math.max(0,timeLeft-2.5);
+    lock=now+260;
+    var l=$('lamps');
+    l.classList.remove('shake');void l.offsetWidth;l.classList.add('shake');
+  }
+  if(timeLeft<=0){drawTop();finish();return;}
+  showPair();drawTop();
+}
+function finish(){
+  playing=false;over=true;
+  var acc=(hits+misses)>0?Math.round(hits/(hits+misses)*100):0;
+  $('ovt').textContent='判定结束!';
+  $('ovp').innerHTML='得分 <b>'+score+'</b> · 最高连击 <b>'+maxStreak+'</b> · 正确率 <b>'+acc+'%</b>('+hits+'/'+(hits+misses)+')<br>颜色差异一秒看穿,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('bSame').addEventListener('click',function(){answer(true)});
+$('bDiff').addEventListener('click',function(){answer(false)});
+document.addEventListener('keydown',function(e){
+  if(e.repeat)return;
+  var k=e.key.toLowerCase();
+  if(k==='s')answer(true);
+  if(k==='d')answer(false);
+});
+function startGame(){
+  score=0;streak=0;maxStreak=0;hits=0;misses=0;timeLeft=30;lock=0;
+  playing=true;over=false;
+  showPair();drawTop();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+showPair();drawTop();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;drawTop();finish();}
+    else drawTop();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

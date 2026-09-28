@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>进制工坊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#a3e635;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:12px}
+.hud b{color:#a3e635;font-size:16px}
+.q{text-align:center;font-size:20px;color:#c7cbe8;margin-bottom:6px}
+.q b{color:#a3e635;font-size:30px;letter-spacing:2px}
+.ans{text-align:center;font-size:26px;font-weight:800;color:#a3e635;background:#0b0e1a;border-radius:10px;padding:8px 0;min-height:48px;margin-bottom:12px;letter-spacing:3px;min-width:100%}
+.kp{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
+.kp button{background:#232949;color:#e8eaf6;border:none;border-radius:9px;padding:11px 0;font-size:18px;font-weight:700;cursor:pointer;font-family:inherit}
+.kp button:active{transform:scale(.93)}
+.kp button.dis{opacity:.22;pointer-events:none}
+.kp .ok{background:#a3e635;color:#1c2703}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:10px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.93);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#a3e635}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a3e635;color:#1c2703;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>进制工坊</h1>
+  <p class="hint">在二进制、八进制、十六进制与十进制之间自由换算 · 键入答案后确认 · 共 12 题,答错扣一颗心</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/12 题</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="combo">0</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+  </div>
+  <div class="stage">
+    <div class="q" id="q">二进制 <b>1011</b> = ?(十进制)</div>
+    <div class="ans" id="ans">&nbsp;</div>
+    <div class="kp" id="kp">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="0">0</button><button data-k="A">A</button><button data-k="B">B</button>
+      <button data-k="C">C</button><button data-k="D">D</button><button data-k="E">E</button><button data-k="F">F</button><button data-k="del">⌫</button><button data-k="ok" class="ok">确认</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">进制工坊</h2>
+      <p id="ovD">计算机的世界用二进制说话!把给出的数换算成目标进制再输入。十六进制的 10~15 写作 A~F(十进制转十六进制时才需要字母键)。三颗心,12 道题,开始!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开工换算</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elScore=$("score"),elCombo=$("combo"),elLives=$("lives");
+var elQ=$("q"),elAns=$("ans"),elMsg=$("msg"),kp=$("kp");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var BN={2:"二进制",8:"八进制",10:"十进制",16:"十六进制"};
+var state,score,combo,lives,no,cur,input,lock;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function updHud(){
+  elNo.textContent=no;elScore.textContent=score;elCombo.textContent=combo;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function setLetters(){
+  var bs=kp.getElementsByTagName("button"),i;
+  var need=cur.to===16;
+  for(i=0;i<bs.length;i++){
+    var k=bs[i].getAttribute("data-k");
+    if(k>="A"&&k<="F"){
+      bs[i].className=need?"":"dis";
+    }
+  }
+}
+function showAns(){elAns.textContent=input===""?"\u00a0":input;}
+function gen(){
+  var types=[2,10,8,10,16,10];
+  var to=types[(no-1)%types.length];
+  var from,lo,hi;
+  if(to===10){
+    from=[2,2,8,16][(no+((Math.random()*2)|0))%4];
+    if(from===2){lo=5;hi=63;}
+    else if(from===8){lo=8;hi=63;}
+    else{lo=10;hi=255;}
+  }else{
+    from=10;
+    if(to===2){lo=5;hi=63;}
+    else{lo=10;hi=255;}
+  }
+  var v=rnd(lo,hi);
+  var shown=v.toString(from).toUpperCase();
+  cur={v:v,from:from,to:to,shown:shown};
+  elQ.innerHTML=BN[from]+" <b>"+shown+"</b> = ?("+BN[to]+")";
+  input="";
+  showAns();
+  setLetters();
+  setMsg("换算成"+BN[to]+"并输入","");
+}
+function submit(){
+  if(state!=="playing"||lock)return;
+  if(input===""){setMsg("先输入答案","badc");return;}
+  var v=parseInt(input,cur.to);
+  if(v===cur.v){
+    score+=10+combo*2;combo++;
+    setMsg("正确!"+cur.shown+"("+BN[cur.from]+") = "+input+"("+BN[cur.to]+")","good");
+    updHud();
+    no++;
+    if(no>12){setTimeout(gameOverWin,700);return;}
+    lock=true;
+    setTimeout(next,750);
+  }else{
+    combo=0;lives--;
+    var corr=cur.v.toString(cur.to).toUpperCase();
+    setMsg("不对,应填 "+corr+" · 生命 -1","badc");
+    updHud();
+    no++;
+    if(lives<=0){setTimeout(gameOverLose,1100);return;}
+    if(no>12){setTimeout(gameOverWin,1100);return;}
+    lock=true;
+    setTimeout(next,1100);
+  }
+}
+function next(){
+  lock=false;
+  gen();
+}
+function press(k){
+  if(state!=="playing")return;
+  if(k==="del")input=input.slice(0,-1);
+  else if(k==="ok")submit();
+  else if(input.length<6)input+=k;
+  showAns();
+}
+function gameOverWin(){
+  state="over";
+  ovT.textContent="进制通!";
+  ovD.textContent="12 道换算全部完成,你和计算机对话毫无压力。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function gameOverLose(){
+  state="over";
+  ovT.textContent="换算失败…";
+  ovD.textContent="小提示:二进制每 4 位对应十六进制 1 位,试试按 4 位分组。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;combo=0;lives=3;no=1;lock=false;
+  ovS.style.display="none";
+  gen();updHud();
+  ov.classList.add("hide");
+}
+kp.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute("data-k"))press(t.getAttribute("data-k"));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key.toUpperCase();
+  if((k>="0"&&k<="9")||(cur.to===16&&k>="A"&&k<="F")){press(k);e.preventDefault();}
+  else if(e.key==="Backspace"){press("del");e.preventDefault();}
+  else if(e.key==="Enter"){press("ok");e.preventDefault();}
+});
+})();
+</script>
+</body>
+</html>

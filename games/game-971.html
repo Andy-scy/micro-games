@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双蛇夺食</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>双蛇夺食</h1>
+<div id="tip">同场抢苹果!玩家1:WASD 转向 · 玩家2:方向键转向 · 吃苹果变长,先吃 6 个赢回合;撞墙、撞蛇身即出局,对手得分 · 头对头相撞时,长蛇获胜 · 先胜 2 回合者夺冠</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">双蛇夺食</div><div id="ovS">两条蛇在同一块场地争夺苹果<br>玩家1:WASD 转向 · 玩家2:方向键转向<br>吃苹果成长,先吃 6 个苹果赢回合<br>撞墙或撞到蛇身立即出局,对手拿下回合;头对头相撞长者胜 · 先胜 2 回合夺冠</div><button id="ovB">开始斗蛇</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var COLS=30,ROWS=20,CS=24;
+var DX=[0,1,0,-1],DY=[-1,0,1,0];
+var keys={},st;
+function mkS(i){
+ var body=[],k;
+ for(k=0;k<3;k++)body.push({x:i===0?7-k:22+k,y:10});
+ return{body:body,dir:i===0?1:3,q:[]};
+}
+function cellFree(x,y,skipApple){
+ var i,j,k;
+ for(i=0;i<2;i++)for(j=0;j<st.s[i].body.length;j++)
+  if(st.s[i].body[j].x===x&&st.s[i].body[j].y===y)return false;
+ if(!skipApple)for(k=0;k<st.apples.length;k++)
+  if(st.apples[k].x===x&&st.apples[k].y===y)return false;
+ return true;
+}
+function spawnApple(){
+ var t=0;
+ while(t<300){
+  t++;
+  var x=Math.floor(Math.random()*COLS),y=Math.floor(Math.random()*ROWS);
+  if(cellFree(x,y,true)){st.apples.push({x:x,y:y});return;}
+ }
+}
+function reset(){
+ st={ph:"count",cd:80,score:[0,0],round:1,acc:0,ate:[0,0],s:[mkS(0),mkS(1)],apples:[],msg:"",msgT:0};
+ spawnApple();spawnApple();spawnApple();
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function turn(i,d){
+ var s=st.s[i];
+ if(st.ph!=="play")return;
+ if(s.q.length<2)s.q.push(d);
+}
+function findApple(x,y){
+ var k;
+ for(k=0;k<st.apples.length;k++)
+  if(st.apples[k].x===x&&st.apples[k].y===y)return k;
+ return -1;
+}
+function tick(){
+ var i,j,k,nh=[],growing=[false,false],dead=[false,false],ai;
+ for(i=0;i<2;i++){
+  var s=st.s[i];
+  while(s.q.length){var d=s.q.shift();if((d+2)%4!==s.dir){s.dir=d;break;}}
+  nh.push({x:s.body[0].x+DX[s.dir],y:s.body[0].y+DY[s.dir]});
+ }
+ for(i=0;i<2;i++){
+  if(nh[i].x<0||nh[i].x>=COLS||nh[i].y<0||nh[i].y>=ROWS){dead[i]=true;continue;}
+  ai=findApple(nh[i].x,nh[i].y);
+  if(ai>=0)growing[i]=true;
+  for(j=0;j<2;j++){
+   var segs=st.s[j].body;
+   for(k=0;k<segs.length;k++){
+    if(k===segs.length-1&&!growing[j])continue;
+    if(segs[k].x===nh[i].x&&segs[k].y===nh[i].y){dead[i]=true;break;}
+   }
+   if(dead[i])break;
+  }
+ }
+ if(nh[0].x===nh[1].x&&nh[0].y===nh[1].y){dead[0]=true;dead[1]=true;}
+ if(dead[0]||dead[1]){
+  if(dead[0]&&dead[1]){
+   if(st.s[0].body.length===st.s[1].body.length){st.msg="头对头同归,重赛!";st.msgT=100;}
+   else{
+    var lg=st.s[0].body.length>st.s[1].body.length?0:1;
+    st.score[lg]++;st.msg=(lg===0?"蓝方":"橙方")+"更长,头对头获胜!";
+    st.msgT=100;
+   }
+  }else{
+   var w=dead[0]?1:0;
+   st.score[w]++;st.msg=(dead[0]?"蓝方":"橙方")+"撞毁,"+(w===0?"蓝方":"橙方")+"得分!";
+   st.msgT=100;
+  }
+  st.ph="rend";return;
+ }
+ for(i=0;i<2;i++){
+  var sn=st.s[i];
+  sn.body.unshift({x:nh[i].x,y:nh[i].y});
+  ai=findApple(nh[i].x,nh[i].y);
+  if(ai>=0){
+   st.apples.splice(ai,1);
+   st.ate[i]++;
+   spawnApple();
+   if(st.ate[i]>=6){
+    st.score[i]++;st.ph="rend";st.msgT=100;
+    st.msg=(i===0?"蓝方":"橙方")+"吃满 6 个苹果!";
+    return;
+   }
+  }else sn.body.pop();
+ }
+}
+function step(dt){
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){
+  st.acc+=dt*16.67;
+  while(st.acc>=100){st.acc-=100;tick();if(st.ph!=="play")break;}
+ }else if(st.ph==="rend"){
+  st.msgT-=dt;
+  if(st.msgT<=0){
+   if(st.score[0]>=2||st.score[1]>=2){
+    st.ph="over";
+    show(st.score[0]>=2?"蓝方蛇王!":"橙方蛇王!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{
+    var s0=st.score[0],s1=st.score[1],r=st.round+1;
+    reset();st.score=[s0,s1];st.round=r;
+   }
+  }
+ }
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ var i,j,k;
+ ctx.strokeStyle="rgba(120,140,220,.05)";ctx.lineWidth=1;
+ for(i=1;i<COLS;i++){ctx.beginPath();ctx.moveTo(i*CS,0);ctx.lineTo(i*CS,480);ctx.stroke();}
+ for(j=1;j<ROWS;j++){ctx.beginPath();ctx.moveTo(0,j*CS);ctx.lineTo(720,j*CS);ctx.stroke();}
+ for(k=0;k<st.apples.length;k++){
+  var ap=st.apples[k];
+  ctx.beginPath();ctx.arc(ap.x*CS+CS/2,ap.y*CS+CS/2,8,0,6.2832);
+  ctx.fillStyle="#ff5c7a";ctx.fill();
+  ctx.strokeStyle="#3f8f4f";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(ap.x*CS+CS/2,ap.y*CS+CS/2-8);ctx.lineTo(ap.x*CS+CS/2+4,ap.y*CS+CS/2-13);ctx.stroke();
+ }
+ for(i=0;i<2;i++){
+  var s=st.s[i],col=i===0?"#4fd1c5":"#f6ad55";
+  for(j=0;j<s.body.length;j++){
+   var sg=s.body[j];
+   ctx.fillStyle=j===0?col:(i===0?"rgba(79,209,197,"+(0.85-j*0.03)+")":"rgba(246,173,85,"+(0.85-j*0.03)+")");
+   ctx.fillRect(sg.x*CS+2,sg.y*CS+2,CS-4,CS-4);
+  }
+  var hd=s.body[0];
+  ctx.fillStyle="#0f1220";
+  ctx.beginPath();ctx.arc(hd.x*CS+8,hd.y*CS+8,2.5,0,6.2832);ctx.fill();
+  ctx.beginPath();ctx.arc(hd.x*CS+CS-8,hd.y*CS+8,2.5,0,6.2832);ctx.fill();
+ }
+ ctx.font="bold 15px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";
+ ctx.fillText("蓝方 "+st.score[0]+" 回合胜 · 苹果 "+st.ate[0]+"/6",14,8);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";
+ ctx.fillText("苹果 "+st.ate[1]+"/6 · "+st.score[1]+" 回合胜 橙方",706,8);
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";
+ ctx.fillText("第 "+st.round+" 回合 · 先胜 2 回合",360,8);
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 42px system-ui";
+  ctx.fillText("夺食开始!",360,180);
+  ctx.font="bold 26px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/27)),360,238);
+ }
+ if(st.ph==="rend"){
+  ctx.fillStyle="#ff5c7a";ctx.font="bold 30px system-ui";
+  ctx.fillText(st.msg,360,200);
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ if(k==="w")turn(0,0);
+ if(k==="d")turn(0,1);
+ if(k==="s")turn(0,2);
+ if(k==="a")turn(0,3);
+ if(k==="arrowup")turn(1,0);
+ if(k==="arrowright")turn(1,1);
+ if(k==="arrowdown")turn(1,2);
+ if(k==="arrowleft")turn(1,3);
+});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

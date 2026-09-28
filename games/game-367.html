@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>舞力四向</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#2b0a1a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>舞力四向</h1>
+  <p class="hint">方向键 / WASD 踩点 · 箭头滑入中央舞毯时按同向键 · 触屏点对应象限</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">5</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">舞力四向</h2>
+      <p id="ovDesc">舞毯在中央,箭头音符从四边滑入。
+箭头与舞毯上的箭槽重合时,按下同方向的方向键!
+每小节第 4 拍会同时飞来两支箭,手脚并用;
+漏 5 步舞局结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,CX=240,CY=270,BPM=100,beatInt=60000/BPM;
+var APPROACH=1150,SLOT=64;
+var DCOL=["#f472b6","#4ade80","#60a5fa","#fbbf24"];
+var keyDir={ArrowUp:0,KeyW:0,ArrowDown:1,KeyS:1,ArrowLeft:2,KeyA:2,ArrowRight:3,KeyD:3};
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g367");
+
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sStep(d){tone("triangle",[660,587,523,784][d],0,0.11,0.22);}
+function sTick(){noiseHit(0.05,0.08,6000);}
+function sMiss(){tone("sawtooth",200,100,0.2,0.16);}
+
+var state="menu",notes,pops,score,combo,life,maxCombo,hits,schedBeat,schedCount,tickBeat,padFlash;
+function reset(){
+  notes=[];pops=[];
+  score=0;combo=0;life=5;maxCombo=0;hits=0;
+  schedBeat=performance.now()+2000;
+  tickBeat=schedBeat;
+  schedCount=0;
+  padFlash=[0,0,0,0];
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function slotPos(d){
+  if(d===0)return {x:CX,y:CY-SLOT};
+  if(d===1)return {x:CX,y:CY+SLOT};
+  if(d===2)return {x:CX-SLOT,y:CY};
+  return {x:CX+SLOT,y:CY};
+}
+function spawnPoint(d){
+  if(d===0)return {x:CX,y:-50};
+  if(d===1)return {x:CX,y:H+50};
+  if(d===2)return {x:-50,y:CY};
+  return {x:W+50,y:CY};
+}
+function schedule(now){
+  if(schedBeat-now>4000)schedBeat=now+2000;
+  while(schedBeat-now<APPROACH){
+    var d=(Math.random()*4)|0;
+    notes.push({d:d,t:schedBeat,done:false});
+    if(schedCount%4===3){
+      var d2=(d+1+((Math.random()*3)|0))%4;
+      notes.push({d:d2,t:schedBeat,done:false});
+    }
+    schedCount++;
+    schedBeat+=beatInt;
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTick();tickBeat+=beatInt;}
+}
+function stepDir(d){
+  if(state!=="play")return;
+  var now=performance.now(),i,n,dt,bi=-1,bd=1e9;
+  padFlash[d]=now;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    if(n.d!==d||n.done)continue;
+    dt=now-n.t;
+    if(dt<-250||dt>250)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0)return;
+  n=notes[bi];n.done=true;hits++;
+  var sp=slotPos(d);
+  if(Math.abs(bd)<=100){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=300+combo*10;
+    addPop(sp.x,sp.y-40,"PERFECT +"+(300+combo*10),"#fbbf24");
+  }else if(Math.abs(bd)<=200){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=120+combo*5;
+    addPop(sp.x,sp.y-40,"GOOD +"+(120+combo*5),"#f472b6");
+  }else{
+    combo=0;score+=30;
+    addPop(sp.x,sp.y-40,"踩偏 +30","#8b90b0");
+  }
+  sStep(d);
+  upd();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g367",best);}
+  upd();
+  ovTitle.textContent="舞步散场";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="共踩中 "+hits+" 步 · 最高连击 "+maxCombo+"\n跟上鼓点,再跳一支!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function update(now){
+  var i,n,sp;
+  for(i=notes.length-1;i>=0;i--){
+    n=notes[i];
+    if(n.done){notes.splice(i,1);continue;}
+    if(now>n.t+200){
+      notes.splice(i,1);
+      combo=0;life--;sMiss();
+      sp=slotPos(n.d);
+      addPop(sp.x,sp.y-40,"MISS","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>560)pops.splice(i,1);}
+}
+function tri(x,y,d,r){
+  ctx.beginPath();
+  if(d===0){ctx.moveTo(x,y-r);ctx.lineTo(x+r*0.9,y+r*0.7);ctx.lineTo(x-r*0.9,y+r*0.7);}
+  else if(d===1){ctx.moveTo(x,y+r);ctx.lineTo(x+r*0.9,y-r*0.7);ctx.lineTo(x-r*0.9,y-r*0.7);}
+  else if(d===2){ctx.moveTo(x-r,y);ctx.lineTo(x+r*0.7,y-r*0.9);ctx.lineTo(x+r*0.7,y+r*0.9);}
+  else{ctx.moveTo(x+r,y);ctx.lineTo(x-r*0.7,y-r*0.9);ctx.lineTo(x-r*0.7,y+r*0.9);}
+  ctx.closePath();
+  ctx.fill();
+}
+function draw(now){
+  var i,n,k,p,sp,fl;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  for(i=0;i<4;i++){
+    sp=slotPos(i);
+    fl=1-(now-padFlash[i])/200;if(fl<0)fl=0;
+    ctx.fillStyle="rgba(244,114,182,"+(0.12+fl*0.5)+")";
+    tri(sp.x,sp.y,i,30);
+  }
+  ctx.fillStyle="rgba(244,114,182,0.1)";
+  ctx.strokeStyle="rgba(244,114,182,0.55)";
+  ctx.rect(CX-110,CY-110,220,220);ctx.fill();ctx.stroke();
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    k=(n.t-now)/APPROACH;
+    if(k<0)k=0;
+    p=spawnPoint(n.d);sp=slotPos(n.d);
+    var x=sp.x+(p.x-sp.x)*k,y=sp.y+(p.y-sp.y)*k;
+    ctx.fillStyle=DCOL[n.d];
+    tri(x,y,n.d,22);
+    ctx.strokeStyle="rgba(255,255,255,0.35)";
+    tri(x,y,n.d,22);ctx.stroke();
+  }
+  for(i=0;i<pops.length;i++){
+    var pp=pops[i],pr=(now-pp.t0)/560;
+    ctx.fillStyle=pp.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(pp.txt,pp.x,pp.y-pr*26);
+    ctx.globalAlpha=1;
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+function onTap(cx,cy){
+  var p=toXY(cx,cy),dx=p.x-CX,dy=p.y-CY;
+  if(Math.abs(dx)>Math.abs(dy))stepDir(dx>0?3:2);
+  else stepDir(dy>0?1:0);
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap(e.clientX,e.clientY);});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap(e.clientX,e.clientY);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];onTap(t.clientX,t.clientY);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.repeat)return;
+  var d=keyDir[e.code];
+  if(d===undefined)return;
+  e.preventDefault();
+  stepDir(d);
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

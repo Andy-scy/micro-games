@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金字塔13 凑数消除</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:8px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:8px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 20%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:14px 8px;width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.prow{display:flex;gap:4px;justify-content:center}
+.card{width:40px;height:56px;border-radius:7px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.45);user-select:none;cursor:pointer}
+.card.red{color:#d62839}
+.card .r{font-size:13px;font-weight:800}
+.card .s{font-size:20px;line-height:1}
+.card.dim{opacity:.55}
+.card.selc{outline:3px solid #4cc9f0}
+.card.empty{background:transparent;box-shadow:none;cursor:default}
+#bottom{display:flex;gap:16px;align-items:center;margin-top:6px}
+#msg{min-height:20px;font-size:14px;color:#ffd166;text-align:center}
+#btns{margin-top:6px}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>金字塔 13 · 凑数消除</h1>
+<p id="how">点击两张点数相加为 13 的牌将其消除（A=1，J=11，Q=12，K=13 可单张消除）。只有未被压住的牌可选，牌堆可逐张翻看。拆完整座金字塔即胜利，无牌可消则失败。</p>
+<div id="bar"><span>已消除 <b id="rm">0</b>/28</span><span>牌堆余 <b id="sk">24</b></span></div>
+<div id="table">
+  <div id="pyr"></div>
+  <div id="bottom">
+    <div id="stockSlot"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div id="deckPile" style="cursor:pointer"></div>
+      <span style="font-size:11px;color:#9aa3c0">点牌堆翻下一张</span>
+    </div>
+  </div>
+  <div id="msg"></div>
+  <div id="btns"><button id="again2" class="acc">重开一局</button></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var grid=[],stock=[],sIdx=0,sel=null,removed=0,phase='play';
+function $(id){return document.getElementById(id);}
+function val(r){return RANKS.indexOf(r)+1;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function cardHTML(c,cls){
+  if(!c)return '<div class="card empty"></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card '+cls+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function free(r,c){
+  if(r===6)return true;
+  var b1=(c-1>=0)&&grid[r+1][c-1]!==null;
+  var b2=grid[r+1][c]!==null;
+  return !b1&&!b2;
+}
+function render(){
+  $('rm').textContent=removed;
+  $('sk').textContent=Math.max(0,stock.length-sIdx-1);
+  var pyr=$('pyr');pyr.innerHTML='';
+  for(var r=0;r<7;r++){
+    var row=document.createElement('div');row.className='prow';
+    for(var c=0;c<=r;c++){
+      var wrap=document.createElement('div');
+      if(grid[r][c]===null){wrap.innerHTML='<div class="card empty"></div>';}
+      else{
+        var cls=free(r,c)?'':'dim ';
+        if(sel&&sel.zone==='p'&&sel.r===r&&sel.c===c)cls+='selc ';
+        wrap.innerHTML=cardHTML(grid[r][c],cls);
+        wrap.firstChild.setAttribute('data-z','p');wrap.firstChild.setAttribute('data-r',r);wrap.firstChild.setAttribute('data-c',c);
+      }
+      row.appendChild(wrap);
+    }
+    pyr.appendChild(row);
+  }
+  var open=(sIdx<stock.length)?stock[sIdx]:null;
+  var scls='';
+  if(sel&&sel.zone==='s')scls='selc ';
+  $('stockSlot').innerHTML=(open?cardHTML(open,scls):'<div class="card empty"></div>')+'<div style="font-size:11px;color:#9aa3c0;text-align:center">当前牌</div>';
+  if(open)$('stockSlot').firstChild.setAttribute('data-z','s');
+  var left=Math.max(0,stock.length-sIdx-1);
+  var dh='<div class="card" style="background:linear-gradient(135deg,#2c4a8a,#1a2f63);cursor:pointer"><span class="r" style="visibility:hidden">·</span><span class="s" style="color:#fff;font-size:16px">'+left+'</span></div>';
+  $('deckPile').innerHTML=left>0?dh:'<div class="card empty"></div>';
+  if(left>0)$('deckPile').firstChild.setAttribute('data-z','d');
+}
+function msg(s){$('msg').textContent=s;}
+function getSel(){
+  if(!sel)return null;
+  if(sel.zone==='p')return grid[sel.r][sel.c];
+  return sIdx<stock.length?stock[sIdx]:null;
+}
+function removeSel(){
+  if(sel.zone==='p')grid[sel.r][sel.c]=null;
+  else sIdx++;
+  removed++;
+}
+function after(){
+  sel=null;render();
+  if(removed===28){end(true,'整座金字塔夷为平地，妙手！');return;}
+  if(stuck()){end(false,'没有可消的组合了');return;}
+}
+function stuck(){
+  if(sIdx<stock.length)return false;
+  var vals=[];
+  for(var r=0;r<7;r++)for(var c=0;c<=r;c++){
+    if(grid[r][c]!==null&&free(r,c))vals.push(val(grid[r][c].r));
+  }
+  for(var i=0;i<vals.length;i++){
+    if(vals[i]===13)return false;
+    for(var j=i+1;j<vals.length;j++)if(vals[i]+vals[j]===13)return false;
+  }
+  return true;
+}
+function clickPyr(r,c){
+  if(phase!=='play'||grid[r][c]===null)return;
+  if(!free(r,c)){msg('这张被压住了，先移开压着它的牌');return;}
+  var v=val(grid[r][c].r);
+  if(v===13){grid[r][c]=null;removed++;msg('K 单张消除！');after();return;}
+  if(sel&&sel.zone==='p'&&sel.r===r&&sel.c===c){sel=null;render();return;}
+  var ov=getSel();
+  if(ov&&val(ov.r)+v===13){removeSel();grid[r][c]=null;removed++;msg('凑成 13，消除！');after();return;}
+  sel={zone:'p',r:r,c:c};render();msg('已选 '+grid[r][c].r+'，再选一张凑 13');
+}
+function clickStock(){
+  if(phase!=='play')return;
+  if(sIdx>=stock.length)return;
+  var c=stock[sIdx],v=val(c.r);
+  if(v===13){sIdx++;removed++;msg('K 单张消除！');after();return;}
+  if(sel&&sel.zone==='s'){sel=null;render();return;}
+  var ov=getSel();
+  if(ov&&sel&&val(ov.r)+v===13){removeSel();msg('凑成 13，消除！');after();return;}
+  sel={zone:'s'};render();msg('已选 '+c.r+'，再选一张凑 13');
+}
+function clickDeck(){
+  if(phase!=='play')return;
+  if(sIdx>=stock.length-1&&sIdx<stock.length){sIdx++;sel=null;render();msg('牌堆翻完了');return;}
+  if(sIdx>=stock.length)return;
+  sIdx++;if(sel&&sel.zone==='s')sel=null;
+  render();msg('翻开下一张');
+}
+function end(win,info){
+  phase='done';render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 共消除 '+removed+' 张，得分 '+(removed*100);
+  $('over').classList.remove('hide');
+}
+function deal(){
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});
+  shuffle(d);
+  grid=[];var k=0;
+  for(var r=0;r<7;r++){var row=[];for(var c=0;c<=r;c++){row.push(d[k]);k++;}grid.push(row);}
+  stock=d.slice(28);sIdx=0;sel=null;removed=0;phase='play';
+}
+function newGame(){
+  deal();$('over').classList.add('hide');msg('点选两张凑 13 的牌');render();
+}
+$('pyr').addEventListener('click',function(e){
+  var t=e.target;
+  while(t&&t.getAttribute&&!t.getAttribute('data-z'))t=t.parentElement;
+  if(!t||!t.getAttribute)return;
+  if(t.getAttribute('data-z')==='p')clickPyr(parseInt(t.getAttribute('data-r'),10),parseInt(t.getAttribute('data-c'),10));
+});
+$('stockSlot').addEventListener('click',function(){clickStock();});
+$('deckPile').addEventListener('click',function(){clickDeck();});
+$('again').onclick=newGame;
+$('again2').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

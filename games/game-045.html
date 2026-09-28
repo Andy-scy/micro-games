@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰球移门</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;gap:10px}
+h1{margin:2px 0;font-size:22px;letter-spacing:4px;color:#67e8f9}
+#wrap{position:relative;width:min(96vw,860px)}
+canvas{display:block;width:100%;height:auto;border-radius:14px;background:#0b1530;box-shadow:0 0 0 1px #262b4a;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(10,12,26,.86);border-radius:14px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#msg{font-size:16px;line-height:2;white-space:pre-line}
+#row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.btn{background:#06b6d4;color:#04283a;border:none;border-radius:10px;padding:10px 26px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:700}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>冰球移门</h1>
+<div id="wrap">
+<canvas id="cv" width="800" height="520"></canvas>
+<div id="overlay"><div id="msg"></div><div id="row"></div></div>
+</div>
+<script>
+'use strict';
+var W=800,H=520,WIN=7,HALF=62;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var overlay=document.getElementById('overlay'),msg=document.getElementById('msg'),row=document.getElementById('row');
+var state='menu',gt=0,freezeT=70,serveDir=1;
+var player={x:90,y:H/2,px:90,py:H/2,vx:0,vy:0,r:24};
+var robot={x:W-90,y:H/2,px:W-90,py:H/2,vx:0,vy:0,r:24};
+var puck={x:W/2,y:H/2,vx:0,vy:0,r:13};
+var sp=0,sa=0,targetX=90,targetY=H/2;
+
+function mkBtn(text,fn){
+  var b=document.createElement('button');
+  b.className='btn';b.textContent=text;
+  b.addEventListener('click',fn);
+  row.appendChild(b);
+  return b;
+}
+var bStart=mkBtn('开始游戏',function(){start();});
+function showMenu(){
+  state='menu';
+  msg.textContent='冰球对攻：两侧球门会不停地上下滑动！\n用球杆把冰球撞进对方移动球门，先得 7 分者胜。\n操作：鼠标 / 手指拖动控制蓝色球杆（限左半场）。';
+  bStart.textContent='开始游戏';
+  overlay.classList.remove('hide');
+}
+function start(){
+  sp=0;sa=0;gt=0;freezeT=70;
+  player.x=90;player.y=H/2;robot.x=W-90;robot.y=H/2;
+  targetX=90;targetY=H/2;
+  puck.x=W/2;puck.y=H/2;puck.vx=0;puck.vy=0;
+  serveDir=Math.random()<0.5?1:-1;
+  state='play';
+  overlay.classList.add('hide');
+}
+function endGame(win){
+  state='end';
+  msg.textContent=(win?'进球如麻，胜利！':'被对手封零，再战！')+'\n最终比分 '+sp+' : '+sa;
+  bStart.textContent='再来一局';
+  overlay.classList.remove('hide');
+}
+function goalP(){sp++;serveDir=1;checkWin();}
+function goalA(){sa++;serveDir=-1;checkWin();}
+function checkWin(){
+  freezeT=55;
+  puck.x=W/2;puck.y=H/2;puck.vx=0;puck.vy=0;
+  if(sp>=WIN){endGame(true);}
+  else if(sa>=WIN){endGame(false);}
+}
+function gyL(){return H/2+Math.sin(gt*0.020)*150;}
+function gyR(){return H/2+Math.sin(gt*0.015+2.0)*150;}
+function strike(s){
+  var dx=puck.x-s.x,dy=puck.y-s.y;
+  var d=Math.sqrt(dx*dx+dy*dy);
+  var min=puck.r+s.r;
+  if(d>=min){return;}
+  if(d<0.001){dx=1;dy=0;d=1;}
+  var nx=dx/d,ny=dy/d;
+  puck.x=s.x+nx*min;puck.y=s.y+ny*min;
+  var dot=puck.vx*nx+puck.vy*ny;
+  if(dot<0){puck.vx-=2*dot*nx;puck.vy-=2*dot*ny;}
+  puck.vx+=s.vx*0.8;puck.vy+=s.vy*0.8;
+  var m=Math.sqrt(puck.vx*puck.vx+puck.vy*puck.vy);
+  if(m>16){puck.vx*=16/m;puck.vy*=16/m;}
+}
+function update(dt){
+  gt+=dt;
+  player.px=player.x;player.py=player.y;
+  player.x+=(targetX-player.x)*Math.min(1,0.4*dt);
+  player.y+=(targetY-player.y)*Math.min(1,0.4*dt);
+  player.x=Math.max(player.r+8,Math.min(W/2-player.r-4,player.x));
+  player.y=Math.max(player.r+8,Math.min(H-player.r-8,player.y));
+  player.vx=(player.x-player.px)/dt;player.vy=(player.y-player.py)/dt;
+  var pv=Math.sqrt(player.vx*player.vx+player.vy*player.vy);
+  if(pv>16){player.vx*=16/pv;player.vy*=16/pv;}
+  robot.px=robot.x;robot.py=robot.y;
+  var chase=puck.vx>0||puck.x>W/2;
+  var rx,ry;
+  if(chase){rx=Math.min(W-robot.r-8,puck.x+puck.vx*8);ry=puck.y+puck.vy*8;}
+  else{rx=W-80;ry=gyR();}
+  var dx=rx-robot.x,dy=ry-robot.y;
+  var dd=Math.sqrt(dx*dx+dy*dy)||1;
+  var mv=Math.min(5.6*dt,dd);
+  robot.x+=dx/dd*mv;robot.y+=dy/dd*mv;
+  robot.x=Math.max(W/2+robot.r+4,Math.min(W-robot.r-8,robot.x));
+  robot.y=Math.max(robot.r+8,Math.min(H-robot.r-8,robot.y));
+  robot.vx=(robot.x-robot.px)/dt;robot.vy=(robot.y-robot.py)/dt;
+  if(freezeT>0){
+    freezeT-=dt;
+    if(freezeT<=0){
+      var a=Math.random()*0.8-0.4;
+      puck.vx=Math.cos(a)*5.2*serveDir;
+      puck.vy=Math.sin(a)*5.2;
+    }
+    return;
+  }
+  puck.x+=puck.vx*dt;puck.y+=puck.vy*dt;
+  var f=Math.pow(0.9945,dt);
+  puck.vx*=f;puck.vy*=f;
+  if(puck.y<puck.r){puck.y=puck.r;puck.vy=Math.abs(puck.vy);}
+  if(puck.y>H-puck.r){puck.y=H-puck.r;puck.vy=-Math.abs(puck.vy);}
+  strike(player);strike(robot);
+  if(puck.x-puck.r<0){
+    if(Math.abs(puck.y-gyL())<HALF){
+      if(puck.x<-puck.r-6){goalA();return;}
+    }else{puck.x=puck.r;puck.vx=Math.abs(puck.vx);}
+  }
+  if(puck.x+puck.r>W){
+    if(Math.abs(puck.y-gyR())<HALF){
+      if(puck.x>W+puck.r+6){goalP();return;}
+    }else{puck.x=W-puck.r;puck.vx=-Math.abs(puck.vx);}
+  }
+}
+function striker(s,color){
+  ctx.fillStyle='#0b1530';
+  ctx.strokeStyle=color;
+  ctx.lineWidth=5;
+  ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle=color;
+  ctx.beginPath();ctx.arc(s.x,s.y,5,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var gl=gyL(),gr=gyR();
+  ctx.strokeStyle='rgba(103,232,249,.18)';
+  ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(W/2,H/2,70,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.fillStyle='#1c2547';
+  ctx.fillRect(0,0,12,gl-HALF);
+  ctx.fillRect(0,gl+HALF,12,H-gl-HALF);
+  ctx.fillRect(W-12,0,12,gr-HALF);
+  ctx.fillRect(W-12,gr+HALF,12,H-gr-HALF);
+  ctx.fillStyle='rgba(56,189,248,.30)';
+  ctx.fillRect(0,gl-HALF,12,HALF*2);
+  ctx.fillStyle='rgba(244,114,182,.30)';
+  ctx.fillRect(W-12,gr-HALF,12,HALF*2);
+  ctx.fillStyle='#38bdf8';
+  ctx.beginPath();ctx.arc(6,gl-HALF,7,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(6,gl+HALF,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#f472b6';
+  ctx.beginPath();ctx.arc(W-6,gr-HALF,7,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(W-6,gr+HALF,7,0,Math.PI*2);ctx.fill();
+  ctx.textAlign='center';
+  ctx.font='bold 46px system-ui';
+  ctx.fillStyle='rgba(232,234,246,.85)';
+  ctx.fillText(sp,W/2-70,60);
+  ctx.fillText(sa,W/2+70,60);
+  striker(player,'#38bdf8');
+  striker(robot,'#f472b6');
+  ctx.fillStyle='#f8fafc';
+  ctx.beginPath();ctx.arc(puck.x,puck.y,puck.r,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#94a3b8';
+  ctx.beginPath();ctx.arc(puck.x,puck.y,puck.r*0.45,0,Math.PI*2);ctx.fill();
+  if(freezeT>0&&state==='play'){
+    ctx.font='20px system-ui';ctx.fillStyle='#67e8f9';
+    ctx.fillText('准备…',W/2,H/2-60);
+  }
+  ctx.font='13px system-ui';ctx.fillStyle='#67e8f9';
+  ctx.fillText('球门在移动 · 先得 7 分',W/2,H-12);
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(2.5,Math.max(0.2,(t-last)/16.7));
+  last=t;
+  if(state==='play'){update(dt);}
+  draw();
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.touches&&e.touches[0]){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  targetX=(cx-r.left)*(W/r.width);
+  targetY=(cy-r.top)*(H/r.height);
+}
+cv.addEventListener('mousemove',ptr);
+cv.addEventListener('touchstart',function(e){e.preventDefault();ptr(e);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();ptr(e);},{passive:false});
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

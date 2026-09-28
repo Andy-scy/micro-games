@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>御风接叶</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>御风接叶</h1>
+  <p class="tips">阵风会把落叶吹得横着飘!盯紧顶部风向标,← → 或 A/D 移动篮子,触屏拖动。接叶 +10,金叶 +40,叶子落地 -1 生命,共 3 条。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">当前风力</div><div class="big" id="wd">无风</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">御风接叶</h2><p id="ovp">玩法:风的干扰,提前预判。<br>· 每隔几秒风向风力都会改变<br>· 顶部箭头实时显示风向与强度<br>· 落叶一边下落一边被吹横移<br>· 键盘 ← → 或 A/D 移篮,触屏拖动<br>· 绿叶 +10,金叶 +40,叶子落地 -1 生命</p><button class="btn" id="obtn">开始接叶</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,lives:3,wind:0,wt:0,wtT:1.2,st:0.7,t:0,leaves:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function windName(){
+  if(S.wind>14)return'东风→';
+  if(S.wind<-14)return'←西风';
+  return'微风';
+}
+function update(dt){
+  S.t+=dt;
+  S.wtT-=dt;
+  if(S.wtT<=0){
+    S.wt=(Math.random()*2-1)*140;
+    S.wtT=2.2+Math.random()*1.4;
+  }
+  S.wind+=(S.wt-S.wind)*Math.min(1,dt*1.4);
+  $('wd').textContent=windName();
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=(0.65+Math.random()*0.4);
+    S.leaves.push({x:40+Math.random()*(W-80),y:-12,v:150+Math.random()*70,ph:Math.random()*6,amp:12+Math.random()*16,age:0,gold:Math.random()<0.1,rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.leaves.length-1;i>=0;i--){
+    var lf=S.leaves[i];
+    lf.age+=dt;
+    lf.x+=(S.wind*0.85+Math.sin(lf.age*2.4+lf.ph)*lf.amp*0.5)*dt;
+    lf.y+=lf.v*dt;
+    lf.rot+=dt*(1.5+S.wind*0.01);
+    if(lf.x<10)lf.x=10;
+    if(lf.x>W-10)lf.x=W-10;
+    if(lf.y>=by-16&&lf.y<=by+10&&Math.abs(lf.x-S.bx)<S.bw/2+8){
+      var pts=lf.gold?40:10;
+      S.score+=pts;$('sc').textContent=S.score;
+      pop(lf.x,by-28,'+'+pts+(lf.gold?' 金叶!':''),'#ffd166');
+      S.leaves.splice(i,1);continue;
+    }
+    if(lf.y>H+14){
+      S.leaves.splice(i,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(lf.x,H-100,'叶子落地!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='风把叶子都吹跑了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>看箭头提前跑位,别追着叶子跑!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='rgba(255,255,255,.06)';rr(120,14,240,40,10);ctx.fill();
+  var dir=S.wind*0.7;
+  ctx.strokeStyle='#4cc9f0';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(W/2,34);ctx.lineTo(W/2+dir,34);ctx.stroke();
+  if(Math.abs(dir)>6){
+    var s=dir>0?1:-1;
+    ctx.beginPath();
+    ctx.moveTo(W/2+dir,34);
+    ctx.lineTo(W/2+dir-s*8,29);
+    ctx.moveTo(W/2+dir,34);
+    ctx.lineTo(W/2+dir-s*8,39);
+    ctx.stroke();
+  }
+  ctx.fillStyle='#cdd6f4';ctx.font='bold 13px system-ui';ctx.textAlign='center';
+  ctx.fillText(windName()+' 强度 '+Math.round(Math.abs(S.wind)),W/2,48);
+  for(var i=0;i<S.leaves.length;i++){
+    var lf=S.leaves[i];
+    ctx.save();ctx.translate(lf.x,lf.y);ctx.rotate(lf.rot);
+    ctx.fillStyle=lf.gold?'#ffd166':'#6fcf6f';
+    ctx.beginPath();ctx.ellipse(0,0,11,6,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(-9,0);ctx.lineTo(9,0);ctx.stroke();
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';
+  ctx.fillText('接叶篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

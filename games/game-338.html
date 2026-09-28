@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>岩壁点灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f59e0b;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f59e0b;font-size:16px}
+.gbtn{background:#3f2c07;color:#f59e0b;border:1px solid #f59e0b;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#f59e0b;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;max-width:400px;margin:0 auto;touch-action:manipulation}
+.cell{aspect-ratio:1/1;border-radius:9px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .18s,box-shadow .18s,transform .08s}
+.cell.on{background:linear-gradient(145deg,#fcd34d,#b45309);border-color:#fde68a;box-shadow:0 0 13px rgba(245,158,11,.55)}
+.cell.rock{background:repeating-linear-gradient(45deg,#2a2a33 0 6px,#232329 6px 12px);border-color:#3a3a45;cursor:default;box-shadow:inset 0 2px 6px rgba(0,0,0,.6)}
+.cell.cur{outline:2px solid rgba(245,158,11,.75);outline-offset:2px}
+.cell:not(.rock):active{transform:scale(.92)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#f59e0b;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#f59e0b;color:#3f2c07;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>岩壁点灯</h1>
+  <p class="hint">5×5 灯场上散布着 3 块顽石:岩石永远暗着、点不动,也不会被翻转。点亮其余所有灯即胜利。谜面仍由目标状态打乱而来,必定可解。</p>
+  <div class="hud">
+    <span>步数 <b id="moves">0</b></span>
+    <span>已点亮 <b id="lit">0</b>/22</span>
+    <span>最少步纪录 <b id="best">--</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">岩壁点灯</h2>
+    <p id="ovDesc">矿洞里的点灯:三块岩壁横在灯阵之间,挡住的是你的思路而不是灯光——翻转照常越过岩石,只是岩石自身纹丝不动。绕开它思考,点亮其余二十二盏灯。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">入洞点灯</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=5,CNT=25,ROCKS=3;
+var gridEl=$("grid"),elMoves=$("moves"),elLit=$("lit"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cells=[],board=[],rock=[],moves=0,state="menu";
+var best=loadNum("mg338_best");
+
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function setMsg(s){elMsg.textContent=s;clearTimeout(setMsg.t);setMsg.t=setTimeout(function(){elMsg.textContent="";},2200);}
+function build(){
+  gridEl.innerHTML="";cells=[];
+  for(var i=0;i<CNT;i++){
+    var d=document.createElement("div");
+    d.className="cell";d.dataset.i=i;
+    gridEl.appendChild(d);cells.push(d);
+  }
+}
+function paint(i){
+  var cl="cell";
+  if(rock[i])cl+=" rock";
+  else if(board[i])cl+=" on";
+  if(cur===i&&!rock[i])cl+=" cur";
+  cells[i].className=cl;
+}
+function paintAll(){for(var i=0;i<CNT;i++)paint(i);}
+function crossList(r,c){
+  var list=[r*N+c];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function press(r,c,silent){
+  var list=crossList(r,c),i;
+  for(i=0;i<list.length;i++){
+    if(rock[list[i]])continue;
+    board[list[i]]^=1;
+    if(!silent)paint(list[i]);
+  }
+  if(!silent)moves++;
+}
+function litGoal(){var n=0,i;for(i=0;i<CNT;i++)if(!rock[i]&&board[i])n++;return n;}
+function cellTotal(){return CNT-ROCKS;}
+function pickRocks(){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,ROCKS);
+}
+function pickCells(pool,k){
+  var arr=pool.slice(),i;
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function updateHud(){
+  elMoves.textContent=moves;elLit.textContent=litGoal();
+  elBest.textContent=best>0?best+" 步":"--";
+}
+function newGame(){
+  var i;
+  board=[];rock=[];
+  for(i=0;i<CNT;i++){board.push(1);rock.push(false);}
+  var rs=pickRocks();
+  for(i=0;i<rs.length;i++)rock[rs[i]]=true;
+  var pool=[];
+  for(i=0;i<CNT;i++)if(!rock[i])pool.push(i);
+  moves=0;state="playing";
+  var ps=pickCells(pool,6),j;
+  for(j=0;j<ps.length;j++)press((ps[j]/N)|0,ps[j]%N,true);
+  paintAll();updateHud();
+}
+function doPress(i){
+  if(state!=="playing")return;
+  if(rock[i]){setMsg("岩石纹丝不动");return;}
+  press((i/N)|0,i%N,false);
+  updateHud();
+  if(litGoal()===cellTotal())win();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||moves<best){best=moves;saveNum("mg338_best",best);isNew=true;}
+  ovTitle.textContent="石缝生光!";
+  ovDesc.textContent=isNew?"新纪录!绕开顽石的最短点灯路被你找到。":"顽石之间,灯火通明。矿洞因你而亮。";
+  ovScore.style.display="block";
+  ovScore.textContent="本局步数 "+moves;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function start(){newGame();ov.classList.add("hide");}
+var cur=-1;
+function setCur(i){
+  var old=cur;cur=i;
+  if(old>=0)paint(old);
+  if(cur>=0)paint(cur);
+}
+gridEl.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.classList&&t.classList.contains("cell"))doPress(parseInt(t.dataset.i,10));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}
+    return;
+  }
+  if(cur<0)setCur(12);
+  var r=(cur/N)|0,c=cur%N,k=e.key;
+  if(k==="ArrowUp"){r=(r+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowDown"){r=(r+1)%N;e.preventDefault();}
+  else if(k==="ArrowLeft"){c=(c+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowRight"){c=(c+1)%N;e.preventDefault();}
+  else if(k==="Enter"||k===" "){e.preventDefault();doPress(cur);return;}
+  else return;
+  setCur(r*N+c);
+});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();setMsg("新的岩壁布局已生成");
+});
+build();
+board=[];rock=[];
+for(var z=0;z<CNT;z++){board.push(1);rock.push(false);}
+var rs0=pickRocks(),z1;
+for(z1=0;z1<rs0.length;z1++)rock[rs0[z1]]=true;
+var pool0=[],z4;
+for(z4=0;z4<CNT;z4++)if(!rock[z4])pool0.push(z4);
+var ps0=pickCells(pool0,6),z2;
+for(z2=0;z2<ps0.length;z2++){
+  var l0=crossList((ps0[z2]/N)|0,ps0[z2]%N),z3;
+  for(z3=0;z3<l0.length;z3++)if(!rock[l0[z3]])board[l0[z3]]^=1;
+}
+paintAll();updateHud();
+})();
+</script>
+</body>
+</html>

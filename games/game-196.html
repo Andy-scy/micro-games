@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>顺序复原</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:380px}
+#board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.card{position:relative;aspect-ratio:1/1;cursor:pointer;perspective:700px}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .25s}
+.card.open .inner{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;border-radius:12px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(24px,8vw,38px)}
+.bk{background:linear-gradient(145deg,#28325f,#1c2447);border:2px solid #46508c;color:#6a76c9;font-weight:bold}
+.ft{background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;transform:rotateY(180deg)}
+.card.wrong .ft{border-color:#ff6b81;background:linear-gradient(145deg,#6b2030,#571a26)}
+.card.wrong{animation:shakeX .4s}
+@keyframes shakeX{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>顺序复原</h1>
+<div class="hint">Simon 式顺序记忆!卡牌会按顺序依次亮起,看清后按同样的顺序依次翻开;共 6 轮、序列越来越长,点错损失一颗心,3 颗心用完则失败。</div>
+<div class="bar"><span>进度 <b id="stRound">1/6</b></span><span>生命 <b id="stLives">❤️ ×3</b></span><span id="stTip">准备中…</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var ICONS=['🌟','🌙','☀️','⚡','🍀','🔥','💧','🎈','🎁'];
+var TOTAL=6;
+var board=document.getElementById('board');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elRound=document.getElementById('stRound');
+var elLives=document.getElementById('stLives');
+var elTip=document.getElementById('stTip');
+var btnAgain=document.getElementById('btnAgain');
+var cards=[],seq=[],round=1,lives=3,showIdx=0,inputIdx=0,phase='idle',nextAt=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function tip(t){elTip.textContent=t;}
+function setCard(cd,open){
+  cd.open=open;
+  cd.el.classList.toggle('open',open);
+}
+function closeAll(){for(var i=0;i<cards.length;i++)setCard(cards[i],false);}
+function pickSeq(){
+  var pool=cards.slice();
+  shuffle(pool);
+  return pool.slice(0,round+2);
+}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);
+  var cd={el:el,sym:sym,open:false};
+  el.cd=cd;
+  board.appendChild(el);
+  return cd;
+}
+function updateBar(){
+  elRound.textContent=Math.min(round,TOTAL)+'/'+TOTAL;
+  elLives.textContent='❤️ ×'+lives;
+}
+function newGame(){
+  clearTimers();board.innerHTML='';cards=[];
+  round=1;lives=3;phase='idle';running=true;over=false;
+  overlay.classList.remove('show');
+  for(var i=0;i<ICONS.length;i++)cards.push(makeCard(ICONS[i]));
+  updateBar();
+  startAt=performance.now();
+  seq=pickSeq();showIdx=0;
+  phase='show';nextAt=performance.now()+800;
+  tip('看好了…');
+}
+function onCard(el){
+  if(over||phase!=='input')return;
+  var cd=el.cd;
+  if(!cd||cd.open)return;
+  if(cd===seq[inputIdx]){
+    setCard(cd,true);
+    inputIdx++;
+    if(inputIdx>=seq.length){phase='wait';nextAt=performance.now()+650;}
+  }else{
+    lives--;updateBar();
+    setCard(cd,true);
+    cd.el.classList.add('wrong');
+    if(lives<=0){
+      phase='idle';
+      later(function(){
+        cd.el.classList.remove('wrong');
+        fail();
+      },900);
+    }else{
+      phase='shake';nextAt=performance.now()+900;
+      later(function(){
+        cd.el.classList.remove('wrong');
+        setCard(cd,false);
+      },500);
+    }
+  }
+}
+function fail(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  ovTitle.textContent='复原失败…';
+  ovDesc.innerHTML='坚持到第 '+Math.min(round,TOTAL)+' 轮 · 用时 '+sec.toFixed(1)+' 秒<br>静下心来,再来一次!';
+  overlay.classList.add('show');
+}
+function finishWin(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  var grade=lives===3?'★★★ 零失误':(lives===2?'★★☆ 稳健复原':'★☆☆ 有惊无险');
+  ovTitle.textContent='全部复原!';
+  ovDesc.innerHTML='完成全部 '+TOTAL+' 轮 · 剩余生命 '+lives+'<br>用时 '+sec.toFixed(1)+' 秒<br>'+grade;
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+var tick=function(){
+  var now=performance.now();
+  if(running&&!over){
+    if(phase==='show'&&now>=nextAt){
+      if(showIdx>0)setCard(seq[showIdx-1],false);
+      setCard(seq[showIdx],true);
+      showIdx++;
+      if(showIdx>=seq.length){phase='pause';nextAt=now+700;}
+      else nextAt=now+640;
+    }else if(phase==='pause'&&now>=nextAt){
+      setCard(seq[seq.length-1],false);
+      phase='input';inputIdx=0;
+      tip('按顺序翻开!');
+    }else if(phase==='shake'&&now>=nextAt){
+      closeAll();
+      showIdx=0;
+      phase='show';nextAt=now+500;
+      tip('再记一遍…');
+    }else if(phase==='wait'&&now>=nextAt){
+      closeAll();
+      round++;
+      if(round>TOTAL){
+        finishWin();
+      }else{
+        updateBar();
+        seq=pickSeq();showIdx=0;
+        phase='show';nextAt=now+800;
+        tip('第 '+round+' 轮,看好了…');
+      }
+    }
+  }
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

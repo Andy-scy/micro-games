@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右开弓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a5f3fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a5f3fc;font-size:16px}
+.stage{position:relative;background:#0f1e24;border:2px solid #1c3a44;border-radius:12px;padding:12px}
+.cols{display:grid;grid-template-columns:1.2fr 0.9fr 1.2fr;gap:10px}
+.col h3{font-size:12px;color:#8b90b0;text-align:center;margin:0 0 6px;font-weight:400}
+.stv{background:#152a34;border:2px solid #23445e;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;margin-bottom:8px;user-select:none}
+.stv .sic{font-size:22px}
+.stv .slb{font-size:12px;color:#8b90b0;min-height:16px}
+.stv .sbar{height:8px;border-radius:4px;background:#0b1520;overflow:hidden;margin-top:4px}
+.stv .sbar i{display:block;height:100%;width:0;background:#a5f3fc}
+.stv.cooking{border-color:#a5f3fc}
+.stv.block{border-color:#f87171}
+.win{display:flex;flex-direction:column;gap:8px}
+.wslot{height:58px;border:2px dashed #23445e;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:26px}
+.cst{background:#1a2530;border:2px solid #2a4452;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;margin-bottom:8px;user-select:none}
+.cst .cic{font-size:22px}
+.cst .clb{font-size:12px;color:#8b90b0}
+.cst .pbar{height:8px;border-radius:4px;background:#0b1520;overflow:hidden;margin-top:4px}
+.cst .pbar i{display:block;height:100%;background:#4ade80}
+.cst.empty{opacity:.35;cursor:default}
+.cst.shake{animation:shk .3s}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a5f3fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#a5f3fc;color:#082830;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>左右开弓</h1>
+  <p class="hint">左手 <b style="color:#a5f3fc">A / S / D</b> 开三口灶做菜,做好自动送出菜口<br>右手 <b style="color:#4ade80">J / K / L</b> 给三位顾客上对应的菜,两边同时转,手忙脚乱才刚开始!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>时间 <b id="time">90</b>秒</span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="cols">
+      <div class="col">
+        <h3>灶台(键盘 A/S/D)</h3>
+        <div id="stoves"></div>
+      </div>
+      <div class="col">
+        <h3>出菜口(最多3份)</h3>
+        <div class="win" id="winrow"></div>
+      </div>
+      <div class="col">
+        <h3>顾客(键盘 J/K/L)</h3>
+        <div id="custs"></div>
+      </div>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">左右开弓</h2>
+      <p id="ovDesc">左区三口灶各做一种菜(速度不同),做好自动进入中间出菜口(限放 3 份);右区顾客想要什么就按对应位置送菜:耐心越足分越高。上错菜 -8,顾客气走扣命,90 秒冲刺!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var DTYPE=[["🍜",2.4],["🍣",2.9],["🥟",2.0]];
+var SKEY=["A","S","D"],CKEY=["J","K","L"];
+var elScore=$("score"),elTime=$("time"),elLife=$("life"),elBest=$("best");
+var stovesEl=$("stoves"),winrow=$("winrow"),custsEl=$("custs"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s820");
+var state="menu",stoves,window820,custs,score,lives,timeLeft,lastT,msgT;
+var stvEls=[],winEls=[],cstEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  var i;
+  for(i=0;i<3;i++){
+    var d=document.createElement("div");
+    d.className="stv";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<div class="sic">'+DTYPE[i][0]+'</div><div class="slb">开火 ('+SKEY[i]+')</div><div class="sbar"><i></i></div>';
+    stovesEl.appendChild(d);
+    stvEls.push({box:d,lb:d.children[1],fill:d.children[2].children[0]});
+  }
+  for(i=0;i<3;i++){
+    var w=document.createElement("div");
+    w.className="wslot";
+    w.textContent="·";
+    winrow.appendChild(w);
+    winEls.push(w);
+  }
+  for(i=0;i<3;i++){
+    var c=document.createElement("div");
+    c.className="cst empty";
+    c.setAttribute("data-i",String(i));
+    c.innerHTML='<div class="cic">💺</div><div class="clb">空位 ('+CKEY[i]+')</div><div class="pbar"><i></i></div>';
+    custsEl.appendChild(c);
+    cstEls.push({box:c,cic:c.children[0],clb:c.children[1],pfill:c.children[2].children[0]});
+  }
+}
+function rate(){return Math.min(18,7+score*0.1);}
+function reset(){
+  stoves=[{st:"idle",t:0},{st:"idle",t:0},{st:"idle",t:0}];
+  window820=[];
+  custs=[{spawnT:0.4},{spawnT:0.9},{spawnT:1.4}];
+  score=0;lives=3;timeLeft=90;
+  msg.textContent="";msgT=0;render();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function render(){
+  var i;
+  for(i=0;i<3;i++){
+    var s=stoves[i],e=stvEls[i];
+    if(s.st==="idle"){e.box.className="stv";e.lb.textContent="开火 ("+SKEY[i]+")";e.fill.style.width="0";}
+    else if(s.st==="cook"){
+      e.box.className="stv cooking";
+      e.lb.textContent=DTYPE[i][0]+" 烹饪中";
+      e.fill.style.width=Math.min(100,s.t/DTYPE[i][1]*100)+"%";
+    }else{
+      e.box.className="stv block";
+      e.lb.textContent="出菜口满了!";
+      e.fill.style.width="100%";
+    }
+  }
+  for(i=0;i<3;i++)winEls[i].textContent=i<window820.length?DTYPE[window820[i]][0]:"·";
+  for(i=0;i<3;i++){
+    var c=custs[i],e=cstEls[i];
+    if(!c.w){e.box.className="cst empty";e.cic.textContent="💺";e.clb.textContent="空位 ("+CKEY[i]+")";e.pfill.style.width="0";}
+    else{
+      e.box.className="cst";
+      e.cic.textContent="🙋";
+      e.clb.textContent="想吃 "+DTYPE[c.w][0]+" ("+CKEY[i]+")";
+      var p=Math.max(0,c.patience);
+      e.pfill.style.width=p+"%";
+      e.pfill.style.background=p>45?"#4ade80":"#f87171";
+    }
+  }
+}
+function startStove(i){
+  if(state!=="playing")return;
+  if(stoves[i].st==="idle"){stoves[i].st="cook";stoves[i].t=0;}
+}
+function serveCust(i){
+  if(state!=="playing")return;
+  var c=custs[i];
+  if(!c.w)return;
+  var j=-1,k;
+  for(k=0;k<window820.length;k++)if(window820[k]===c.w){j=k;break;}
+  if(j>=0){
+    window820.splice(j,1);
+    var pts=15+Math.round(c.patience/5);
+    score+=pts;
+    showMsg("上菜 +"+pts,"#4ade80");
+    custs[i]={spawnT:0.8};
+  }else{
+    score=Math.max(0,score-8);
+    showMsg("没有他要的菜! -8","#f87171");
+    var e=cstEls[i].box;
+    e.classList.add("shake");
+    setTimeout(function(){e.classList.remove("shake");},320);
+  }
+  updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s820",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="90 秒双手并用,你扛住了几波客人?";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  timeLeft-=dts;
+  if(timeLeft<=0){timeLeft=0;updateHud();gameOver();return;}
+  var i;
+  for(i=0;i<3;i++){
+    var s=stoves[i];
+    if(s.st==="cook"){
+      s.t+=dts;
+      if(s.t>=DTYPE[i][1]){
+        if(window820.length<3){window820.push(i);stoves[i]={st:"idle",t:0};}
+        else s.st="ready";
+      }
+    }else if(s.st==="ready"&&window820.length<3){
+      window820.push(i);stoves[i]={st:"idle",t:0};
+    }
+  }
+  for(i=0;i<3;i++){
+    var c=custs[i];
+    if(c.w){
+      c.patience-=rate()*dts;
+      if(c.patience<=0){
+        custs[i]={spawnT:0.8};
+        lives--;
+        showMsg("顾客气走了!","#f87171");
+        updateHud();
+        if(lives<=0){render();gameOver();return;}
+      }
+    }else{
+      c.spawnT-=dts;
+      if(c.spawnT<=0)custs[i]={w:(Math.random()*3)|0,patience:100,spawnT:0};
+    }
+  }
+  render();updateHud();
+}
+stovesEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==stovesEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==stovesEl)startStove(parseInt(n.getAttribute("data-i"),10));
+});
+custsEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==custsEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==custsEl)serveCust(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var k=e.key.toLowerCase();
+  var smap={a:0,s:1,d:2},cmap={j:0,k:1,l:2};
+  if(smap[k]!==undefined&&state==="playing"){startStove(smap[k]);e.preventDefault();}
+  else if(cmap[k]!==undefined&&state==="playing"){serveCust(cmap[k]);e.preventDefault();}
+  else if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

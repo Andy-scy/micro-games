@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>跳弹连环</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0a1a33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>跳弹连环</h1>
+  <p class="hint">↑↓ 调角度 · 空格蓄力发射 · 拖拽瞄准 · 弹墙不停,一球连杀翻倍计分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>弹丸 <b id="ammo">5</b></span>
+    <span>波次 <b id="wave">1</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="400"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">跳弹连环</h2>
+      <p id="ovDesc">这里没有重力,炮弹会像台球一样在四壁间不停反弹!
+同一发炮弹每多命中一个目标,得分翻一倍:100、200、400……
+清空一波目标补 1 发弹丸,弹丸耗尽且场上还有目标即结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=400,GY=372;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elAmmo=$("ammo"),elWave=$("wave"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12,R=6;
+var best=loadBest("mg_s463");
+var state="menu",ang=40,pow=60,charging=false,cd=1;
+var ball=null,trail=[],ammo=5,score=0,wave=1,combo=0,targets=[],parts=[],sparks=[];
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 3.4+p*0.03;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function newWave(){
+  targets=[];
+  var n=Math.min(2+wave,6),i,j,ok,tx,ty;
+  for(i=0;i<n;i++){
+    ok=false;
+    while(!ok){
+      tx=rnd(150,440);ty=rnd(46,GY-46);ok=true;
+      if(Math.hypot(tx-CX,ty-PIV)<130)ok=false;
+      for(j=0;j<targets.length;j++)if(Math.hypot(tx-targets[j].x,ty-targets[j].y)<64)ok=false;
+    }
+    targets.push({x:tx,y:ty,rot:rnd(0,3)});
+  }
+}
+function reset(){
+  score=0;ammo=5;wave=1;combo=0;ball=null;trail=[];parts=[];sparks=[];
+  newWave();ang=40;pow=60;charging=false;hud();
+}
+function hud(){elScore.textContent=score;elAmmo.textContent=ammo;elWave.textContent=wave;elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball&&ammo>0;}
+function fire(){
+  if(!canFire())return;
+  ammo--;charging=false;combo=0;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0,b:0};
+  trail=[];sparks=[];hud();
+}
+function bounce(x,y){
+  ball.b++;
+  sparks.push({x:x,y:y,l:12});
+}
+function tick(){
+  var i;
+  if(charging&&canFire()){pow+=cd*1.7;if(pow>=100){pow=100;cd=-1;}if(pow<=15){pow=15;cd=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.l--;if(p.l<=0)parts.splice(i,1);}
+  for(i=sparks.length-1;i>=0;i--){sparks[i].l--;if(sparks[i].l<=0)sparks.splice(i,1);}
+  if(ball){
+    ball.t++;
+    ball.x+=ball.vx;ball.y+=ball.vy;
+    if(ball.x<R){ball.x=R;ball.vx=Math.abs(ball.vx);bounce(0,ball.y);}
+    if(ball.x>W-R){ball.x=W-R;ball.vx=-Math.abs(ball.vx);bounce(W,ball.y);}
+    if(ball.y<R){ball.y=R;ball.vy=Math.abs(ball.vy);bounce(ball.x,0);}
+    if(ball.y>GY-R){ball.y=GY-R;ball.vy=-Math.abs(ball.vy);bounce(ball.x,GY);}
+    for(i=0;i<targets.length;i++){
+      var t=targets[i];
+      if(Math.hypot(ball.x-t.x,ball.y-t.y)<20){
+        combo++;
+        var pts=100*Math.pow(2,Math.min(combo-1,4));
+        score+=pts;
+        for(var k=0;k<12;k++)parts.push({x:t.x,y:t.y,vx:Math.cos(k/12*Math.PI*2)*2.4,vy:Math.sin(k/12*Math.PI*2)*2.4,l:26,c:"#60a5fa"});
+        targets.splice(i,1);i--;
+        break;
+      }
+    }
+    trail.push({x:ball.x,y:ball.y});if(trail.length>26)trail.shift();
+    if(!targets.length){
+      score+=300+wave*100;
+      wave++;ammo++;combo=0;
+      newWave();ball=null;hud();
+    }else if(ball.b>16||ball.t>540){
+      ball=null;combo=0;
+    }
+    if(ball)hud();
+  }
+  if(state==="playing"&&ammo<=0&&!ball&&targets.length>0){
+    if(score>best){best=score;saveBest("mg_s463",best);}
+    state="over";
+    ovTitle.textContent="弹丸用尽";
+    ovDesc.textContent="挺进第 "+wave+" 波,最终得分 "+score+" 分。\n一球多杀才能滚起翻倍的分雪球!";
+    btnGo.textContent="再来一局";
+    ov.classList.remove("hide");
+    hud();
+  }
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCannon(){
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  if(charging){
+    ctx.fillStyle="#20263f";rr(CX-40,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#60a5fa";
+    var bh=80*(pow-15)/85;
+    rr(CX-40,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.35)";
+  for(var i=0;i<90;i++){
+    x+=vx;y+=vy;
+    if(x<R||x>W-R){vx=-vx;}
+    if(y<R||y>GY-R){vy=-vy;}
+    if(i%4===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i;
+  ctx.fillStyle="#0d1226";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="#2a3154";ctx.lineWidth=3;ctx.strokeRect(2,2,W-4,H-4);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  for(i=0;i<targets.length;i++){
+    var t=targets[i];
+    ctx.save();ctx.translate(t.x,t.y);ctx.rotate(t.rot);
+    ctx.fillStyle="#60a5fa";ctx.fillRect(-11,-11,22,22);
+    ctx.fillStyle="#dbe7ff";ctx.fillRect(-5,-5,10,10);
+    ctx.restore();
+  }
+  if(canFire())preview();
+  drawCannon();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(96,165,250,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-2,trail[i].y-2,4,4);}
+  if(ball){
+    ctx.fillStyle="#dbe7ff";ctx.beginPath();ctx.arc(ball.x,ball.y,R,0,Math.PI*2);ctx.fill();
+    if(combo>0){
+      ctx.fillStyle="#fbbf24";ctx.font="bold 13px system-ui";ctx.textAlign="center";
+      ctx.fillText("x"+combo,ball.x,ball.y-12);
+    }
+  }
+  for(i=0;i<sparks.length;i++){var s=sparks[i];ctx.strokeStyle="rgba(219,231,255,"+(s.l/12)+")";ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,14-(s.l),0,Math.PI*2);ctx.stroke();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=15;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-CX,dy=PIV-p.y;
+  if(dy<6||dx<2)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,dx)*180/Math.PI));
+  pow=Math.max(15,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

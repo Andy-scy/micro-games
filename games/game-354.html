@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>限时回放</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#93c5fd;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#93c5fd;font-size:16px}
+.gbtn{background:#152a52;color:#93c5fd;border:1px solid #93c5fd;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#93c5fd;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.timer{height:16px;border-radius:8px;background:#0b0e1c;border:1px solid #2a3258;overflow:hidden;margin-bottom:12px}
+.tbar{height:100%;width:100%;background:linear-gradient(90deg,#3b82f6,#93c5fd);transition:background .2s}
+.tbar.warn{background:linear-gradient(90deg,#dc2626,#f87171)}
+.pads{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:320px;margin:0 auto;touch-action:manipulation}
+.pad{aspect-ratio:1/1;border-radius:16px;cursor:pointer;transition:transform .06s,box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none}
+.pad:active{transform:scale(.94)}
+.p0{background:#0d2f1a;border:2px solid #166534}.p0.lit{background:#22c55e;box-shadow:0 0 26px rgba(34,197,94,.85)}
+.p1{background:#3d1114;border:2px solid #991b1b}.p1.lit{background:#ef4444;box-shadow:0 0 26px rgba(239,68,68,.85)}
+.p2{background:#39300a;border:2px solid #a16207}.p2.lit{background:#eab308;box-shadow:0 0 26px rgba(234,179,8,.85)}
+.p3{background:#122a52;border:2px solid #1d4ed8}.p3.lit{background:#3b82f6;box-shadow:0 0 26px rgba(59,130,246,.85)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#93c5fd;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#93c5fd;color:#152a52;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>限时回放</h1>
+  <p class="hint">倒计时版记忆序列:演示照常播放,但复述开始后顶部倒计时条立刻流逝,必须在时间内点完整个序列!序列越长,给的宽限越多,但永远不够从容。支持键盘 1-4。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>剩余 <b id="left">--</b> 秒</span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="timer"><div class="tbar" id="tbar"></div></div>
+  <div class="pads" id="pads">
+    <div class="pad p0"></div>
+    <div class="pad p1"></div>
+    <div class="pad p2"></div>
+    <div class="pad p3"></div>
+  </div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">限时回放</h2>
+    <p id="ovDesc">记忆没有deadline?这里有。演示结束后倒计时立刻启动,条走完即判负。序列每长一步多给 0.85 秒——听起来慷慨,其实分秒必争。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg354_best",FREQ=[329.63,261.63,220,164.81],GAP=600,FLASH=380;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var raf=0,deadline=0,total=0;
+var pads=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLeft=$("left"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew"),tbar=$("tbar");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.26;v=v==null?0.14:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var box=$("pads"),list=box.querySelectorAll(".pad");for(var i=0;i<list.length;i++){pads.push(list[i]);list[i].dataset.i=String(i);}})();
+function flash(i,ms){var el=pads[i];el.classList.add("lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<4;i++)pads[i].classList.remove("lit");}
+function rnd(){var n;do{n=(Math.random()*4)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function tickTimer(){
+if(state!=="input"){return;}
+var remain=deadline-Date.now();
+if(remain<=0){elLeft.textContent="0.0";tbar.style.width="0%";fail("时间到!倒计时条走完,序列还没复述完。");return;}
+tbar.style.width=(remain/total*100)+"%";
+tbar.classList.toggle("warn",remain<total*0.3);
+elLeft.textContent=(remain/1000).toFixed(1);
+raf=requestAnimationFrame(tickTimer);}
+function playSeq(){state="show";setMsg("演示中…");
+var i=0;(function step(){
+if(i>=seq.length){state="input";pos=0;
+total=2000+850*seq.length;deadline=Date.now()+total;
+setMsg("倒计时开始!快复述!");raf=requestAnimationFrame(tickTimer);return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();if(raf)cancelAnimationFrame(raf);raf=0;
+seq=[];pos=0;level=0;state="wait";setMsg("");tbar.style.width="100%";tbar.classList.remove("warn");
+elLeft.textContent="--";updateHud();timers.push(setTimeout(nextRound,600));}
+function winStep(){level++;if(raf)cancelAnimationFrame(raf);raf=0;state="wait";
+setMsg("压哨完成!序列加长…");updateHud();timers.push(setTimeout(nextRound,800));}
+function fail(txt){clearTimers();clearLit();if(raf)cancelAnimationFrame(raf);raf=0;state="over";
+tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="时间到";
+ovDesc.textContent=txt||("序列在第 "+seq.length+" 步耗尽了时间。诀窍:演示时就在心里预演一遍输入路径,开跑就别停。");
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flash(i,180);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail("第 "+(pos+1)+" 步点错了,倒计时也没能救场。");}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+$("pads").addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+document.addEventListener("keydown",function(e){
+if(state==="menu"||state==="over"){if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}return;}
+var k=e.key;if(k==="1")press(0);else if(k==="2")press(1);else if(k==="3")press(2);else if(k==="4")press(3);});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

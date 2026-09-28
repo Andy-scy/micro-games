@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>穿云术</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>穿云术</h1>
+  <p class="tips">云台可以从下方直接穿过,落下才站稳;按 ↓ 可从云台上垂直落下。限时收集全部铃铛再敲响天空之铃。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">铃铛</div><div class="big" id="bl">0/10</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tm">100s</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">跳</button><button class="tb" id="bD">落</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">穿云术</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃,↓ / S 下落<br>· 云台是单向的:从下面顶上去会直接穿过<br>· 站在云台上按 ↓ 可立刻穿下去,抄近路<br>· 收集全部 10 只铃铛,天空之铃才会亮起<br>· 碰到巡逻的蜜蜂 -1 生命,共 3 条<br>· 限时 100 秒,剩余时间越多分越高</p><button class="btn" id="obtn">开始登云</button></div></div>
+<script>
+'use strict';
+var W=420,H=560,WORLD=1400;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var GROUND=1370,TIMELIMIT=100;
+var PLATS=[
+[40,1330,120],[260,1250,110],[90,1170,120],[230,1080,110],[40,990,140],
+[180,900,120],[300,810,100],[60,720,130],[220,630,120],[80,540,130],
+[280,460,110],[140,370,140],[300,290,100],[60,200,120],[160,120,100]
+];
+var BELLS=[[100,1290],[315,1210],[150,1130],[285,1040],[110,950],[240,860],[350,770],[125,680],[285,590],[145,410]];
+var plats=[],bells=[],bees=[];
+var px=60,py=1330,vx=0,vy=0,pw=22,ph=26,onG=false,dropT=0;
+var camY=WORLD-H,timeLeft=TIMELIMIT,score=0,lives=3,got=0;
+var running=false,lastT=0,parts=[],won=false,winT=0,skyReady=false;
+var keys={L:false,R:false,J:false,D:false},jHeld=false,dHeld=false;
+function build(){
+  plats=[];bells=[];bees=[];
+  var i;
+  for(i=0;i<PLATS.length;i++)plats.push({x:PLATS[i][0],y:PLATS[i][1],w:PLATS[i][2],h:12});
+  for(i=0;i<BELLS.length;i++)bells.push({x:BELLS[i][0],y:BELLS[i][1],got:false});
+  bees.push({x:210,y:1150,a:0,r:10,sp:0.55});
+  bees.push({x:120,y:870,a:2,r:10,sp:0.4});
+  bees.push({x:300,y:510,a:4,r:10,sp:0.5});
+}
+function reset(){
+  build();
+  px=60;py=1330;vx=0;vy=0;onG=false;dropT=0;
+  camY=WORLD-H;timeLeft=TIMELIMIT;score=0;lives=3;got=0;
+  parts=[];won=false;winT=0;skyReady=false;
+  hud();
+}
+function hud(){
+  $i('bl').textContent=got+'/10';
+  $i('tm').textContent=Math.max(0,Math.ceil(timeLeft))+'s';
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function endGame(){
+  running=false;
+  if(won){$i('ovt').textContent='天空之铃响彻云霄!';$i('ovp').innerHTML='全部铃铛到手!<br>最终得分:<b>'+score+'</b>';}
+  else{$i('ovt').textContent=timeLeft<=0?'云散了…':'旅程结束…';$i('ovp').innerHTML='差一点就齐了,再来一次。<br>最终得分:<b>'+score+'</b><br>收集铃铛:<b>'+got+'/10</b>';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function physics(dt){
+  var acc=1500,mx=210;
+  if(keys.L)vx-=acc*dt;
+  if(keys.R)vx+=acc*dt;
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,11*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  if(keys.J&&!jHeld&&onG){vy=-560;onG=false;}
+  if(keys.D&&!dHeld&&onG&&dropT<=0){dropT=0.22;onG=false;py+=3;}
+  vy+=1500*dt;if(vy>900)vy=900;
+  px+=vx*dt;
+  if(px<2)px=2;if(px+pw>W-2)px=W-2-pw;
+  var prevB=py+ph;
+  py+=vy*dt;onG=false;
+  var i,s;
+  if(vy>=0&&dropT<=0){
+    for(i=0;i<plats.length;i++){s=plats[i];
+      if(prevB<=s.y+1&&py+ph>=s.y&&px+pw>s.x&&px<s.x+s.w){
+        py=s.y-ph;vy=0;onG=true;
+      }}
+  }
+  if(py+ph>=GROUND){py=GROUND-ph;vy=0;onG=true;}
+  if(py<0)py=0;
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(!running)return;
+  if(won){winT+=dt;if(winT>1.3){endGame();}return;}
+  if(dropT>0)dropT-=dt;
+  physics(dt);
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;hud();endGame();return;}
+  for(i=0;i<bees.length;i++){var b=bees[i];b.a+=b.sp*dt;b.x=60+Math.sin(b.a)*150+((i*137)%80);}
+  for(i=0;i<bells.length;i++){var bl=bells[i];
+    if(bl.got)continue;
+    var dx=bl.x-(px+pw/2),dy=bl.y-(py+ph/2);
+    if(dx*dx+dy*dy<25*25){bl.got=true;got++;score+=30;burst(bl.x,bl.y,'#ffd166',7);hud();}
+  }
+  if(!skyReady&&got>=bells.length){skyReady=true;burst(210,95,'#ffe9a3',16);}
+  if(skyReady&&Math.abs(px+pw/2-210)<50&&Math.abs(py+ph/2-95)<50){won=true;score+=300+Math.round(timeLeft*3);burst(210,95,'#ffe9a3',24);}
+  for(i=0;i<bees.length;i++){var be=bees[i];
+    var ddx=be.x-(px+pw/2),ddy=be.y-(py+ph/2);
+    if(ddx*ddx+ddy*ddy<20*20){
+      lives--;vy=250;burst(px+pw/2,py,'#ff5c5c',10);hud();
+      if(lives<=0){lives=0;hud();endGame();return;}
+      px=60;py=1330;vx=0;vy=0;dropT=0;
+    }}
+  var target=py-300;
+  camY+=(target-camY)*Math.min(1,8*dt);
+  if(camY<0)camY=0;if(camY>WORLD-H)camY=WORLD-H;
+}
+function cloud(x,y,w){
+  ctx.fillStyle='#3b466f';
+  ctx.beginPath();
+  ctx.arc(x+16,y+6,12,0,6.28);
+  ctx.arc(x+w/2,y+2,15,0,6.28);
+  ctx.arc(x+w-16,y+6,12,0,6.28);
+  ctx.rect(x+10,y+6,w-20,8);
+  ctx.fill();
+  ctx.fillStyle='#6674ab';
+  ctx.fillRect(x+10,y+4,w-20,3);
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#1a2142');g.addColorStop(1,'#0d1128');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  ctx.save();ctx.translate(0,-Math.round(camY));
+  ctx.fillStyle='#2a3153';
+  ctx.fillRect(0,GROUND,W,WORLD-GROUND+40);
+  ctx.fillStyle='#3f4a78';
+  ctx.fillRect(0,GROUND,W,5);
+  for(i=0;i<plats.length;i++)cloud(plats[i].x,plats[i].y,plats[i].w);
+  if(skyReady){
+    ctx.globalAlpha=0.3+0.2*Math.sin(Date.now()*0.006);
+    ctx.fillStyle='#ffd166';
+    ctx.beginPath();ctx.arc(210,95,42,0,6.28);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle=skyReady?'#ffd166':'#5a628c';
+  ctx.beginPath();ctx.arc(210,95,13,0,6.28);ctx.fill();
+  ctx.fillStyle=skyReady?'#fff1c4':'#7a83b0';
+  ctx.fillRect(207,108,6,14);
+  for(i=0;i<bells.length;i++){var bl=bells[i];
+    if(bl.got)continue;
+    var sw=Math.sin(Date.now()*0.003+i*1.3)*0.18;
+    ctx.save();ctx.translate(bl.x,bl.y);ctx.rotate(sw);
+    ctx.fillStyle='#ffd166';
+    ctx.beginPath();ctx.arc(0,2,8,3.14,0);ctx.closePath();ctx.fill();
+    ctx.fillRect(-2,-12,4,10);
+    ctx.fillStyle='#c99b3f';ctx.fillRect(-5,6,10,3);
+    ctx.restore();
+  }
+  for(i=0;i<bees.length;i++){var b=bees[i];
+    ctx.fillStyle='#ffe066';
+    ctx.beginPath();ctx.ellipse(b.x,b.y,10,7,0,0,6.28);ctx.fill();
+    ctx.fillStyle='#1c2038';
+    ctx.fillRect(b.x-4,b.y-6,3,12);ctx.fillRect(b.x+2,b.y-6,3,12);
+    ctx.globalAlpha=0.5;
+    ctx.fillStyle='#dff3ff';
+    ctx.beginPath();ctx.ellipse(b.x-8,b.y-7,6,3,Date.now()*0.03,0,6.28);ctx.fill();
+    ctx.beginPath();ctx.ellipse(b.x+8,b.y-7,6,3,-Date.now()*0.03,0,6.28);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle='#a6e3a1';
+  ctx.fillRect(px,py,pw,ph);
+  ctx.fillStyle='#081226';
+  ctx.fillRect(px+pw*0.28,py+7,4,5);
+  ctx.fillRect(px+pw*0.62,py+7,4,5);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  ctx.font='12px system-ui';ctx.fillStyle='#7f8ab0';ctx.textAlign='left';
+  ctx.fillText(skyReady?'天空之铃已亮,快去敲响它!':'↓ 可从云台直接落下',10,H-10);
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');bindBtn('bD','D');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='ArrowDown'||e.code==='KeyS'){keys.D=true;e.preventDefault();}
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){keys.J=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='ArrowDown'||e.code==='KeyS')keys.D=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;dHeld=keys.D;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

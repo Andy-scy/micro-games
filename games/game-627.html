@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色序回响</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+#pads{display:flex;gap:10px;margin-top:6px}
+.pad{flex:1;height:96px;border-radius:14px;border:3px solid #232a48;cursor:pointer;opacity:.5;transition:opacity .1s,transform .1s}
+.pad.on{opacity:1;transform:scale(1.05);border-color:#fff}
+#msg{text-align:center;font-size:15px;color:#cdd6f4;min-height:24px;margin-top:12px;line-height:1.6}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色序回响</h1>
+  <p class="tips">五块色灯按随机顺序亮起,像回声一样越来越长!亮灯结束后按相同顺序点击复现。每轮多亮一盏,速度越来越快;记错任意一步即结束。撑满 8 轮即通关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">轮次</div><div class="big" id="lv">1/8</div></div>
+      <div class="stat"><div class="mut">序列长度</div><div class="big" id="len">3</div></div>
+      <div class="stat"><div class="mut">阶段</div><div class="big" id="ph">—</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="pads"></div>
+    <div id="msg">亮灯时仔细看,轮到你时按顺序点!</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色序回响</h2><p id="ovp">玩法:经典色彩记忆「西蒙」。<br>· 每轮开始,色灯按随机顺序逐个亮起(每轮多 1 步)<br>· 播放完毕后,你按同样的顺序点击色灯<br>· 点错任何一步立即结束;完成 8 轮(最长 10 步)通关<br>· 播放速度会逐轮加快,别眨眼!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PADS=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var seq=[],round=1,inputIdx=0,phase='idle',S=0,audio=null;
+var playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function ensureAudio(){
+  if(audio)return;
+  try{
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(AC)audio=new AC();
+  }catch(e){audio=null}
+}
+function beep(i){
+  if(!audio)return;
+  try{
+    var o=audio.createOscillator(),g=audio.createGain();
+    o.type='sine';
+    o.frequency.value=300+i*80;
+    g.gain.setValueAtTime(0.16,audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+0.28);
+    o.connect(g);g.connect(audio.destination);
+    o.start();o.stop(audio.currentTime+0.28);
+  }catch(e){}
+}
+function lightPad(i,ms){
+  var el=$('pad'+i);
+  el.classList.add('on');
+  beep(i);
+  setTimeout(function(){el.classList.remove('on')},ms);
+}
+function playSeq(){
+  var token=S;
+  phase='show';
+  $('ph').textContent='播放';
+  $('msg').textContent='看好了……';
+  var lit=Math.max(210,430-round*18),gap=150,i=0;
+  function step(){
+    if(token!==S||over)return;
+    if(i>=seq.length){
+      phase='input';inputIdx=0;
+      $('ph').textContent='复现';
+      $('msg').textContent='轮到你了,按顺序点!';
+      return;
+    }
+    lightPad(seq[i],lit);
+    i++;
+    setTimeout(step,lit+gap);
+  }
+  setTimeout(step,520);
+}
+function nextRound(){
+  seq.push(Math.floor(Math.random()*5));
+  $('lv').textContent=Math.min(round,8)+'/8';
+  $('len').textContent=seq.length;
+  playSeq();
+}
+function onPad(i){
+  if(!playing||over||phase!=='input')return;
+  lightPad(i,170);
+  if(seq[inputIdx]===i){
+    inputIdx++;
+    if(inputIdx>=seq.length){
+      phase='wait';
+      $('ph').textContent='正确';
+      $('msg').textContent='正确!下一轮马上开始……';
+      round++;
+      if(round>8){finish(true);return;}
+      var tk=S;
+      setTimeout(function(){if(tk===S&&!over)nextRound()},780);
+    }
+  }else{
+    finish(false);
+  }
+}
+function buildPads(){
+  var box=$('pads');box.innerHTML='';
+  for(var i=0;i<5;i++){
+    var b=document.createElement('button');
+    b.className='pad';
+    b.id='pad'+i;
+    b.style.background=PADS[i][1];
+    (function(idx){b.addEventListener('click',function(){onPad(idx)})})(i);
+    box.appendChild(b);
+  }
+}
+function finish(win){
+  playing=false;over=true;
+  $('ph').textContent='结束';
+  var got=seq.length-1;
+  $('ovt').textContent=win?'色彩记忆大师!':'回声中断…';
+  $('ovp').innerHTML=(win?'8 轮全部复现成功!':'记错了一步。')+'<br>完成轮数 <b>'+(win?8:round-1)+'</b> · 成功记住 <b>'+got+'</b> 步<br>在心里默念颜色名,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  S++;round=1;seq=[];inputIdx=0;phase='idle';
+  playing=true;over=false;
+  ensureAudio();
+  $('overlay').classList.add('hide');
+  nextRound();
+}
+$('obtn').addEventListener('click',startGame);
+buildPads();
+</script>
+</body>
+</html>

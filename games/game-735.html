@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹射起步</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f87171;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#f87171;font-size:16px}
+.gbtn{background:#3f1d2b;color:#fda4af;border:1px solid #f87171;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit;user-select:none}
+.gbtn:active{background:#f87171;color:#2b0b12}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#2b0b12;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹射起步</h1>
+  <p class="hint">按住 空格/↑ 油门 · 按 S/→ 升挡 · 抢跑罚时!触屏用下方按钮</p>
+  <div class="hud">
+    <span>挡位 <b id="gear">N</b></span>
+    <span>速度 <b id="spd">0</b> km/h</span>
+    <span>用时 <b id="time">0.00</b> s</span>
+    <span>最佳 <b id="best">--</b></span>
+    <button class="gbtn" id="btnGas">油门(按住)</button>
+    <button class="gbtn" id="btnShift">升挡</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹射起步</h2>
+      <p id="ovDesc">402 米直线加速对决!三盏琥珀灯后绿灯随机亮起,提前踩油门=抢跑罚时 1.5 秒;转速表绿区(6300-7500)升挡获完美加速,落后红区会限扭。击败蓝色对手!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">进入发车区</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elGear=$("gear"),elSpd=$("spd"),elTime=$("time"),elBest=$("best");
+var btnGas=$("btnGas"),btnShift=$("btnShift");
+var TOP=[68,118,168,215,258,296];
+var ACC=[3.4,2.6,2.0,1.55,1.2,0.95];
+var PXM=6,FIN=402,FINPX=FIN*PXM,GY=520;
+var state="menu",best=0;
+try{best=parseFloat(localStorage.getItem("mg_735")||"0")||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg_735",String(best));}catch(e){}}
+function pm(r){
+  if(r<3500)return 0.5;
+  if(r<5200)return 0.85;
+  if(r<7300)return 1;
+  if(r<7850)return 0.6;
+  return 0.12;
+}
+function calcRpm(vel,g){var top=TOP[g-1]/3.6*PXM;return Math.max(900,Math.min(8100,900+7100*Math.min(1.05,vel/top)));}
+var phase,stageT,greenAt,jumped,stallT,gear,v,rpm,distP,distAI,vAI,gearAI,raceT,tP,tAI,aiDelay,msgs,gasHeld,newRec,finalP;
+function reset(){
+  phase="stage";stageT=0;greenAt=2.3+Math.random()*0.8;jumped=false;stallT=0;
+  gear=1;v=0;rpm=900;distP=0;distAI=0;vAI=0;gearAI=1;raceT=0;tP=0;tAI=0;
+  aiDelay=0.22+Math.random()*0.18;msgs=[];gasHeld=false;newRec=false;finalP=0;
+  elGear.textContent="1挡";elSpd.textContent="0";elTime.textContent="0.00";
+  elBest.textContent=best>0?best.toFixed(2)+" s":"--";
+}
+function pushMsg(txt,c){msgs.push({txt:txt,c:c,t:1.1});}
+function hud(){
+  elGear.textContent=gear+"挡";
+  elSpd.textContent=Math.round(v/PXM*3.6);
+  elTime.textContent=(phase==="race"?(tP>0?tP+(jumped?1.5:0):raceT):0).toFixed(2);
+}
+function endRace(){
+  state="over";
+  finalP=tP+(jumped?1.5:0);
+  var win=finalP<tAI;
+  if(win&&(best<=0||finalP<best)){best=finalP;newRec=true;saveBest();}
+  ovTitle.textContent=win?"胜利!":"惜败…";
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=(jumped?"包含抢跑罚时 1.5 秒。":"干净利落的起步!")+"\n对手用时约 "+tAI.toFixed(2)+" 秒";
+  ovScore.style.display="block";
+  ovScore.textContent="你的成绩 "+finalP.toFixed(2)+" s"+(newRec?" · 新纪录!":(best>0?" · 最佳 "+best.toFixed(2)+" s":""));
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");ovTitle.style.color="#4ade80";}
+function doShift(){
+  if(state!=="playing"||phase!=="race"||gear>=6)return;
+  var r=rpm;
+  gear++;
+  if(r>=6300&&r<=7500){v+=16;pushMsg("完美换挡!","#4ade80");}
+  else if(r<4500)pushMsg("升挡太早","#fbbf24");
+  else if(r>7600)pushMsg("换晚啦","#f87171");
+}
+function update(dt){
+  var i;
+  if(phase==="stage"){
+    stageT+=dt;
+    if(gasHeld&&!jumped&&stageT<greenAt){
+      jumped=true;stallT=1.5;pushMsg("抢跑!罚时 1.5 秒","#f87171");
+    }
+    if(stageT>=greenAt){phase="race";raceT=0;pushMsg("绿灯!冲!","#4ade80");}
+  }else if(phase==="race"){
+    raceT+=dt;
+    rpm=calcRpm(v,gear);
+    if(gasHeld&&raceT>stallT)v+=ACC[gear-1]*PXM*pm(rpm)*dt;
+    else v=Math.max(0,v-v*0.4*dt);
+    distP+=v*dt;
+    if(raceT>aiDelay){
+      var rAI=calcRpm(vAI,gearAI);
+      if(rAI>=7250&&gearAI<6)gearAI++;
+      vAI+=ACC[gearAI-1]*PXM*pm(rAI)*0.97*dt;
+    }
+    distAI+=vAI*dt;
+    if(!tP&&distP>=FINPX)tP=raceT;
+    if(!tAI&&distAI>=FINPX)tAI=raceT;
+    if(raceT>90&&!tP){tP=raceT;tAI=tAI||raceT-0.5;}
+    if(tP&&!tAI)tAI=raceT+(FINPX-distAI)/Math.max(vAI,80);
+    if(tP&&tAI){endRace();return;}
+  }
+  for(i=msgs.length-1;i>=0;i--){
+    msgs[i].t-=dt;
+    if(msgs[i].t<=0)msgs.splice(i,1);
+  }
+  hud();
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawCar(x,col,wrot){
+  ctx.save();ctx.translate(x,GY);
+  ctx.fillStyle="rgba(0,0,0,0.4)";ctx.beginPath();ctx.ellipse(0,14,46,7,0,0,Math.PI*2);ctx.fill();
+  rr(-43,-40,86,28,9);ctx.fillStyle=col;ctx.fill();
+  rr(-24,-64,46,28,7);ctx.fillStyle=col;ctx.fill();
+  rr(-18,-58,32,16,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.25)";ctx.fillRect(-40,-36,80,4);
+  ctx.fillStyle="#0d1020";
+  ctx.beginPath();ctx.arc(-27,0,13,0,Math.PI*2);ctx.arc(27,0,13,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#565f82";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(-27-Math.cos(wrot)*9,0-Math.sin(wrot)*9);ctx.lineTo(-27+Math.cos(wrot)*9,0+Math.sin(wrot)*9);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(27-Math.cos(wrot)*9,0-Math.sin(wrot)*9);ctx.lineTo(27+Math.cos(wrot)*9,0+Math.sin(wrot)*9);ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.restore();
+}
+function draw(){
+  var i,m,sx;
+  var g=ctx.createLinearGradient(0,0,0,460);
+  g.addColorStop(0,"#131028");g.addColorStop(1,"#33204a");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,460);
+  ctx.fillStyle="#c7cbe8";
+  for(i=0;i<26;i++){ctx.globalAlpha=0.25+((i*37)%10)/22;ctx.fillRect((i*97+31)%W,(i*53+13)%300,2,2);}
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#171a30";
+  for(i=0;i<9;i++){var bh=40+((i*73)%70);ctx.fillRect(i*56+8,460-bh,40,bh);}
+  ctx.fillStyle="#20243e";ctx.fillRect(0,460,W,60);
+  ctx.fillStyle="#2b3050";ctx.fillRect(0,516,W,44);
+  ctx.fillStyle="#c7cbe8";ctx.fillRect(0,514,W,3);
+  ctx.fillStyle="#3c4266";
+  for(m=0;m<FIN;m+=25){sx=110+(m*PXM-distP);if(sx>-10&&sx<W+10)ctx.fillRect(sx-1,518,2,18);}
+  sx=110-distP;
+  if(sx>-30&&sx<W+30){ctx.fillStyle="#c7cbe8";ctx.fillRect(sx-3,460,6,84);for(i=0;i<6;i++)ctx.fillStyle=i%2?"#20243e":"#e8eaf6",ctx.fillRect(sx-3,462+i*13,6,13);}
+  sx=110+(FINPX-distP);
+  if(sx>-40&&sx<W+40){
+    ctx.fillStyle="#4ade80";ctx.fillRect(sx-4,380,8,140);
+    ctx.fillStyle="#0f2c1c";ctx.fillRect(sx-34,368,68,22);
+    ctx.fillStyle="#4ade80";ctx.font="bold 12px system-ui";ctx.textAlign="center";ctx.fillText("FINISH",sx,383);
+  }
+  drawCar(110,"#fbbf24",distP/13);
+  var ax=Math.max(40,Math.min(460,110+(distAI-distP)));
+  if(ax>150)drawCar(ax,"#60a5fa",distAI/13);
+  ctx.strokeStyle="#565f82";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(130,42);ctx.lineTo(470,42);ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.moveTo(130+340*Math.min(1,distP/FINPX),34);ctx.lineTo(124+340*Math.min(1,distP/FINPX),24);ctx.lineTo(136+340*Math.min(1,distP/FINPX),24);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#60a5fa";ctx.beginPath();ctx.moveTo(130+340*Math.min(1,distAI/FINPX),50);ctx.lineTo(124+340*Math.min(1,distAI/FINPX),60);ctx.lineTo(136+340*Math.min(1,distAI/FINPX),60);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#3a3f5c";ctx.fillRect(236,120,8,80);
+  var lamps=[0.2,0.9,1.6];
+  for(i=0;i<3;i++){
+    ctx.beginPath();ctx.arc(240,140+i*26,11,0,Math.PI*2);
+    var on=state==="playing"&&stageT>=lamps[i]&&phase==="stage";
+    ctx.fillStyle=on?"#fbbf24":"#3a3f5c";ctx.fill();
+  }
+  var green=state==="playing"&&phase==="race";
+  ctx.beginPath();ctx.arc(240,218,11,0,Math.PI*2);
+  ctx.fillStyle=green?"#4ade80":"#3a3f5c";ctx.fill();
+  if(state==="playing"&&jumped&&phase==="stage"){
+    ctx.fillStyle="#f87171";ctx.font="bold 15px system-ui";ctx.textAlign="center";ctx.fillText("抢跑!",280,150);
+  }
+  ctx.fillStyle="#141829";ctx.beginPath();ctx.arc(88,88,50,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#3a3f5c";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(88,88,44,Math.PI*0.75,Math.PI*2.25);ctx.stroke();
+  ctx.strokeStyle="#4ade80";
+  ctx.beginPath();ctx.arc(88,88,44,Math.PI*0.75+Math.PI*1.5*(5200/8100),Math.PI*0.75+Math.PI*1.5*(7300/8100));ctx.stroke();
+  ctx.strokeStyle="#f87171";
+  ctx.beginPath();ctx.arc(88,88,44,Math.PI*0.75+Math.PI*1.5*(7850/8100),Math.PI*0.75+Math.PI*1.5);ctx.stroke();
+  var na=Math.PI*0.75+Math.PI*1.5*Math.min(1,rpm/8100);
+  ctx.strokeStyle="#fbbf24";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(88,88);ctx.lineTo(88+Math.cos(na)*38,88+Math.sin(na)*38);ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle="#e8eaf6";ctx.font="11px system-ui";ctx.textAlign="center";
+  ctx.fillText(Math.round(rpm)+" rpm",88,110);
+  for(i=0;i<msgs.length;i++){
+    ctx.globalAlpha=Math.min(1,msgs[i].t);
+    ctx.fillStyle=msgs[i].c;ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msgs[i].txt,240,300-(msgs.length-i)*4);
+  }
+  ctx.globalAlpha=1;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key===" "||e.key==="ArrowUp"||e.key==="w"||e.key==="W"){e.preventDefault();gasHeld=true;}
+  else if(e.key==="s"||e.key==="S"||e.key==="ArrowRight"||e.key==="d"||e.key==="D"||e.key==="Enter"){e.preventDefault();doShift();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "||e.key==="ArrowUp"||e.key==="w"||e.key==="W")gasHeld=false;
+});
+function gasOn(ev){gasHeld=true;if(ev)ev.preventDefault();}
+function gasOff(ev){gasHeld=false;if(ev)ev.preventDefault();}
+btnGas.addEventListener("touchstart",gasOn,{passive:false});
+btnGas.addEventListener("touchend",gasOff,{passive:false});
+btnGas.addEventListener("mousedown",gasOn);
+btnGas.addEventListener("mouseup",gasOff);
+btnGas.addEventListener("mouseleave",gasOff);
+btnShift.addEventListener("click",function(){if(state==="playing")doShift();});
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

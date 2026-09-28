@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智敌择路</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none;cursor:crosshair}
+.sbtn{border:0;border-radius:8px;padding:10px 6px;font-size:13px;background:#232a4a;color:#e8eaf6;cursor:pointer;flex:1;font-weight:700}
+.sbtn.on{background:#4cc9f0;color:#081226}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>智敌择路</h1>
+  <p class="tips">敌人不傻!走到岔口时,他们会侦察两条岔路的火力,专挑防守薄弱的一条冲。两座城门各 5 生命,失衡即溃——均衡布防是唯一解。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">金币</div><div class="big" id="gd">0</div></div>
+    <div class="stat"><div class="mut">上门</div><div class="big" id="lu">5</div></div>
+    <div class="stat"><div class="mut">下门</div><div class="big" id="ld">5</div></div>
+    <div class="stat"><div class="mut">波次</div><div class="big" id="wv">0/12</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="sbtn on" id="bA">箭塔 50金</button>
+    <button class="sbtn" id="bB">法塔 90金</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">智敌择路</h2><p id="ovp">玩法说明:<br>· 岔口处敌人会评估上下两条岔路的火力,选择更弱的一条<br>· 岔口的闪烁箭头实时指示敌军当前的偏好<br>· 任何一座城门生命归零即失败,两门各 5 生命<br>· 箭塔(50金)速射;法塔(90金)高伤远程<br>· 先点选塔型,再点击空地建造<br>· 撑过 12 波获得胜利!别让任何一门裸奔!</p><button class="btn" id="obtn">开始布防</button></div></div>
+<script>
+'use strict';
+var W=480,H=360,CS=40;
+function $i(id){return document.getElementById(id)}
+var cv=$i('cv'),ctx=cv.getContext('2d');
+var PP=[[-20,180],[200,180]];
+var PU=[[200,180],[200,80],[360,80],[500,80]];
+var PD=[[200,180],[200,280],[360,280],[500,280]];
+var segsP=[],segsU=[],segsD=[],PLENP=0,PLENB=0;
+var SAMPLES=[[],[]];
+function mkSegs(pts){var arr=[],i;for(i=0;i<pts.length-1;i++){var ax=pts[i][0],ay=pts[i][1],bx=pts[i+1][0],by=pts[i+1][1];var dx=bx-ax,dy=by-ay,len=Math.sqrt(dx*dx+dy*dy);arr.push({ax:ax,ay:ay,dx:dx/len,dy:dy/len,len:len});}return arr;}
+function pathLen(s){var L=0,i;for(i=0;i<s.length;i++)L+=s[i].len;return L;}
+function posAtS(segs,d){var i=0;while(i<segs.length&&d>segs[i].len){d-=segs[i].len;i++;}if(i>=segs.length)i=segs.length-1;var s=segs[i],t=Math.min(d,s.len);return{x:s.ax+s.dx*t,y:s.ay+s.dy*t};}
+function dist2(x,y,s){var px=x-s.ax,py=y-s.ay,t=px*s.dx+py*s.dy;t=Math.max(0,Math.min(s.len,t));var ex=s.ax+s.dx*t-x,ey=s.ay+s.dy*t-y;return ex*ex+ey*ey;}
+function blocked(c,r){var x=c*CS+CS/2,y=r*CS+CS/2,i;
+for(i=0;i<segsP.length;i++)if(dist2(x,y,segsP[i])<529)return true;
+for(i=0;i<segsU.length;i++)if(dist2(x,y,segsU[i])<529)return true;
+for(i=0;i<segsD.length;i++)if(dist2(x,y,segsD[i])<529)return true;
+return false;}
+function epos(e){if(e.br<0)return posAtS(segsP,Math.min(e.d,PLENP));return posAtS(e.br===0?segsU:segsD,Math.min(e.d,PLENB));}
+function mkSamples(){var b,dd;
+for(b=0;b<2;b++){SAMPLES[b]=[];var segsB=b===0?segsU:segsD;
+for(dd=0;dd<PLENB;dd+=30)SAMPLES[b].push(posAtS(segsB,dd));}}
+function branchScore(b){var sc=0,i,j;
+for(i=0;i<towers.length;i++){var t=towers[i],dps=t.dmg/t.rate;
+for(j=0;j<SAMPLES[b].length;j++){var s=SAMPLES[b][j],dx=s.x-t.x,dy=s.y-t.y;
+if(dx*dx+dy*dy<=t.range*t.range){sc+=dps;break;}}}
+return sc;}
+var money=0,livesU=0,livesD=0,kills=0,wave=0,running=false,over=false;
+var enemies=[],towers=[],shots=[],parts=[];
+var toSpawn=[],spawnT=0,interT=0,phase='wait',banner=0,buildType='a';
+function makeWave(n){var arr=[],i;if(n===12){arr.push({hp:1500,mhp:1500,spd:24,rw:180,r:16,leak:3,boss:true});return arr;}
+var cnt=6+n,hp=24+14*n,spd=42+1.8*n,rw=7+n;for(i=0;i<cnt;i++)arr.push({hp:hp,mhp:hp,spd:spd,rw:rw,r:9,leak:1,boss:false});return arr;}
+function burst(x,y,c,n){var k;for(k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*110;parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:1.5+Math.random()*2.5,c:c,life:0.35+Math.random()*0.3});}}
+function reset(){money=150;livesU=5;livesD=5;kills=0;wave=0;enemies=[];towers=[];shots=[];parts=[];toSpawn=[];spawnT=0;interT=1.5;phase='wait';banner=0;over=false;hud();}
+function hud(){$i('gd').textContent=money;$i('lu').textContent=livesU;$i('ld').textContent=livesD;$i('wv').textContent=wave+'/12';}
+function acquire(t){var best=null,bd=-1,i;for(i=0;i<enemies.length;i++){var e=enemies[i];if(e.hp<=0)continue;
+if(e.br<0&&e.d>=PLENP)continue;if(e.br>=0&&e.d>=PLENB)continue;
+var p=epos(e);var dx=p.x-t.x,dy=p.y-t.y;if(dx*dx+dy*dy<=t.range*t.range&&e.d>bd){bd=e.d;best=e;}}return best;}
+function gameOver(win){over=true;running=false;
+if(win){$i('ovt').textContent='双门无恙!';$i('ovp').innerHTML='十二波敌军全部击退!<br>上门生命:<b>'+livesU+'</b> · 下门生命:<b>'+livesD+'</b> · 总击杀:<b>'+kills+'</b>';}
+else{$i('ovt').textContent='城门告破…';$i('ovp').innerHTML='止步于第 '+wave+' 波<br>上门:<b>'+livesU+'</b> · 下门:<b>'+livesD+'</b><br>提示:敌人总挑弱侧下手,两头并重才能守住!';}
+$i('obtn').textContent='再来一局';$i('overlay').classList.remove('hide');}
+function update(dt){var i;
+for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+if(banner>0)banner-=dt;
+if(!running)return;
+if(phase==='wait'){interT-=dt;if(interT<=0){wave++;toSpawn=makeWave(wave);spawnT=0.4;phase='spawn';banner=1.2;hud();}}
+else{if(toSpawn.length>0){spawnT-=dt;if(spawnT<=0){var nx=toSpawn.shift();nx.br=-1;enemies.push(nx);spawnT=nx.boss?1.4:0.75;}}}
+for(i=enemies.length-1;i>=0;i--){var e=enemies[i];e.d+=e.spd*dt;
+if(e.br<0){if(e.d>=PLENP){e.d-=PLENP;
+var su=branchScore(0),sd=branchScore(1);
+if(Math.abs(su-sd)<0.01)e.br=Math.random()<0.5?0:1;
+else e.br=su<sd?0:1;
+var fp=posAtS(segsP,PLENP);burst(fp.x,fp.y,'#ffd166',5);}}
+else{if(e.d>=PLENB){var lp=epos(e);if(e.br===0)livesU-=e.leak;else livesD-=e.leak;
+burst(lp.x,lp.y,'#ff6b6b',12);enemies.splice(i,1);hud();
+if(livesU<=0||livesD<=0){if(livesU<0)livesU=0;if(livesD<0)livesD=0;hud();gameOver(false);return;}continue;}}}
+for(i=0;i<towers.length;i++){var t=towers[i];t.cool-=dt;
+if(t.cool<=0){var tg=acquire(t);if(tg){var pp=epos(tg);t.ang=Math.atan2(pp.y-t.y,pp.x-t.x);t.cool=t.rate;shots.push({x:t.x,y:t.y,tg:tg,lx:pp.x,ly:pp.y,spd:t.type==='b'?320:360,dmg:t.dmg,col:t.type==='b'?'#d9c8ff':'#ffe9a8'});}else t.cool=0.06;}}
+for(i=shots.length-1;i>=0;i--){var s=shots[i];var tx=s.lx,ty=s.ly;
+if(s.tg&&s.tg.hp>0){var p2=epos(s.tg);s.lx=p2.x;s.ly=p2.y;tx=p2.x;ty=p2.y;}
+var dx=tx-s.x,dy=ty-s.y,d=Math.sqrt(dx*dx+dy*dy),st=s.spd*dt;
+if(d<=st+3){if(s.tg&&s.tg.hp>0)s.tg.hp-=s.dmg;shots.splice(i,1);}
+else{s.x+=dx/d*st;s.y+=dy/d*st;}}
+for(i=enemies.length-1;i>=0;i--){var e2=enemies[i];if(e2.hp<=0){var p3=epos(e2);kills++;money+=e2.rw;burst(p3.x,p3.y,'#ffd166',9);enemies.splice(i,1);}}
+if(phase==='spawn'&&toSpawn.length===0&&enemies.length===0){money+=30;hud();if(wave>=12){gameOver(true);return;}phase='wait';interT=3;}}
+function draw(){var i;
+var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#131730');g.addColorStop(1,'#0d1024');
+ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ctx.fillStyle='rgba(120,130,180,0.10)';
+for(var c=0;c<12;c++)for(var r=0;r<9;r++){if(blocked(c,r))continue;ctx.fillRect(c*CS+CS/2-1,r*CS+CS/2-1,2,2);}
+ctx.lineCap='round';ctx.lineJoin='round';
+function strokePts(pts,w,col){ctx.strokeStyle=col;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);var j;for(j=1;j<pts.length;j++)ctx.lineTo(pts[j][0],pts[j][1]);ctx.stroke();}
+strokePts(PP,28,'#232a4a');strokePts(PU,28,'#232a4a');strokePts(PD,28,'#232a4a');
+strokePts(PP,20,'#2c3352');strokePts(PU,20,'#2c3352');strokePts(PD,20,'#2c3352');
+ctx.fillStyle='#4cc9f0';ctx.beginPath();ctx.moveTo(-2,168);ctx.lineTo(14,180);ctx.lineTo(-2,192);ctx.closePath();ctx.fill();
+ctx.fillStyle='#7ee08a';ctx.fillRect(474,64,26,32);ctx.fillRect(474,264,26,32);
+ctx.fillStyle='#0f1220';ctx.fillRect(482,76,10,20);ctx.fillRect(482,276,10,20);
+var su=branchScore(0),sd=branchScore(1);
+var pul=0.5+0.5*Math.sin(Date.now()*0.008);
+if(running&&!over){
+ctx.globalAlpha=0.4+0.6*pul;
+ctx.fillStyle=su<sd?'#ff6b6b':'#ffd166';
+var ay=su<sd?-1:1;
+ctx.beginPath();ctx.moveTo(200,180+ay*14);ctx.lineTo(190,180+ay*2);ctx.lineTo(210,180+ay*2);ctx.closePath();ctx.fill();
+ctx.globalAlpha=1;
+ctx.fillStyle=su<sd?'#ff6b6b':'#ffd166';ctx.font='10px system-ui';ctx.textAlign='center';
+ctx.fillText(su<sd?'敌扑上':'敌扑下',200,su<sd?160:206);
+ctx.textAlign='left';}
+ctx.fillStyle='#6f7ba0';ctx.font='10px system-ui';ctx.textAlign='center';
+ctx.fillText('火力 '+su.toFixed(0),280,68);
+ctx.fillText('火力 '+sd.toFixed(0),280,268);
+ctx.textAlign='left';
+for(i=0;i<towers.length;i++){var t=towers[i];
+ctx.fillStyle='#2b3358';ctx.beginPath();ctx.arc(t.x,t.y,13,0,6.28);ctx.fill();
+ctx.strokeStyle=t.type==='a'?'#4cc9f0':'#b28dff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(t.x,t.y,13,0,6.28);ctx.stroke();
+ctx.strokeStyle='#ffe9a8';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(t.x,t.y);ctx.lineTo(t.x+Math.cos(t.ang)*12,t.y+Math.sin(t.ang)*12);ctx.stroke();}
+for(i=0;i<enemies.length;i++){var e=enemies[i];var ep=epos(e);
+ctx.fillStyle=e.boss?'#ff6b6b':'#ff9f68';ctx.beginPath();ctx.arc(ep.x,ep.y,e.r,0,6.28);ctx.fill();
+ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=2;ctx.stroke();
+ctx.fillStyle='#402030';ctx.fillRect(ep.x-11,ep.y-e.r-9,22,4);
+ctx.fillStyle='#7ee08a';ctx.fillRect(ep.x-11,ep.y-e.r-9,22*Math.max(0,e.hp/e.mhp),4);}
+for(i=0;i<shots.length;i++){var s2=shots[i];ctx.fillStyle=s2.col;ctx.fillRect(s2.x-2,s2.y-2,4,4);}
+for(i=0;i<parts.length;i++){var p4=parts[i];ctx.globalAlpha=Math.max(0,p4.life*2.4);ctx.fillStyle=p4.c;ctx.beginPath();ctx.arc(p4.x,p4.y,p4.r,0,6.28);ctx.fill();}
+ctx.globalAlpha=1;
+ctx.fillStyle='#9aa3c0';ctx.font='11px system-ui';
+if(running&&!over){if(phase==='wait')ctx.fillText('下一波 '+Math.ceil(interT)+' 秒…',12,18);
+if(banner>0){ctx.globalAlpha=Math.min(1,banner);ctx.fillStyle='#ffd166';ctx.font='bold 20px system-ui';ctx.textAlign='center';ctx.fillText('第 '+wave+' 波来袭!',W/2,30);ctx.globalAlpha=1;ctx.font='11px system-ui';ctx.textAlign='left';}}}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();
+var rc=cv.getBoundingClientRect();var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+if(!running||over)return;
+var c=Math.floor(x/CS),r=Math.floor(y/CS);if(c<0||c>=12||r<0||r>=9)return;
+var i;for(i=0;i<towers.length;i++){if(towers[i].c===c&&towers[i].r===r)return;}
+if(blocked(c,r))return;
+if(buildType==='a'){if(money<50)return;money-=50;towers.push({c:c,r:r,x:c*CS+CS/2,y:r*CS+CS/2,cool:0,type:'a',rate:0.65,range:95,dmg:12,ang:0});}
+else{if(money<90)return;money-=90;towers.push({c:c,r:r,x:c*CS+CS/2,y:r*CS+CS/2,cool:0,type:'b',rate:1.2,range:115,dmg:26,ang:0});}
+hud();});
+function selType(ty){buildType=ty;$i('bA').classList.toggle('on',ty==='a');$i('bB').classList.toggle('on',ty==='b');}
+$i('bA').addEventListener('click',function(){selType('a')});
+$i('bB').addEventListener('click',function(){selType('b')});
+$i('obtn').addEventListener('click',function(){$i('overlay').classList.add('hide');reset();running=true;});
+segsP=mkSegs(PP);segsU=mkSegs(PU);segsD=mkSegs(PD);
+PLENP=pathLen(segsP);PLENB=pathLen(segsU);
+mkSamples();reset();
+var lastT=0;
+function loop(t){var dt=(t-lastT)/1000;lastT=t;if(!(dt>0)||dt>0.05)dt=0.016;update(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

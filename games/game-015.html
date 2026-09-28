@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>食物链序</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>食物链序</h1>
+  <p class="hint">方向键 / WASD 转向 · 触屏滑动 · 按编号顺序进食</p>
+  <div class="hud">
+    <span>当前目标 <b id="target">1</b></span>
+    <span>进度 <b id="prog">1/12</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">食物链序</h2>
+      <p id="ovDesc">场上散布多枚数字果:只有按 1→2→3…→12 的顺序吞下发光的目标果才有效(分数随序号递增)!误食灰果会扣 10 分并缩短一节。集齐整条食物链即通关!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=20,ROWS=20,CELL=24,W=480,H=480,MAXN=12;
+function $(id){return document.getElementById(id);}
+var elTarget=$("target"),elProg=$("prog"),elScore=$("score");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu";
+var snake,dir,queue,items,seq,seqMax,score,stepMs,acc,lastT,pulse,hurtT;
+
+function inSnake(x,y){
+  var i;
+  for(i=0;i<snake.length;i++){if(snake[i].x===x&&snake[i].y===y)return true;}
+  return false;
+}
+function onItems(x,y){
+  var i;
+  for(i=0;i<items.length;i++){if(items[i].x===x&&items[i].y===y)return true;}
+  return false;
+}
+function freeCell(){
+  var p;
+  while(true){
+    p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0};
+    if(!inSnake(p.x,p.y)&&!onItems(p.x,p.y))return p;
+  }
+}
+function spawnItems(){
+  items=[];
+  var i;
+  items.push({x:0,y:0,num:seq,good:true});
+  for(i=0;i<3;i++){
+    var num=1+((Math.random()*MAXN)|0);
+    var g=0;
+    while((num===seq||num===seq+1)&&g<30){num=1+((Math.random()*MAXN)|0);g++;}
+    items.push({x:0,y:0,num:num,good:false});
+  }
+  for(i=0;i<items.length;i++){
+    var c=freeCell();
+    items[i].x=c.x;items[i].y=c.y;
+  }
+}
+function reset(){
+  snake=[{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+  dir={x:1,y:0};queue=[];
+  seq=1;seqMax=1;score=0;stepMs=115;acc=0;pulse=0;hurtT=0;
+  spawnItems();
+  updateHud();
+}
+function updateHud(){
+  elTarget.textContent=seq;
+  elProg.textContent=seqMax+"/"+MAXN;
+  elScore.textContent=score;
+}
+function queueDir(d){
+  var last=queue.length?queue[queue.length-1]:dir;
+  if(d.x===-last.x&&d.y===-last.y)return;
+  if(d.x===last.x&&d.y===last.y)return;
+  if(queue.length<2)queue.push(d);
+}
+function finish(win,msg){
+  state="over";
+  ovTitle.textContent=win?"通关成功!":"游戏结束";
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 进度 "+(seqMax-1)+"/"+MAXN;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h=snake[0];
+  var nh={x:(h.x+dir.x+COLS)%COLS,y:(h.y+dir.y+ROWS)%ROWS};
+  var hit=-1,i;
+  for(i=0;i<items.length;i++){
+    if(items[i].x===nh.x&&items[i].y===nh.y){hit=i;break;}
+  }
+  snake.unshift(nh);
+  if(hit>=0){
+    var it=items[hit];
+    if(it.good){
+      score+=5+it.num*3;
+      seq++;
+      if(seq>MAXN){
+        updateHud();
+        finish(true,"你按序吃遍了整条食物链,生态大师!");
+        return;
+      }
+      spawnItems();
+    }else{
+      score=Math.max(0,score-10);
+      hurtT=600;
+      if(snake.length>2)snake.pop();
+    }
+  }
+  else snake.pop();
+  for(i=1;i<snake.length;i++){
+    if(snake[i].x===nh.x&&snake[i].y===nh.y){
+      finish(false,"灵蛇咬到了自己!");
+      return;
+    }
+  }
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var x,y,i,s;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<COLS;x++)for(y=0;y<ROWS;y++){if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);}
+  for(i=0;i<items.length;i++){
+    var it=items[i];
+    var cx=it.x*CELL+CELL/2,cy=it.y*CELL+CELL/2;
+    if(it.good){
+      ctx.fillStyle="#4ade80";
+      ctx.shadowColor="#4ade80";ctx.shadowBlur=16;
+      ctx.beginPath();ctx.arc(cx,cy,9+Math.sin(pulse*2)*1.5,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="#05230f";
+    }else{
+      ctx.fillStyle="#3a3f5c";
+      ctx.beginPath();ctx.arc(cx,cy,8.5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#8b90b0";
+    }
+    ctx.font="bold 11px system-ui";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(String(it.num),cx,cy+0.5);
+  }
+  for(i=snake.length-1;i>=0;i--){
+    s=snake[i];
+    ctx.fillStyle=i===0?"#86efac":"#4ade80";
+    if(hurtT>0)ctx.fillStyle=i===0?"#fca5a5":"#f87171";
+    rr(s.x*CELL+2,s.y*CELL+2,CELL-4,CELL-4,6);ctx.fill();
+  }
+  var h=snake[0],cx=h.x*CELL+CELL/2,cy=h.y*CELL+CELL/2;
+  var ex=dir.x*4.5,ey=dir.y*4.5,px=dir.y!==0?4:0,py=dir.x!==0?4:0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(cx+ex-px,cy+ey-py,2.2,0,Math.PI*2);
+  ctx.arc(cx+ex+px,cy+ey+py,2.2,0,Math.PI*2);
+  ctx.fill();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.006;
+  if(hurtT>0)hurtT-=dt;
+  if(state==="playing"){
+    acc+=dt;
+    var guard=0;
+    while(acc>=stepMs&&state==="playing"&&guard<5){acc-=stepMs;step();guard++;}
+  }
+  draw();
+}
+function keyDir(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")return{x:0,y:-1};
+  if(k==="ArrowDown"||k==="s"||k==="S")return{x:0,y:1};
+  if(k==="ArrowLeft"||k==="a"||k==="A")return{x:-1,y:0};
+  if(k==="ArrowRight"||k==="d"||k==="D")return{x:1,y:0};
+  return null;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=keyDir(e);
+  if(d){e.preventDefault();queueDir(d);}
+  else if(e.key===" ")e.preventDefault();
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueDir({x:dx>0?1:-1,y:0});
+  else queueDir({x:0,y:dy>0?1:-1});
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

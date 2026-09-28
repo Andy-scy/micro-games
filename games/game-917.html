@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>投手九宫格</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ce93d8;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ce93d8;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ce93d8;color:#3a1140;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>投手九宫格</h1>
+<p class="tip">点击（或按 1-9 键）好球带格子投球 · 打者的红热区最容易被打，离热区越远越容易三振 · 12 球拿 16 分获胜，4 次坏球送分</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,GX=150,GY=120,CS=60;
+var score,streak,ballIdx,hot,balls,phase,fly,flyRC,resT,msg,msgT;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  score=0;streak=0;ballIdx=0;balls=0;phase='ready';fly=null;resT=0;msg='';msgT=0;
+  hot={r:(Math.random()*3)|0,c:(Math.random()*3)|0};
+}
+function pitchDist(r,c){
+  return Math.max(Math.abs(r-hot.r),Math.abs(c-hot.c));
+}
+function doPitch(r,c){
+  if(phase!=='ready')return;
+  fly={t:0,r:r,c:c};
+  flyRC={r:r,c:c};
+  phase='fly';
+}
+function resolvePitch(){
+  var r=flyRC.r,c=flyRC.c;
+  fly=null;
+  ballIdx++;
+  if(r<0||c<0){
+    balls++;
+    msg='坏球…'+(balls>=4?'（保送，对方 +1）':'');
+    if(balls>=4){balls=0;score=Math.max(0,score-1);}
+    msgT=1;
+    nextBall();
+    return;
+  }
+  var d=pitchDist(r,c);
+  if(d===0){
+    streak=0;msg='被安打！热区不能投';msgT=1;
+  }else{
+    var pK=d===1?0.55:0.85;
+    if(Math.random()<pK){
+      var pts=streak>=3?3:2;
+      streak++;score+=pts;
+      msg='三振！+'+pts+(streak>=3?'（连击加成）':'');
+    }else{
+      streak=0;msg='被打出去了…';
+    }
+    msgT=1.1;
+  }
+  nextBall();
+}
+function nextBall(){
+  phase='res';resT=0.15;
+}
+function update(dt){
+  msgT-=dt;
+  if(phase==='fly'&&fly){
+    fly.t+=dt/0.3;
+    if(fly.t>=1)resolvePitch();
+  }
+  if(phase==='res'){
+    resT-=dt;
+    if(resT<=0){
+      if(ballIdx>=12){
+        phase='over';
+        ovT.textContent=score>=16?'金牌投手！':'比赛结束';
+        ovX.textContent='12 球拿到 '+score+' 分'+(score>=16?'，打者完全被你玩弄于股掌！':'（目标 16 分）。把球投进离红热区最远的格子，连击 3 次后有加分。');
+        ov.classList.remove('hidden');
+      }else{
+        hot={r:(Math.random()*3)|0,c:(Math.random()*3)|0};
+        phase='ready';
+      }
+    }
+  }
+}
+function drawZone(){
+  var pulse=0.5+0.5*Math.sin(performance.now()*0.006);
+  for(var r=0;r<3;r++)for(var c=0;c<3;c++){
+    var x=GX+c*CS,y=GY+r*CS;
+    ctx.fillStyle=r===hot.r&&c===hot.c?'rgba(239,83,80,'+(0.25+pulse*0.3)+')':'rgba(255,255,255,.05)';
+    ctx.fillRect(x+2,y+2,CS-4,CS-4);
+    ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1.5;
+    ctx.strokeRect(x,y,CS,CS);
+  }
+  ctx.strokeStyle='#e8eaf6';ctx.lineWidth=2.5;
+  ctx.strokeRect(GX,GY,CS*3,CS*3);
+  ctx.fillStyle='#ff8a80';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('打者热区',GX+hot.c*CS+CS/2,GY+hot.r*CS+CS/2+5);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1e3320';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.05)';
+  for(var a2=0;a2<5;a2++){ctx.beginPath();ctx.arc(W/2,560,300-a2*44,Math.PI,0);ctx.stroke();}
+  ctx.strokeStyle='rgba(255,255,255,.12)';
+  ctx.beginPath();ctx.arc(W/2,560,150,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  drawZone();
+  ctx.fillStyle='#3e2723';ctx.fillRect(W/2-8,470,16,50);
+  ctx.fillStyle='#ce93d8';ctx.beginPath();ctx.arc(W/2,590,9,0,7);ctx.fill();
+  ctx.strokeStyle='#ce93d8';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(W/2,466,26,Math.PI*0.15,Math.PI*0.85);ctx.stroke();
+  if(fly){
+    var t=Math.min(1,fly.t);
+    var tx=GX+fly.c*CS+CS/2,ty=GY+fly.r*CS+CS/2;
+    var bx=W/2+(tx-W/2)*t,by=590+(ty-590)*t-120*Math.sin(Math.PI*t);
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(bx,by,8*t+3,0,7);ctx.fill();
+    ctx.strokeStyle='#e57373';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(bx,by,4,0,7);ctx.stroke();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+Math.min(12,ballIdx+1)+' / 12 球',14,28);
+  ctx.fillText('得分 '+score+' / 16',14,52);
+  if(streak>0){ctx.fillStyle='#ffd54f';ctx.fillText('连击 '+streak,14,76);}
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';ctx.textAlign='right';
+  ctx.fillText('坏球 '+balls+' / 4',W-14,28);
+  if(msgT>0){ctx.fillStyle='#ffd54f';ctx.font='20px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,W/2,368);}
+  if(phase==='ready'){ctx.fillStyle='#c5cae9';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('点击格子投球（键盘 1-9 对应九宫格）',W/2,620);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  if(phase!=='ready')return;
+  var r=cv.getBoundingClientRect();
+  var px=(e.clientX-r.left)*(W/r.width),py=(e.clientY-r.top)*(H/r.height);
+  var c=Math.floor((px-GX)/CS),r2=Math.floor((py-GY)/CS);
+  if(c>=0&&c<3&&r2>=0&&r2<3)doPitch(r2,c);
+  else doPitch(-1,-1);
+});
+window.addEventListener('keydown',function(e){
+  var map={Digit7:[0,0],Digit8:[0,1],Digit9:[0,2],Digit4:[1,0],Digit5:[1,1],Digit6:[1,2],Digit1:[2,0],Digit2:[2,1],Digit3:[2,2]};
+  if(map[e.code]&&phase==='ready'){e.preventDefault();doPitch(map[e.code][0],map[e.code][1]);}
+});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>气球连破</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f06292;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#f06292;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f06292}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f06292;color:#3d0e22;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>气球连破</h1>
+  <p class="hint">射升空的气球得分 · 黑色炸弹千万别碰 · 跑五个气球即失败</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">60</b>秒</span>
+    <span>跑球 <b id="ep">0</b>/5</span>
+    <span>目标 <b>200</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">气球连破</h2>
+      <p id="ovD">气球不断从底部升起,越升越快:红球 5 分、蓝球 8 分、金球 15 分。黑气球是系在气球里的炸弹,射中要倒扣 12 分——眼睛要分清颜色。放跑五个气球,本轮直接收场。60 秒冲 200 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">开始连破</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elEp=$("ep"),elMsg=$("msg");
+const GOAL=200,DUR=60;
+let state="menu",score=0,timeLeft=DUR,elapsed=0,tp=0,spawnT=0.4,escapes=0,flashT=0;
+let mouse={x:240,y:280},balls=[],pops=[],darts=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function spawn(){
+  const roll=Math.random();
+  let hue,val,bomb=false;
+  if(roll<0.13){hue="#263238";val=0;bomb=true;}
+  else if(roll<0.25){hue="#ffd54f";val=15;}
+  else if(roll<0.65){hue="#ef5350";val=5;}
+  else{hue="#42a5f5";val=8;}
+  balls.push({
+    x:40+Math.random()*400,y:590,
+    vy:-(55+Math.random()*55),
+    r:20+Math.random()*10,
+    hue:hue,val:val,bomb:bomb,
+    ph:Math.random()*6.28
+  });
+}
+function shoot(){
+  if(state!=="play")return;
+  const px=mouse.x,py=mouse.y;
+  darts.push({x:px,y1:py,l:0.15});
+  let hit=null,best=1e9;
+  for(let i=0;i<balls.length;i++){
+    const d=Math.hypot(px-balls[i].x,py-balls[i].y);
+    if(d<balls[i].r+8&&d<best){best=d;hit=balls[i];}
+  }
+  if(hit){
+    if(hit.bomb){
+      score=Math.max(0,score-12);
+      flashT=0.4;
+      elMsg.textContent="那是炸弹!-12";
+      for(let i=0;i<14;i++){
+        const a=Math.random()*6.28,s=80+Math.random()*180;
+        pops.push({x:hit.x,y:hit.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.6,c:"#90a4ae"});
+      }
+    }else{
+      score+=hit.val;
+      elMsg.textContent="破!+"+hit.val;
+      for(let i=0;i<12;i++){
+        const a=Math.random()*6.28,s=70+Math.random()*160;
+        pops.push({x:hit.x,y:hit.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:hit.hue});
+      }
+    }
+    balls.splice(balls.indexOf(hit),1);
+    elSc.textContent=score;
+  }
+}
+function startGame(){
+  score=0;timeLeft=DUR;elapsed=0;tp=0;spawnT=0.4;escapes=0;flashT=0;
+  balls=[];pops=[];darts=[];
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;elEp.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(early){
+  state="over";
+  const win=!early&&score>=GOAL;
+  ovT.textContent=win?"连破高手!":"本轮收场";
+  ovT.style.color=win?"#f06292":"#ef9a9a";
+  ovD.textContent=early?"五个气球带着分跑了。下一轮别只顾高分的,漏球更伤。":(win?"颜色一眼分清、箭无虚发,气球在你面前形同纸糊。":"红蓝金都可以打,黑的要放过——先把颜色认熟。");
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    elapsed+=dt;timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(flashT>0)flashT-=dt;
+    spawnT-=dt;
+    if(spawnT<=0){spawn();spawnT=Math.max(0.45,0.85-elapsed*0.006);}
+    for(let i=balls.length-1;i>=0;i--){
+      const b=balls[i];
+      b.y+=b.vy*dt;
+      b.x+=Math.sin(tp*2+b.ph)*18*dt;
+      if(b.y<-40){
+        balls.splice(i,1);
+        if(!b.bomb){
+          escapes++;
+          elEp.textContent=escapes;
+          elMsg.textContent="气球跑了!";
+          if(escapes>=5){finish(true);}
+        }
+      }
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=220*dt;
+    }
+    for(let i=darts.length-1;i>=0;i--){
+      darts[i].l-=dt;
+      if(darts[i].l<=0)darts.splice(i,1);
+    }
+    if(state==="play"&&timeLeft<=0)finish(false);
+  }
+  draw();
+}
+function drawBall(b){
+  const sway=Math.sin(tp*2+b.ph)*3;
+  ctx.strokeStyle="rgba(255,255,255,0.35)";ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(b.x+sway,b.y+b.r);
+  ctx.quadraticCurveTo(b.x+sway*2,b.y+b.r+18,b.x+sway,b.y+b.r+34);ctx.stroke();
+  if(b.bomb){
+    ctx.fillStyle="#1c262e";
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#455a64";
+    ctx.beginPath();ctx.arc(b.x-b.r*0.3,b.y-b.r*0.3,b.r*0.25,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#8d6e63";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(b.x,b.y-b.r);ctx.quadraticCurveTo(b.x+6,b.y-b.r-8,b.x+3,b.y-b.r-14);ctx.stroke();
+    ctx.fillStyle=(Math.sin(tp*12)>0)?"#ff7043":"#ffca28";
+    ctx.beginPath();ctx.arc(b.x+3,b.y-b.r-15,3,0,Math.PI*2);ctx.fill();
+  }else{
+    ctx.fillStyle=b.hue;
+    ctx.beginPath();ctx.ellipse(b.x,b.y,b.r*0.82,b.r,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.3)";
+    ctx.beginPath();ctx.ellipse(b.x-b.r*0.3,b.y-b.r*0.35,b.r*0.22,b.r*0.32,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=b.hue;
+    ctx.beginPath();ctx.moveTo(b.x-5,b.y+b.r-2);ctx.lineTo(b.x+5,b.y+b.r-2);ctx.lineTo(b.x,b.y+b.r+6);ctx.closePath();ctx.fill();
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#1a2540");g.addColorStop(1,"#0e1428");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  for(let i=0;i<7;i++){
+    ctx.fillStyle="rgba(255,255,255,0.05)";
+    ctx.beginPath();ctx.arc(60+i*62+Math.sin(tp*0.8+i)*10,60+(i*97)%300,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#20263d";ctx.fillRect(0,520,W,H-520);
+  for(let i=0;i<balls.length;i++)drawBall(balls[i]);
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  for(let i=0;i<darts.length;i++){
+    const d=darts[i];
+    ctx.globalAlpha=Math.max(0,d.l/0.15);
+    ctx.strokeStyle="#ffe0b2";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(d.x,560);ctx.lineTo(d.x,d.y1);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  if(flashT>0){
+    ctx.fillStyle="rgba(144,164,174,"+(flashT*0.8)+")";
+    ctx.fillRect(0,0,W,H);
+  }
+  if(state==="play"){
+    ctx.strokeStyle="#f06292";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-16,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+    ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+16,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-16);ctx.lineTo(mouse.x,mouse.y-5);
+    ctx.moveTo(mouse.x,mouse.y+5);ctx.lineTo(mouse.x,mouse.y+16);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

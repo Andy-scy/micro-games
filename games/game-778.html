@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>护送商队</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.sbtn{border:0;border-radius:8px;padding:10px 4px;font-size:12px;background:#232a4a;color:#e8eaf6;cursor:pointer;flex:1;font-weight:700}
+.sbtn.dis{opacity:.35;cursor:default}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>护送商队</h1>
+  <p class="tips">反向塔防:这回你不建塔!五辆商队马车将自动穿越敌方炮火线,你只能用三种技能护航——治疗、圣盾、疾行。至少 4 辆抵达!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">抵达</div><div class="big" id="ar">0/5</div></div>
+    <div class="stat"><div class="mut">存活</div><div class="big" id="al">5</div></div>
+    <div class="stat"><div class="mut">用时</div><div class="big" id="tm">0s</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="sbtn" id="bH">治疗 1</button>
+    <button class="sbtn" id="bS">圣盾 2</button>
+    <button class="sbtn" id="bF">疾行 3</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">护送商队</h2><p id="ovp">玩法说明:<br>· 五辆马车自动沿道路前进,路上有 4 座敌方箭塔<br>· 你的三技能(按键 1/2/3):<br>· 治疗:全体回复 22 点(冷却 13 秒)<br>· 圣盾:全员免疫伤害 3 秒(冷却 16 秒)<br>· 疾行:全队加速 70% 持续 4 秒(冷却 11 秒)<br>· 马车血量见血条,被打爆就没了<br>· 至少 4 辆抵达终点才算胜利!</p><button class="btn" id="obtn">商队出发</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+function $i(id){return document.getElementById(id)}
+var cv=$i('cv'),ctx=cv.getContext('2d');
+var WPTS=[[-20,320],[120,320],[120,200],[260,200],[260,90],[400,90],[400,220],[500,220]];
+var ETOW=[{x:80,y:260},{x:190,y:140},{x:330,y:40},{x:340,y:280}];
+var segs=[],PLEN=0;
+function buildPath(){segs=[];PLEN=0;var i;for(i=0;i<WPTS.length-1;i++){var ax=WPTS[i][0],ay=WPTS[i][1],bx=WPTS[i+1][0],by=WPTS[i+1][1];var dx=bx-ax,dy=by-ay,len=Math.sqrt(dx*dx+dy*dy);segs.push({ax:ax,ay:ay,dx:dx/len,dy:dy/len,len:len});PLEN+=len;}}
+function posAt(d){var i=0;while(i<segs.length&&d>segs[i].len){d-=segs[i].len;i++;}if(i>=segs.length)i=segs.length-1;var s=segs[i],t=Math.min(d,s.len);return{x:s.ax+s.dx*t,y:s.ay+s.dy*t};}
+var wagons=[],beams=[],parts=[];
+var arrived=0,running=false,over=false,elapsed=0;
+var cdH=0,cdS=0,cdF=0,shieldT=0,hasteT=0;
+function burst(x,y,c,n){var k;for(k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*110;parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:1.5+Math.random()*2.5,c:c,life:0.35+Math.random()*0.3});}}
+function reset(){wagons=[];beams=[];parts=[];arrived=0;elapsed=0;cdH=0;cdS=0;cdF=0;shieldT=0;hasteT=0;over=false;
+var i;for(i=0;i<5;i++)wagons.push({d:-i*42,hp:72,mhp:72});hud();uiSkills();}
+function hud(){$i('ar').textContent=arrived+'/5';$i('al').textContent=wagons.length;$i('tm').textContent=Math.floor(elapsed)+'s';}
+function uiSkills(){
+$i('bH').classList.toggle('dis',cdH>0||!running||over);
+$i('bS').classList.toggle('dis',cdS>0||!running||over);
+$i('bF').classList.toggle('dis',cdF>0||!running||over);
+$i('bH').textContent=cdH>0?'治疗 '+Math.ceil(cdH)+'s':'治疗 1';
+$i('bS').textContent=cdS>0?'圣盾 '+Math.ceil(cdS)+'s':'圣盾 2';
+$i('bF').textContent=cdF>0?'疾行 '+Math.ceil(cdF)+'s':'疾行 3';}
+function gameOver(win){over=true;running=false;uiSkills();
+if(win){$i('ovt').textContent='商队抵达!';$i('ovp').innerHTML='<b>'+arrived+'</b> 辆马车安全到站,货款两讫!<br>用时:'+Math.floor(elapsed)+' 秒';}
+else{$i('ovt').textContent='商队覆灭…';$i('ovp').innerHTML='仅有 <b>'+arrived+'</b> 辆抵达,不足 4 辆,货主血亏!<br>提示:敌方箭塔开火有节奏,圣盾要卡在集火前开。';}
+$i('obtn').textContent='再来一局';$i('overlay').classList.remove('hide');}
+function update(dt){var i,j;
+for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+for(i=beams.length-1;i>=0;i--){beams[i].life-=dt;if(beams[i].life<=0)beams.splice(i,1);}
+if(!running||over)return;
+elapsed+=dt;
+if(cdH>0)cdH-=dt;if(cdS>0)cdS-=dt;if(cdF>0)cdF-=dt;
+if(shieldT>0)shieldT-=dt;if(hasteT>0)hasteT-=dt;
+for(i=wagons.length-1;i>=0;i--){var w=wagons[i];
+w.d+=26*(hasteT>0?1.7:1)*dt;
+if(w.d>=PLEN){arrived++;burst(470,220,'#7ee08a',14);wagons.splice(i,1);hud();continue;}}
+for(i=0;i<ETOW.length;i++){var t=ETOW[i];t.cool=(t.cool||0)-dt;
+if(t.cool<=0){var tgt=null,bd=-1;
+for(j=0;j<wagons.length;j++){var w2=wagons[j];if(w2.d<0)continue;var wp=posAt(Math.min(w2.d,PLEN));
+var dx=wp.x-t.x,dy=wp.y-t.y;if(dx*dx+dy*dy<=100*100&&w2.d>bd){bd=w2.d;tgt=w2;}}
+if(tgt){t.cool=0.9;var tp=posAt(Math.min(tgt.d,PLEN));
+beams.push({x1:t.x,y1:t.y,x2:tp.x,y2:tp.y,life:0.15});
+if(shieldT<=0){tgt.hp-=8;burst(tp.x,tp.y,'#ff6b6b',4);
+if(tgt.hp<=0){burst(tp.x,tp.y,'#ff6b6b',14);wagons.splice(wagons.indexOf(tgt),1);}}
+}}}
+hud();
+if(wagons.length===0){if(arrived>=4)gameOver(true);else gameOver(false);}}
+function draw(){var i;
+var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#1c1430');g.addColorStop(1,'#0d1024');
+ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ctx.lineCap='round';ctx.lineJoin='round';
+ctx.strokeStyle='#2b2340';ctx.lineWidth=30;ctx.beginPath();ctx.moveTo(WPTS[0][0],WPTS[0][1]);for(i=1;i<WPTS.length;i++)ctx.lineTo(WPTS[i][0],WPTS[i][1]);ctx.stroke();
+ctx.strokeStyle='#3a3055';ctx.lineWidth=22;ctx.stroke();
+for(i=0;i<ETOW.length;i++){var t=ETOW[i];
+ctx.globalAlpha=0.08;ctx.fillStyle='#ff6b6b';ctx.beginPath();ctx.arc(t.x,t.y,100,0,6.28);ctx.fill();ctx.globalAlpha=1;
+ctx.fillStyle='#3a2340';ctx.beginPath();ctx.arc(t.x,t.y,12,0,6.28);ctx.fill();
+ctx.strokeStyle='#ff6b6b';ctx.lineWidth=2;ctx.beginPath();ctx.arc(t.x,t.y,12,0,6.28);ctx.stroke();
+ctx.fillStyle='#ff6b6b';ctx.fillRect(t.x-2,t.y-16,4,10);
+if((t.cool||0)>0.6){ctx.fillStyle='#ffd9df';ctx.font='9px system-ui';ctx.textAlign='center';ctx.fillText('!',t.x,t.y-20);ctx.textAlign='left';}}
+var gp=posAt(PLEN-24);
+ctx.fillStyle='#7ee08a';ctx.fillRect(gp.x-12,gp.y-16,24,32);
+ctx.fillStyle='#0f1220';ctx.fillRect(gp.x-4,gp.y-4,8,20);
+for(i=0;i<beams.length;i++){var b=beams[i];ctx.globalAlpha=Math.max(0,b.life*6);ctx.strokeStyle='#ff8fa3';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(b.x1,b.y1);ctx.lineTo(b.x2,b.y2);ctx.stroke();ctx.globalAlpha=1;}
+for(i=0;i<wagons.length;i++){var w=wagons[i];if(w.d<0)continue;
+var wp=posAt(Math.min(w.d,PLEN));
+ctx.fillStyle='#8a6d3b';ctx.fillRect(wp.x-13,wp.y-9,26,18);
+ctx.fillStyle='#c9a86a';ctx.fillRect(wp.x-13,wp.y-9,26,6);
+ctx.fillStyle='#3a2f1c';ctx.fillRect(wp.x-9,wp.y+4,5,5);ctx.fillRect(wp.x+4,wp.y+4,5,5);
+ctx.fillStyle='#402030';ctx.fillRect(wp.x-13,wp.y-16,26,4);
+ctx.fillStyle='#7ee08a';ctx.fillRect(wp.x-13,wp.y-16,26*Math.max(0,w.hp/w.mhp),4);
+if(shieldT>0){ctx.strokeStyle='rgba(122,215,255,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(wp.x,wp.y,17,0,6.28);ctx.stroke();}
+if(hasteT>0&&w.d>0){ctx.fillStyle='rgba(122,215,255,.5)';ctx.beginPath();ctx.arc(wp.x-16,wp.y,2,0,6.28);ctx.fill();}}
+for(i=0;i<parts.length;i++){var p4=parts[i];ctx.globalAlpha=Math.max(0,p4.life*2.4);ctx.fillStyle=p4.c;ctx.beginPath();ctx.arc(p4.x,p4.y,p4.r,0,6.28);ctx.fill();}
+ctx.globalAlpha=1;
+ctx.fillStyle='#9aa3c0';ctx.font='11px system-ui';
+if(running&&!over){
+if(shieldT>0){ctx.fillStyle='#7ad7ff';ctx.fillText('圣盾 '+shieldT.toFixed(1)+'s',12,18);}
+if(hasteT>0){ctx.fillStyle='#7ad7ff';ctx.fillText('疾行 '+hasteT.toFixed(1)+'s',12,32);}}}
+function useSkill(k){
+if(!running||over)return;
+if(k==='H'&&cdH<=0){cdH=13;var i;for(i=0;i<wagons.length;i++){wagons[i].hp=Math.min(wagons[i].mhp,wagons[i].hp+22);
+var wp=posAt(Math.max(0,Math.min(wagons[i].d,PLEN)));burst(wp.x,wp.y,'#7ee08a',5);}}
+if(k==='S'&&cdS<=0){cdS=16;shieldT=3;}
+if(k==='F'&&cdF<=0){cdF=11;hasteT=4;}
+uiSkills();}
+$i('bH').addEventListener('click',function(){useSkill('H')});
+$i('bS').addEventListener('click',function(){useSkill('S')});
+$i('bF').addEventListener('click',function(){useSkill('F')});
+window.addEventListener('keydown',function(e){
+if(e.code==='Digit1')useSkill('H');
+if(e.code==='Digit2')useSkill('S');
+if(e.code==='Digit3')useSkill('F');});
+$i('obtn').addEventListener('click',function(){$i('overlay').classList.add('hide');reset();running=true;uiSkills();});
+buildPath();reset();
+var lastT=0;
+function loop(t){var dt=(t-lastT)/1000;lastT=t;if(!(dt>0)||dt>0.05)dt=0.016;update(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

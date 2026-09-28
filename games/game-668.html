@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>空中拼词</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>空中拼词</h1>
+  <p class="tips">按顺序接住目标单词的字母!← → 或 A/D 移篮,触屏拖动。接错字母 -1 生命,该接的字母掉地上也 -1 生命,共 3 条;拼完一个词 +80!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">完成单词</div><div class="big" id="wc">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">空中拼词</h2><p id="ovp">玩法:按顺序拼出顶部单词。<br>· 顶部显示目标词与进度(已接字母高亮)<br>· 只接「下一个字母」,接错字母 -1 生命<br>· 目标字母落地 -1 生命,杂字母落地无事<br>· 拼完一词 +80,自动换下一个词<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始拼词</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var WORDS=[['CAT','小猫'],['DOG','小狗'],['STAR','星星'],['MOON','月亮'],['FISH','小鱼'],['CAKE','蛋糕'],['RAIN','细雨'],['SNOW','雪花'],['FIRE','火花'],['WIND','微风']];
+var AZ='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+var S=null;
+function reset(){S={on:false,score:0,lives:3,wi:0,ci:0,wc:0,st:0.7,t:0,tiles:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function word(){return WORDS[S.wi][0]}
+function zh(){return WORDS[S.wi][1]}
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('wc').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function pickChar(){
+  if(Math.random()<0.55)return word().charAt(S.ci);
+  var pool='';
+  for(var i=0;i<26;i++){
+    var ch=AZ.charAt(i);
+    if(word().indexOf(ch)<0)pool+=ch;
+  }
+  return pool.charAt(Math.floor(Math.random()*pool.length));
+}
+function update(dt){
+  S.t+=dt;
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.72+Math.random()*0.4;
+    S.tiles.push({ch:pickChar(),x:30+Math.random()*(W-60),y:-18,v:165+Math.random()*55,rot:(Math.random()-0.5)*1.2});
+  }
+  var by=H-46,wd=word();
+  for(var i=S.tiles.length-1;i>=0;i--){
+    var tl=S.tiles[i];
+    tl.y+=tl.v*dt;
+    if(tl.y>=by-20&&tl.y<=by+8&&Math.abs(tl.x-S.bx)<S.bw/2+10){
+      if(tl.ch===wd.charAt(S.ci)){
+        S.ci++;S.score+=20;$('sc').textContent=S.score;
+        pop(tl.x,by-30,'+20 下一字母!','#51d88a');
+        if(S.ci>=wd.length){
+          S.score+=80;S.wc++;S.wi=(S.wi+1)%WORDS.length;S.ci=0;
+          $('sc').textContent=S.score;$('wc').textContent=S.wc;
+          pop(W/2,H-140,'拼出「'+zh()+'」+80!','#ffd166');
+        }
+      }else{
+        S.lives--;$('hp').textContent=hearts();
+        pop(tl.x,by-30,'接错字母!-1 生命','#ff6b6b');
+        if(S.lives<=0){S.tiles.splice(i,1);gameOver();continue}
+      }
+      S.tiles.splice(i,1);continue;
+    }
+    if(tl.y>H+20){
+      S.tiles.splice(i,1);
+      if(tl.ch===wd.charAt(S.ci)){
+        S.lives--;$('hp').textContent=hearts();
+        pop(tl.x,H-100,'目标字母掉了!-1 生命','#ff6b6b');
+        if(S.lives<=0)gameOver();
+      }
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='字母摔碎了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>拼出 <b>'+S.wc+'</b> 个单词<br>盯紧「下一个字母」,杂字母别手痒!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  var wd=word();
+  ctx.fillStyle='rgba(255,255,255,.07)';rr(90,12,W-180,52,12);ctx.fill();
+  ctx.font='bold 22px system-ui';ctx.textAlign='center';
+  var disp='';
+  for(var k=0;k<wd.length;k++){
+    disp+=k<S.ci?wd.charAt(k):'＿';
+  }
+  ctx.fillStyle='#51d88a';ctx.fillText(disp,W/2,40);
+  ctx.fillStyle='#9aa3c0';ctx.font='13px system-ui';
+  ctx.fillText('目标:'+zh()+'(按顺序接)',W/2,58);
+  for(var i=0;i<S.tiles.length;i++){
+    var tl=S.tiles[i];
+    ctx.save();ctx.translate(tl.x,tl.y);ctx.rotate(tl.rot);
+    var need=tl.ch===wd.charAt(S.ci);
+    ctx.fillStyle=need?'rgba(81,216,138,.2)':'rgba(255,255,255,.1)';
+    rr(-17,-17,34,34,8);ctx.fill();
+    ctx.strokeStyle=need?'#51d88a':'rgba(255,255,255,.4)';ctx.lineWidth=2;
+    rr(-17,-17,34,34,8);ctx.stroke();
+    ctx.fillStyle=need?'#51d88a':'#e8eaf6';
+    ctx.font='bold 20px system-ui';ctx.textAlign='center';
+    ctx.fillText(tl.ch,0,7);
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';
+  ctx.fillText('字母篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

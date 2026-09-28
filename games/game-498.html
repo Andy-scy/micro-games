@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一箭连环</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#aed581;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#aed581;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#aed581}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#aed581;color:#22330c;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>一箭连环</h1>
+  <p class="hint">选一列放箭 · 箭会穿透该列所有靶 · 一箭多靶有重奖 · 共 8 箭</p>
+  <div class="hud">
+    <span>剩箭 <b id="ar">8</b></span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>目标 <b>260</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">一箭连环</h2>
+      <p id="ovD">五条靶道各挂着 1~3 只靶,你的箭会笔直向上、穿透同列的所有靶:一箭穿两只 +39,一箭穿三只 +76!但灰色铁靶挡箭——箭撞上它就停,它后面的靶全保住。看准哪一列最有油水,八箭之内冲 260 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">搭箭</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elAr=$("ar"),elSc=$("sc"),elMsg=$("msg");
+const GOAL=260,TOTAL=8,CW=96;
+const CENTERS=[48,144,240,336,432];
+let state="menu",score=0,used=0,tp=0,endT=-1;
+let cols=[],arrow=null,pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function genCol(ci){
+  const n=1+Math.floor(Math.random()*3);
+  const arr=[];
+  let guard=0;
+  while(arr.length<n&&guard<300){
+    guard++;
+    const y=95+Math.random()*355;
+    let ok=true;
+    for(let i=0;i<arr.length;i++){
+      if(Math.abs(arr[i].y-y)<58){ok=false;break;}
+    }
+    if(ok)arr.push({y:y,iron:Math.random()<0.15});
+  }
+  cols[ci]=arr;
+}
+function regenAll(){
+  cols=[];
+  for(let i=0;i<5;i++)genCol(i);
+}
+function shoot(){
+  if(state!=="play"||arrow!==null||used>=TOTAL)return;
+  const p=evPosSafe();
+  if(!p)return;
+  const ci=Math.max(0,Math.min(4,Math.floor(p.x/CW)));
+  used++;
+  elAr.textContent=TOTAL-used;
+  arrow={x:CENTERS[ci],y:548,py:548,ci:ci,hits:0};
+}
+function evPosSafe(){
+  return mouse;
+}
+function burst(x,y,col){
+  for(let i=0;i<8;i++){
+    const a=Math.random()*6.28,s=60+Math.random()*130;
+    pops.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.45,c:col});
+  }
+}
+function finishArrow(){
+  tally(arrow,false);
+  arrow=null;
+}
+function tally(a2,stopped){
+  const n=a2.hits;
+  if(n>0){
+    const bonus=n>=3?40:(n===2?15:0);
+    const gain=n*12+bonus;
+    score+=gain;
+    elMsg.textContent=(stopped?"被铁靶挡下,仍穿透 ":"穿透 ")+n+" 只!+"+gain;
+  }else{
+    elMsg.textContent=stopped?"被铁靶挡下了!":"这一列是空的…";
+  }
+  genCol(a2.ci);
+  elSc.textContent=score;
+  if(used>=TOTAL)endT=0.6;
+}
+function startGame(){
+  score=0;used=0;tp=0;endT=-1;
+  arrow=null;pops=[];
+  regenAll();
+  elMsg.textContent="";elAr.textContent=TOTAL;elSc.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"连珠神箭!":"箭囊已空";
+  ovT.style.color=win?"#aed581":"#ef9a9a";
+  ovD.textContent=win?"八箭打穿了整面靶墙,这一手穿透功夫名不虚传。":"别急着射最近的:先数一数每列有几只靶、有没有铁靶挡路,再选最肥的那一列。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+let mouse={x:240,y:280};
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    if(arrow!==null){
+      arrow.py=arrow.y;
+      arrow.y-=880*dt;
+      const arr=cols[arrow.ci];
+      let stopped=false;
+      for(let i=0;i<arr.length;i++){
+        const tr=arr[i];
+        if(arrow.py>=tr.y&&arrow.y<=tr.y){
+          if(tr.iron){
+            arrow.y=tr.y+16;
+            elMsg.textContent="被铁靶挡下了!";
+            burst(arrow.x,tr.y,"#90a4ae");
+            stopped=true;
+            break;
+          }else{
+            arrow.hits++;
+            burst(arrow.x,tr.y,"#aed581");
+            arr.splice(i,1);
+            i--;
+          }
+        }
+      }
+      if(arrow.y<-30){finishArrow();}
+      else if(stopped){tally(arrow,true);arrow=null;}
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;
+    }
+    if(endT>0){endT-=dt;if(endT<=0)finish();}
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#1d2a14");g.addColorStop(1,"#0f160b");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(174,213,129,0.12)";ctx.lineWidth=1;
+  for(let i=1;i<5;i++){
+    ctx.beginPath();ctx.moveTo(i*CW,0);ctx.lineTo(i*CW,H);ctx.stroke();
+  }
+  ctx.fillStyle="rgba(0,0,0,0.3)";ctx.fillRect(0,548,W,H-548);
+  for(let ci=0;ci<5;ci++){
+    const arr=cols[ci];
+    for(let i=0;i<arr.length;i++){
+      const tr=arr[i];
+      if(tr.iron){
+        ctx.fillStyle="#607d8b";
+        ctx.fillRect(CENTERS[ci]-18,tr.y-14,36,28);
+        ctx.strokeStyle="#37474f";ctx.lineWidth=2;
+        ctx.strokeRect(CENTERS[ci]-18,tr.y-14,36,28);
+        ctx.fillStyle="#455a64";
+        ctx.beginPath();ctx.arc(CENTERS[ci]-9,tr.y-6,2.5,0,Math.PI*2);ctx.arc(CENTERS[ci]+9,tr.y+6,2.5,0,Math.PI*2);ctx.fill();
+      }else{
+        ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+        const cols2=["#eceff1","#e53935","#ffc107"];
+        const rs=[1,0.6,0.28];
+        for(let k=0;k<3;k++){
+          ctx.fillStyle=cols2[k];
+          ctx.beginPath();ctx.arc(CENTERS[ci],tr.y,20*rs[k],0,Math.PI*2);ctx.fill();ctx.stroke();
+        }
+      }
+    }
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.45);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(240,552,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  if(arrow!==null){
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(arrow.x,arrow.y+20);ctx.lineTo(arrow.x,arrow.y);ctx.stroke();
+    ctx.fillStyle="#f5f5f5";
+    ctx.beginPath();ctx.moveTo(arrow.x,arrow.y-7);ctx.lineTo(arrow.x-4,arrow.y+1);ctx.lineTo(arrow.x+4,arrow.y+1);ctx.closePath();ctx.fill();
+  }
+  if(state==="play"&&arrow===null&&used<TOTAL){
+    const ci=Math.max(0,Math.min(4,Math.floor(mouse.x/CW)));
+    ctx.strokeStyle="rgba(174,213,129,0.4)";ctx.lineWidth=1.5;
+    ctx.strokeRect(ci*CW+2,10,CW-4,530);
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

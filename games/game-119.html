@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风雨弹幕</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>风雨弹幕</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏拖动 · 注意顶部风向标,暴雨会突袭!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">风雨弹幕</h2>
+      <p id="ovDesc">致命的雨从天而降,风却一直在变:顶部风向标指示当前风力,雨点会随风漂移,看错风向就走不到位。每隔一阵还会突降暴雨,雨点密度翻倍——撑住每一场风雨!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var KEY="mg_s119";
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest(KEY);
+var state="menu",score=0,timeMs=0,lastT=0;
+var player={x:W/2,y:H-70};
+var drops=[],parts=[];
+var wind=0,windTarget=40,windT=2.5;
+var stormCd=10,stormT=0;
+var spawnT=0.3;
+var keys={};
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function d2f(ax,ay,bx,by){var dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;}
+function rand(a,b){return a+Math.random()*(b-a);}
+function updHud(){elScore.textContent=Math.floor(score);elBest.textContent=best;}
+function reset(){
+  score=0;timeMs=0;drops=[];parts=[];keys={};
+  player.x=W/2;player.y=H-70;
+  wind=0;windTarget=40;windT=2.5;
+  stormCd=10;stormT=0;spawnT=0.3;
+  updHud();
+}
+function burst(x,y,c,n){
+  var i;
+  for(i=0;i<n;i++){parts.push({x:x,y:y,vx:rand(-120,120),vy:rand(-60,120),t:0.5,c:c});}
+}
+function moveInput(){
+  var mx=0,my=0;
+  if(keys.ArrowLeft||keys.a)mx-=1;
+  if(keys.ArrowRight||keys.d)mx+=1;
+  if(keys.ArrowUp||keys.w)my-=1;
+  if(keys.ArrowDown||keys.s)my+=1;
+  var l=Math.sqrt(mx*mx+my*my);
+  if(l>0){mx/=l;my/=l;}
+  return {x:mx,y:my};
+}
+function update(dt){
+  var s=dt/1000,i,d;
+  timeMs+=dt;score+=s*10;
+  var mv=moveInput();
+  player.x=clamp(player.x+mv.x*205*s,10,W-10);
+  player.y=clamp(player.y+mv.y*205*s,10,H-10);
+  windT-=s;
+  if(windT<=0){
+    windT=rand(3.5,6.5);
+    windTarget=rand(-130,130);
+  }
+  wind+=(windTarget-wind)*Math.min(1,s*1.4);
+  if(stormT>0){
+    stormT-=s;
+    if(stormT<=0)stormCd=rand(9,14);
+  }else{
+    stormCd-=s;
+    if(stormCd<=0){stormT=4.5;}
+  }
+  spawnT-=s;
+  if(spawnT<=0){
+    spawnT=stormT>0?0.055:0.13;
+    drops.push({x:rand(-10,W+10),y:-12,vy:rand(150,250),vx:wind*0.55+rand(-12,12),r:3.2});
+  }
+  for(i=drops.length-1;i>=0;i--){
+    d=drops[i];
+    d.x+=d.vx*s;d.y+=d.vy*s;
+    if(d.y>H+16||d.x<-40||d.x>W+40){drops.splice(i,1);continue;}
+    if(d2f(d.x,d.y,player.x,player.y)<(d.r+8)*(d.r+8)){die(stormT>0?"你在暴雨中被击中!":"被雨点击中!");return;}
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];p.t-=s;p.x+=p.vx*s;p.y+=p.vy*s;
+    if(p.t<=0)parts.splice(i,1);
+  }
+  updHud();
+}
+function die(msg){
+  state="over";
+  burst(player.x,player.y,"#22d3ee",26);
+  if(Math.floor(score)>best){best=Math.floor(score);saveBest(KEY,best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+Math.floor(score)+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function drawGrid(){
+  var x,y;
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<W;x+=40)for(y=0;y<H;y+=40)ctx.fillRect(x+1,y+1,38,38);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawGrid();
+  var i;
+  if(stormT>0){
+    ctx.fillStyle="rgba(56,130,246,0.08)";
+    ctx.fillRect(0,0,W,H);
+  }
+  ctx.strokeStyle="#7dd3fc";
+  ctx.lineWidth=2;
+  for(i=0;i<drops.length;i++){
+    var d=drops[i];
+    ctx.beginPath();
+    ctx.moveTo(d.x,d.y);
+    ctx.lineTo(d.x-d.vx*0.045,d.y-d.vy*0.045);
+    ctx.stroke();
+  }
+  ctx.lineWidth=1;
+  ctx.fillStyle="rgba(148,163,184,0.5)";
+  ctx.fillRect(0,0,W,44);
+  ctx.fillStyle="#e2e8f0";
+  ctx.font="bold 14px system-ui";
+  ctx.textAlign="center";
+  ctx.fillText("风",W/2,17);
+  var wl=Math.abs(wind)*0.32;
+  ctx.strokeStyle="#38bdf8";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(W/2-wind*0.16,30);
+  ctx.lineTo(W/2+wind*0.16,30);
+  ctx.stroke();
+  if(Math.abs(wind)>8){
+    var dirn=wind>0?1:-1;
+    ctx.beginPath();
+    ctx.moveTo(W/2+dirn*wl,30);
+    ctx.lineTo(W/2+dirn*wl-dirn*7,25);
+    ctx.moveTo(W/2+dirn*wl,30);
+    ctx.lineTo(W/2+dirn*wl-dirn*7,35);
+    ctx.stroke();
+  }
+  ctx.lineWidth=1;
+  ctx.fillStyle=stormT>0?"#f87171":"rgba(148,163,184,0.7)";
+  ctx.font="12px system-ui";
+  ctx.fillText(stormT>0?"暴雨!":"风力 "+Math.round(Math.abs(wind)),W/2,42);
+  for(i=0;i<parts.length;i++){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.t*2);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#22d3ee";
+  ctx.shadowColor="#22d3ee";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(player.x,player.y,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle="rgba(34,211,238,0.35)";
+  ctx.beginPath();ctx.arc(player.x,player.y,13,0,Math.PI*2);ctx.stroke();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function kn(e){var k=e.key;return k.length===1?k.toLowerCase():k;}
+document.addEventListener("keydown",function(e){
+  var k=kn(e);
+  if(k==="ArrowUp"||k==="ArrowDown"||k==="ArrowLeft"||k==="ArrowRight"||k===" ")e.preventDefault();
+  if(state!=="playing"){
+    if(k===" "||k==="Enter")startGame();
+    return;
+  }
+  keys[k]=true;
+});
+document.addEventListener("keyup",function(e){keys[kn(e)]=false;});
+var tId=null,lx=0,ly=0;
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];tId=t.identifier;
+  var r=cv.getBoundingClientRect();
+  lx=(t.clientX-r.left)*(W/r.width);ly=(t.clientY-r.top)*(H/r.height);
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect(),i,t;
+  for(i=0;i<e.changedTouches.length;i++){
+    t=e.changedTouches[i];
+    if(t.identifier===tId){
+      var x=(t.clientX-r.left)*(W/r.width),y=(t.clientY-r.top)*(H/r.height);
+      player.x=clamp(player.x+(x-lx),10,W-10);
+      player.y=clamp(player.y+(y-ly),10,H-10);
+      lx=x;ly=y;
+    }
+  }
+},{passive:false});
+function tEnd(e){
+  var i;
+  for(i=0;i<e.changedTouches.length;i++){if(e.changedTouches[i].identifier===tId)tId=null;}
+}
+cv.addEventListener("touchend",tEnd,{passive:false});
+cv.addEventListener("touchcancel",tEnd,{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

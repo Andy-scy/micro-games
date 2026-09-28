@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>轰塌高塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#2b1c04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>轰塌高塔</h1>
+  <p class="hint">↑↓ 调角度 · 空格蓄力发射 · 拖拽瞄准 · 6 发炮弹轰掉全部 3 块金砖</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>炮弹 <b id="ammo">6</b></span>
+    <span>金砖 <b id="gold">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="380"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">轰塌高塔</h2>
+      <p id="ovDesc">高塔顶部藏着 3 块金砖,石砖要打两下,木砖一击就碎。
+打掉承重的底砖,整段塔身会失去支撑而垮塌,坠落的砖块也会摔碎!
+6 发炮弹内毁掉全部金砖即为胜利,剩余炮弹有额外加分。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=380,GY=344,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elAmmo=$("ammo"),elGold=$("gold"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12;
+var best=loadBest("mg_s462");
+var state="menu",ang=45,pow=55,charging=false,cd=1;
+var ball=null,trail=[],ammo=6,score=0,blocks=[],parts=[],goldLeft=3,winT=0,loseT=0;
+var BW=26,BH=16,BX=330;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function buildTower(){
+  blocks=[];goldLeft=3;
+  for(var r=0;r<7;r++)for(var c=0;c<5;c++){
+    var gold=(r===6&&c>=1&&c<=3);
+    var hp=gold?1:(((r*5+c)%4===0)?1:2);
+    blocks.push({x:BX+c*BW,y:GY-(r+1)*BH,w:BW,h:BH,hp:hp,gold:gold,fall:false,vy:0,fl:0,sup:true});
+  }
+}
+function reset(){
+  score=0;ammo=6;ball=null;trail=[];parts=[];winT=0;loseT=0;
+  buildTower();ang=45;pow=55;charging=false;hud();
+}
+function hud(){elScore.textContent=score;elAmmo.textContent=ammo;elGold.textContent=goldLeft;elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball&&ammo>0;}
+function fire(){
+  if(!canFire())return;
+  ammo--;charging=false;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2.4,2.4),vy:rnd(-3.4,0.5),l:rnd(18,42),c:col});
+}
+function bColor(b){return b.gold?"#fbbf24":(b.hp>1?"#7c86b8":"#b98a5a");}
+function destroyBlock(b,pts){
+  var idx=blocks.indexOf(b);
+  if(idx<0)return;
+  blocks.splice(idx,1);
+  score+=pts;
+  boom(b.x+b.w/2,b.y+b.h/2,bColor(b),12);
+  if(b.gold){goldLeft--;boom(b.x+13,b.y+8,"#fde68a",18);}
+  hud();
+}
+function ov2(a,b){var l=Math.max(a.x,b.x),r2=Math.min(a.x+a.w,b.x+b.w);return Math.max(0,r2-l);}
+function support(){
+  var list=blocks.slice().sort(function(a,b){return b.y-a.y;});
+  var i,j,b,s;
+  for(i=0;i<list.length;i++){
+    b=list[i];
+    if(b.fall)continue;
+    var sup=b.y+b.h>=GY-2;
+    if(!sup){
+      for(j=0;j<i;j++){
+        s=list[j];
+        if(s.fall||!s.sup)continue;
+        if(s.y>=b.y+b.h-3&&s.y<=b.y+b.h+3&&ov2(b,s)>=6){sup=true;break;}
+      }
+    }
+    b.sup=sup;
+    if(!sup){b.fall=true;b.vy=0;}
+  }
+}
+function tick(){
+  var i,j,b;
+  if(charging&&canFire()){pow+=cd*1.9;if(pow>=100){pow=100;cd=-1;}if(pow<=18){pow=18;cd=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.l--;if(p.l<=0)parts.splice(i,1);}
+  for(i=0;i<blocks.length;i++)if(blocks[i].fl>0)blocks[i].fl--;
+  support();
+  for(i=0;i<blocks.length;i++){
+    b=blocks[i];
+    if(!b.fall)continue;
+    b.vy+=0.3;
+    var pb=b.y;b.y+=b.vy;
+    var landed=false,at=0;
+    if(b.y+b.h>=GY){at=GY-b.h;landed=true;}
+    else{
+      for(j=0;j<blocks.length;j++){
+        var s=blocks[j];
+        if(s===b||s.fall)continue;
+        if(ov2(b,s)>=6&&pb+b.h<=s.y+2&&b.y+b.h>=s.y){at=s.y-b.h;landed=true;break;}
+      }
+    }
+    if(landed){
+      if(b.vy>=5.4)destroyBlock(b,b.gold?800:100);
+      else{b.y=at;b.vy=0;b.fall=false;}
+    }
+  }
+  if(ball){
+    for(var st=0;st<2;st++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      for(i=0;i<blocks.length;i++){
+        b=blocks[i];
+        if(ball.x>b.x-3&&ball.x<b.x+b.w+3&&ball.y>b.y-3&&ball.y<b.y+b.h+3){
+          b.hp--;b.fl=12;
+          boom(ball.x,ball.y,"#e8eaf6",6);
+          if(b.hp<=0)destroyBlock(b,b.gold?800:100);
+          ball=null;break;
+        }
+      }
+      if(!ball)break;
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+      if(ball.y>=GY-3){boom(ball.x,GY-4,"#8b93c8",8);ball=null;break;}
+      if(ball.x>W+40||ball.x<-40||ball.t>700){ball=null;break;}
+    }
+    hud();
+  }
+  if(state==="playing"&&goldLeft<=0&&!ball){winT++;if(winT>50)finish(true);}
+  else if(state==="playing"&&ammo<=0&&!ball&&goldLeft>0){
+    var falling=false;
+    for(i=0;i<blocks.length;i++)if(blocks[i].fall){falling=true;break;}
+    if(!falling){loseT++;if(loseT>50)finish(false);}else loseT=0;
+  }else{winT=0;loseT=0;}
+}
+function finish(win){
+  state="over";
+  var bonus=win?ammo*120:0;
+  score+=bonus;
+  if(score>best){best=score;saveBest("mg_s462",best);}
+  ovTitle.textContent=win?"高塔轰塌!":"炮弹用尽";
+  ovDesc.textContent=win?("金砖全部摧毁!剩余炮弹奖励 "+bonus+" 分。"):"金砖仍有 "+goldLeft+" 块未摧毁,试试先打掉底部的承重砖。";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  hud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCannon(){
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  if(charging){
+    ctx.fillStyle="#20263f";rr(CX-40,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#fbbf24";
+    var bh=80*(pow-18)/82;
+    rr(CX-40,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.35)";
+  for(var i=0;i<80;i++){
+    vy+=G;x+=vx;y+=vy;
+    if(y>GY)break;
+    if(i%3===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i,b;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  for(i=0;i<blocks.length;i++){
+    b=blocks[i];
+    ctx.fillStyle=bColor(b);
+    rr(b.x,b.y,b.w-2,b.h-2,3);ctx.fill();
+    if(b.gold){
+      ctx.fillStyle="#7c4a03";
+      ctx.font="bold 12px system-ui";ctx.textAlign="center";
+      ctx.fillText("金",b.x+b.w/2-1,b.y+b.h-5);
+    }else if(b.hp>1){
+      ctx.strokeStyle="rgba(11,14,26,0.5)";ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(b.x+4,b.y+3);ctx.lineTo(b.x+b.w-8,b.y+b.h-5);ctx.stroke();
+    }
+    if(b.fl>0){ctx.fillStyle="rgba(255,255,255,"+(b.fl/24)+")";rr(b.x,b.y,b.w-2,b.h-2,3);ctx.fill();}
+  }
+  if(canFire())preview();
+  drawCannon();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=18;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-CX,dy=PIV-p.y;
+  if(dy<6||dx<2)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,dx)*180/Math.PI));
+  pow=Math.max(18,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

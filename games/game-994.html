@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风起蒲公英</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#a7f3d0;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a7f3d0}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#a7f3d0;color:#064e3b;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>风起蒲公英</h1>
+  <p class="hint">按住并快速划动,划出一阵风 · 托种子落进深色沃土便开花 · 开满 12 朵圆满</p>
+  <div class="hud">
+    <span>开花 <b id="hBloom">0</b>/12</span>
+    <span>余种 <b id="hSeed">25</b></span>
+    <span>世代 <b id="hGen">一</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">风起蒲公英</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">唤一阵风</button>
+      <button id="btnMore" style="display:none">继续播撒</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hBloom=$("hBloom"),hSeed=$("hSeed"),hGen=$("hGen");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=300,TAU=Math.PI*2;
+var GENS=["一","二","三","四","五","六","七","八","九","十"];
+function groundY(x){return 266+Math.sin(x*0.012)*7;}
+var plant={x:85,seeds:[]},flying=[],patches=[],sprouts=[],gusts=[],fx=[];
+var bloom=0,gen=0,state="menu",goalDone=false,time=0;
+var pressing=false,px=0,py=0,lx=0,ly=0,gustCd=0;
+function sr(n){var x=Math.sin(n*41.3+7.7)*3571.3453;return x-Math.floor(x);}
+for(var i=0;i<40;i++)patches.push(null);
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function newPatch(){
+  var x,tries=0,i;
+  do{x=140+Math.random()*300;tries++;}
+  while(tries<30&&Math.abs(x-plant.x)<70);
+  patches.push({x:x,r:28});
+  for(i=0;i<patches.length;i++){if(patches[i]===null){patches.splice(i,1);break;}}
+}
+function newPlant(){
+  gen++;
+  plant={x:150+Math.random()*270,seeds:[]};
+  var k;
+  for(k=0;k<25;k++)plant.seeds.push({ang:k/25*TAU,att:true,ix:0,iy:0,sw:Math.random()*TAU});
+  hGen.textContent=GENS[Math.min(GENS.length-1,gen-1)];
+  seedHud();
+}
+function seedHud(){
+  var n=plant.seeds.length+flying.length;
+  hSeed.textContent=n;
+}
+function step(dt){
+  var i,j,k;
+  gustCd-=dt;
+  for(i=gusts.length-1;i>=0;i--){gusts[i].life-=dt;
+    if(gusts[i].life<=0)gusts.splice(i,1);}
+  for(i=0;i<gusts.length;i++){var gu=gusts[i];
+    for(j=0;j<plant.seeds.length;j++){var s=plant.seeds[j];
+      if(!s.att)continue;
+      var hx=plant.x+Math.cos(s.ang)*13,hy=groundY(plant.x)-58+Math.sin(s.ang)*13;
+      var dx=hx-gu.x,dy=hy-gu.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<gu.r){
+        var fall=1-d/gu.r;
+        s.ix+=gu.vx*fall*dt*3.5;
+        s.iy+=gu.vy*fall*dt*3.5;
+      }
+    }
+    for(j=0;j<flying.length;j++){var fs=flying[j];
+      var dx2=fs.x-gu.x,dy2=fs.y-gu.y,d2=Math.sqrt(dx2*dx2+dy2*dy2);
+      if(d2<gu.r){var f2=1-d2/gu.r;
+        fs.vx+=gu.vx*f2*dt*1.2;fs.vy+=gu.vy*f2*dt*1.2;}}
+  }
+  for(j=plant.seeds.length-1;j>=0;j--){var s2=plant.seeds[j];
+    if(!s2.att)continue;
+    s2.ix*=0.85;s2.iy*=0.85;
+    if(Math.sqrt(s2.ix*s2.ix+s2.iy*s2.iy)>260){
+      s2.att=false;
+      flying.push({x:plant.x+Math.cos(s2.ang)*13,y:groundY(plant.x)-58+Math.sin(s2.ang)*13,
+        vx:s2.ix*0.85,vy:s2.iy*0.85-40,sw:s2.sw});
+      plant.seeds.splice(j,1);
+      seedHud();
+    }else{s2.ix*=0.9;s2.iy*=0.9;}
+  }
+  for(i=flying.length-1;i>=0;i--){var sd=flying[i];
+    sd.vx*=(1-0.9*dt);
+    sd.vy+=18*dt;
+    sd.vy-=Math.sin(time*6+sd.sw)*26*dt;
+    if(sd.vy<8)sd.vy=8;
+    if(sd.vy>48)sd.vy=48;
+    sd.x+=sd.vx*dt;sd.y+=sd.vy*dt;
+    if(sd.x<6)sd.x=6;
+    if(sd.x>W-6)sd.x=W-6;
+    if(sd.y>=groundY(sd.x)-3){
+      flying.splice(i,1);
+      var landed=false;
+      for(k=0;k<patches.length;k++){var pa=patches[k];
+        if(!pa)continue;
+        var px2=sd.x-pa.x,py2=sd.y-groundY(pa.x);
+        if(px2*px2+py2*py2<pa.r*pa.r){
+          landed=true;
+          sprouts.push({x:sd.x,y:groundY(sd.x),t:0});
+          bloom++;hBloom.textContent=bloom;
+          addFx(sd.x,groundY(sd.x)-14,"落地生根!","#a7f3d0");
+          patches[k]=null;
+          newPatch();
+          if(bloom>=12&&!goalDone){
+            goalDone=true;state="zen";
+            ovT.textContent="原野生花";
+            ovD.textContent="十二朵蒲公英次第开放,\n风一遍遍吹,种子一遍遍落。\n原野已成花田,可继续播撒。";
+            btnMore.style.display="inline-block";
+            ov.classList.remove("hide");
+          }
+          break;
+        }
+      }
+      if(!landed)addFx(sd.x,groundY(sd.x)-8,"随风而逝","#94a3b8");
+      seedHud();
+    }
+  }
+  for(i=sprouts.length-1;i>=0;i--){sprouts[i].t+=dt/3;
+    if(sprouts[i].t>1)sprouts[i].t=1;}
+  if(plant.seeds.length===0&&flying.length===0&&state==="play"){
+    newPlant();
+    addFx(plant.x,groundY(plant.x)-90,"新一代蒲公英扬起","#a7f3d0");
+  }
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  var sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#101830");sky.addColorStop(1,"#1b2440");
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#20301f";
+  ctx.beginPath();ctx.moveTo(0,H);
+  for(i=0;i<=W;i+=10)ctx.lineTo(i,groundY(i));
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+  for(i=0;i<patches.length;i++){var pa=patches[i];
+    if(!pa)continue;
+    ctx.fillStyle="rgba(30,22,12,.85)";
+    ctx.beginPath();ctx.ellipse(pa.x,groundY(pa.x)+2,pa.r,7,0,0,TAU);ctx.fill();}
+  var hy=groundY(plant.x)-58;
+  ctx.strokeStyle="#2f5232";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(plant.x,groundY(plant.x));
+  ctx.quadraticCurveTo(plant.x+8,groundY(plant.x)-30,plant.x,hy);ctx.stroke();
+  ctx.fillStyle="#8a5a3a";
+  ctx.beginPath();ctx.arc(plant.x,hy,5,0,TAU);ctx.fill();
+  var j;
+  for(j=0;j<plant.seeds.length;j++){var s=plant.seeds[j];
+    if(!s.att)continue;
+    var sx=plant.x+Math.cos(s.ang)*13,sy2=hy+Math.sin(s.ang)*13;
+    drawSeed(sx,sy2,1);}
+  for(j=0;j<flying.length;j++){var fs=flying[j];
+    drawSeed(fs.x,fs.y,0.9);}
+  for(j=0;j<sprouts.length;j++){var sp=sprouts[j];
+    var hgt=26*sp.t;
+    ctx.strokeStyle="#3f7a4b";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(sp.x,sp.y);
+    ctx.quadraticCurveTo(sp.x+4,sp.y-hgt*0.6,sp.x,sp.y-hgt);ctx.stroke();
+    if(sp.t>0.65){
+      var bx=sp.x,by=sp.y-hgt,pl;
+      for(pl=0;pl<6;pl++){
+        var pa2=pl/6*TAU+sp.t;
+        ctx.strokeStyle="rgba(255,255,255,.85)";ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.moveTo(bx,by);
+        ctx.lineTo(bx+Math.cos(pa2)*5,by+Math.sin(pa2)*5);ctx.stroke();}
+      ctx.fillStyle="#fde68a";
+      ctx.beginPath();ctx.arc(bx,by,2.2,0,TAU);ctx.fill();
+    }
+  }
+  for(i=0;i<gusts.length;i++){var gu=gusts[i];
+    ctx.strokeStyle="rgba(167,243,208,"+(gu.life*0.4).toFixed(2)+")";
+    ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(gu.x,gu.y,gu.r*(1.4-gu.life),0,TAU);ctx.stroke();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+function drawSeed(x,y,sc){
+  ctx.strokeStyle="rgba(240,248,255,.8)";ctx.lineWidth=1;
+  var k;
+  for(k=0;k<4;k++){
+    var a=-Math.PI/2+(k-1.5)*0.5;
+    ctx.beginPath();ctx.moveTo(x,y);
+    ctx.lineTo(x+Math.cos(a)*6*sc,y+Math.sin(a)*6*sc);ctx.stroke();}
+  ctx.fillStyle="#e8f4ff";
+  ctx.beginPath();ctx.arc(x,y,1.7*sc,0,TAU);ctx.fill();
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;var p=ptr(e);px=p.x;py=p.y;lx=px;ly=py;}
+function mv(e){
+  if(!pressing||state!=="play")return;
+  e.preventDefault();
+  var p=ptr(e);
+  var dx=p.x-px,dy=p.y-py;
+  var sp=Math.sqrt(dx*dx+dy*dy)*60;
+  if(sp>220&&gustCd<=0){
+    gusts.push({x:p.x,y:p.y,vx:dx*60,vy:dy*60,life:0.45,r:95});
+    if(gusts.length>6)gusts.shift();
+    gustCd=0.06;
+  }
+  px=p.x;py=p.y;
+}
+function up(){pressing=false;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="风起蒲公英";
+  ovD.textContent="山野一株蒲公英,顶着二十五枚小伞。\n按住并快速划动,划出一阵风,风会掀落种子;\n种子随风飘荡,落进深色沃土便扎根开花,\n落在别处则随风而逝。开花十二朵即圆满。";
+  btnGo.textContent="唤一阵风";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){
+  newPlant();
+  newPatch();newPatch();newPatch();
+  state="play";ov.classList.add("hide");
+});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

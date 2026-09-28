@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抢鲜出餐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a3e635;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a3e635;font-size:16px}
+.stage{position:relative;background:#13200f;border:2px solid #24371c;border-radius:12px;padding:12px}
+.sec{font-size:12px;color:#8b90b0;margin:2px 0 6px}
+.orders{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.od{flex:1;min-width:130px;background:#fdf6e3;color:#333;border-radius:10px;padding:8px;text-align:center;cursor:pointer;user-select:none;border:3px solid transparent}
+.od.sel{border-color:#e67e22;box-shadow:0 0 10px rgba(230,126,34,.6)}
+.od .needing{display:flex;justify-content:center;gap:8px;font-size:22px}
+.od .needing span.done{opacity:.35;text-decoration:line-through}
+.od .rw{font-size:12px;color:#a0522d;font-weight:700;margin-top:2px}
+.shelf{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.card810{background:#1d2a15;border:2px solid #2f4222;border-radius:10px;padding:8px;text-align:center;cursor:pointer;user-select:none}
+.card810 .ic{font-size:24px}
+.card810 .fbar{height:8px;border-radius:4px;background:#111527;overflow:hidden;margin:5px 2px}
+.card810 .fbar i{display:block;height:100%;background:#4ade80}
+.card810 .fl{font-size:11px;color:#8b90b0}
+.card810.bad{border-color:#7f1d1d;box-shadow:0 0 10px rgba(248,113,113,.5)}
+.card810.bad .fbar i{background:#f87171}
+.card810.mid .fbar i{background:#fbbf24}
+.card810.shake{animation:shk .3s}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a3e635}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#a3e635;color:#1a2a05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>抢鲜出餐</h1>
+  <p class="hint">点一张订单选中,再点货架上<b style="color:#a3e635">对应的 2 样食材</b>即可出餐<br>食材会不断腐坏:先用快坏的!用到腐坏食材或放坏都亏!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>出餐 <b id="served">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="sec">今日订单(点击选中)</div>
+    <div class="orders" id="orders"></div>
+    <div class="sec">保鲜货架(越红越要赶紧用)</div>
+    <div class="shelf" id="shelf"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">抢鲜出餐</h2>
+      <p id="ovDesc">货架上的食材新鲜度会持续下降。选中订单后点它要的两种食材:越新鲜加分越多!点了腐坏食材扣一条命;食材自然放坏则扣分。用你的眼光决定先做哪单!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var KIND=[["🍅","番茄"],["🥬","青菜"],["🥩","肥牛"],["🧀","芝士"],["🍄","蘑菇"],["🥕","胡萝卜"]];
+var elScore=$("score"),elServed=$("served"),elLife=$("life"),elBest=$("best");
+var ordersEl=$("orders"),shelfEl=$("shelf"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s810");
+var state="menu",cards,orders,sel,score,served,lives,lastT,msgT;
+var cardEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildShelf(){
+  for(var i=0;i<KIND.length;i++){
+    var d=document.createElement("div");
+    d.className="card810";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<div class="ic">'+KIND[i][0]+'</div><div class="nm" style="font-size:12px;color:#c7cbe8">'+KIND[i][1]+'</div><div class="fbar"><i></i></div><div class="fl">100%</div>';
+    shelfEl.appendChild(d);
+    cardEls.push(d);
+  }
+}
+function newCard(i){
+  cards[i]={fresh:100,decay:1.8+Math.random()*1.2};
+}
+function newOrder(){
+  var a=(Math.random()*KIND.length)|0,b=(Math.random()*KIND.length)|0;
+  while(b===a)b=(Math.random()*KIND.length)|0;
+  return {a:a,b:b,reward:12+Math.round(Math.random()*18),u1:false,u2:false,f1:0,f2:0};
+}
+function reset(){
+  cards=[null,null,null,null,null,null];
+  for(var i=0;i<6;i++)newCard(i);
+  orders=[newOrder(),newOrder(),newOrder()];
+  sel=null;score=0;served=0;lives=3;
+  msg.textContent="";msgT=0;render();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elServed.textContent=served;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function refreshCard(i){newCard(i);}
+function render(){
+  var i;
+  for(i=0;i<6;i++){
+    var c=cards[i],e=cardEls[i];
+    var cls="card810";
+    if(c.fresh<=25)cls+=" bad";
+    else if(c.fresh<=55)cls+=" mid";
+    e.className=cls;
+    e.children[2].children[0].style.width=Math.max(0,c.fresh)+"%";
+    e.children[3].textContent=c.fresh<=0?"已腐坏":Math.round(c.fresh)+"% 新鲜";
+  }
+  var h="";
+  for(i=0;i<orders.length;i++){
+    var o=orders[i];
+    h+='<div class="od'+(sel===i?" sel":"")+'" data-i="'+i+'">'
+      +'<div class="needing"><span class="'+(o.u1?"done":"")+'">'+KIND[o.a][0]+'</span><span class="'+(o.u2?"done":"")+'">'+KIND[o.b][0]+"</span></div>"
+      +'<div class="rw">+$'+o.reward+"</div></div>";
+  }
+  ordersEl.innerHTML=h;
+}
+function useCard(i){
+  if(state!=="playing")return;
+  if(sel===null){showMsg("先点一张订单选中它!","#e8b06a");return;}
+  var o=orders[sel];
+  if(cards[i].fresh<=0){
+    lives--;showMsg("腐坏食材上桌,客人投诉了!","#f87171");
+    refreshCard(i);updateHud();render();
+    if(lives<=0)gameOver("三次食品安全事故,餐厅被查封了!");
+    return;
+  }
+  var f=cards[i].fresh;
+  if(i===o.a&&!o.u1){o.u1=true;o.f1=f;refreshCard(i);showMsg("已加入,再配一样!","#a3e635");}
+  else if(i===o.b&&!o.u2){o.u2=true;o.f2=f;refreshCard(i);showMsg("已加入,再配一样!","#a3e635");}
+  else{
+    score=Math.max(0,score-4);
+    cardEls[i].classList.add("shake");
+    var ce=cardEls[i];
+    setTimeout(function(){ce.classList.remove("shake");},320);
+    showMsg("这单不需要它! -4","#f87171");
+    render();updateHud();
+    return;
+  }
+  if(o.u1&&o.u2){
+    var pts=o.reward+Math.round((o.f1+o.f2)/10);
+    score+=pts;served++;
+    showMsg("出餐 +"+pts,"#4ade80");
+    orders[sel]=newOrder();
+    sel=null;
+  }
+  render();updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s810",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent="你共出餐 "+served+" 份,可惜货架管理出了大问题。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(msgT>0){msgT-=dt/1000;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  var mul=1+score/150;
+  for(var i=0;i<6;i++){
+    var c=cards[i];
+    c.fresh-=c.decay*mul*dt/1000;
+    if(c.fresh<=0){
+      c.fresh=0;
+      score=Math.max(0,score-12);
+      showMsg(KIND[i][1]+"放坏了! -12","#f87171");
+      refreshCard(i);
+      updateHud();
+    }
+  }
+  render();
+}
+ordersEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==ordersEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==ordersEl){
+    var i=parseInt(n.getAttribute("data-i"),10);
+    sel=(sel===i?null:i);
+    render();
+  }
+});
+shelfEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==shelfEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==shelfEl)useCard(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+buildShelf();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

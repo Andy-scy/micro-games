@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>道具乱斗</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;gap:10px}
+h1{margin:2px 0;font-size:22px;letter-spacing:4px;color:#4ade80}
+#wrap{position:relative;width:min(96vw,860px)}
+canvas{display:block;width:100%;height:auto;border-radius:14px;background:#141830;box-shadow:0 0 0 1px #262b4a;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(10,12,26,.86);border-radius:14px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#msg{font-size:16px;line-height:2;white-space:pre-line}
+#row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.btn{background:#22c55e;color:#052e16;border:none;border-radius:10px;padding:10px 26px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:700}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>道具乱斗</h1>
+<div id="wrap">
+<canvas id="cv" width="800" height="500"></canvas>
+<div id="overlay"><div id="msg"></div><div id="row"></div></div>
+</div>
+<script>
+'use strict';
+var W=800,H=500,WIN=7,BASE=5.5;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var overlay=document.getElementById('overlay'),msg=document.getElementById('msg'),row=document.getElementById('row');
+var state='menu';
+var player={x:26,y:H/2-55,w:14,h:110,hT:0,hTarget:110};
+var ai={x:W-40,y:H/2-55,w:14,h:110,hT:0,hTarget:110};
+var ball={x:W/2,y:H/2,vx:0,vy:0,r:9,speed:BASE};
+var sp=0,sa=0,serveT=0,keys={},mouseY=null;
+var items=[],itemT=300,lastHit=null,floats=[];
+var TYPES=[
+  {k:'grow',t:'巨',c:'#4ade80'},
+  {k:'shrink',t:'缩',c:'#f87171'},
+  {k:'slow',t:'缓',c:'#60a5fa'},
+  {k:'fast',t:'疾',c:'#facc15'}
+];
+
+function mkBtn(text,fn){
+  var b=document.createElement('button');
+  b.className='btn';b.textContent=text;
+  b.addEventListener('click',fn);
+  row.appendChild(b);
+  return b;
+}
+var bStart=mkBtn('开始游戏',function(){start();});
+function showMenu(){
+  state='menu';
+  msg.textContent='球撞道具箱会触发效果，归属最后触球方：\n巨＝自己挡板变大　缩＝对手挡板变小\n缓＝球减速　疾＝球加速\n先得 7 分者胜。鼠标/触屏或 ↑↓（W/S）操作。';
+  bStart.textContent='开始游戏';
+  overlay.classList.remove('hide');
+}
+function start(){
+  sp=0;sa=0;items=[];itemT=300;lastHit=null;floats=[];keys={};mouseY=null;
+  player.h=110;player.hT=0;ai.h=110;ai.hT=0;
+  player.y=H/2-player.h/2;ai.y=H/2-ai.h/2;
+  serve(Math.random()<0.5?1:-1);
+  state='play';
+  overlay.classList.add('hide');
+}
+function serve(dir){
+  ball.x=W/2;ball.y=H/2+(Math.random()*160-80);
+  ball.speed=BASE;
+  var a=Math.random()*0.7-0.35;
+  ball.vx=Math.cos(a)*ball.speed*dir;
+  ball.vy=Math.sin(a)*ball.speed;
+  serveT=45;lastHit=null;
+}
+function endGame(win){
+  state='end';
+  msg.textContent=(win?'胜利！道具运用于一心':'败北…被道具压制')+'\n最终比分 '+sp+' : '+sa;
+  bStart.textContent='再来一局';
+  overlay.classList.remove('hide');
+}
+function afterPoint(dir){
+  if(sp>=WIN){endGame(true);}
+  else if(sa>=WIN){endGame(false);}
+  else{serve(dir);}
+}
+function float(t){floats.push({t:t,x:W/2,y:110,life:66});}
+function apply(it,who){
+  var other=who==='p'?ai:player;
+  var mine=who==='p'?player:ai;
+  if(it.k==='grow'){mine.hT=480;mine.hTarget=155;float(who==='p'?'你的挡板巨大化！':'对方挡板巨大化！');}
+  else if(it.k==='shrink'){other.hT=480;other.hTarget=62;float(who==='p'?'对方挡板被缩小！':'你的挡板被缩小！');}
+  else if(it.k==='slow'){ball.speed=Math.max(3.4,ball.speed*0.75);float('球体减速！');}
+  else{ball.speed=Math.min(12.5,ball.speed*1.28);float('球体加速！');}
+}
+function hitPaddle(p,dir,who){
+  if(ball.vx*dir>=0){return;}
+  if(ball.x+ball.r<p.x||ball.x-ball.r>p.x+p.w||ball.y+ball.r<p.y||ball.y-ball.r>p.y+p.h){return;}
+  var rel=(ball.y-(p.y+p.h/2))/(p.h/2);
+  rel=Math.max(-1,Math.min(1,rel));
+  var ang=rel*0.95;
+  ball.speed=Math.min(11,ball.speed+0.22);
+  ball.vx=Math.cos(ang)*ball.speed*dir;
+  ball.vy=Math.sin(ang)*ball.speed;
+  ball.x=dir>0?p.x+p.w+ball.r:p.x-ball.r;
+  lastHit=who;
+}
+function update(dt){
+  var pv=0;
+  if(keys.up){pv=-1;}else if(keys.down){pv=1;}
+  if(pv!==0){mouseY=null;player.y+=pv*7.2*dt;}
+  else if(mouseY!==null){player.y+=(mouseY-(player.y+player.h/2))*Math.min(1,0.3*dt);}
+  if(player.hT>0){player.hT-=dt;}else{player.hTarget=110;}
+  if(ai.hT>0){ai.hT-=dt;}else{ai.hTarget=110;}
+  player.h+=(player.hTarget-player.h)*Math.min(1,0.12*dt);
+  ai.h+=(ai.hTarget-ai.h)*Math.min(1,0.12*dt);
+  player.y=Math.max(6,Math.min(H-player.h-6,player.y));
+  ai.y=Math.max(6,Math.min(H-ai.h-6,ai.y));
+  var tx=ball.vx>0?ball.y:H/2;
+  var diff=tx-(ai.y+ai.h/2);
+  ai.y+=Math.max(-4.8*dt,Math.min(4.8*dt,diff*0.14));
+  ai.y=Math.max(6,Math.min(H-ai.h-6,ai.y));
+  itemT-=dt;
+  if(itemT<=0&&items.length<2){
+    items.push({
+      x:W/2-140+Math.random()*280,
+      y:70+Math.random()*(H-140),
+      type:TYPES[Math.floor(Math.random()*TYPES.length)],
+      life:600
+    });
+    itemT=380;
+  }
+  if(serveT>0){serveT-=dt;return;}
+  ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+  if(ball.y<ball.r){ball.y=ball.r;ball.vy=Math.abs(ball.vy);}
+  if(ball.y>H-ball.r){ball.y=H-ball.r;ball.vy=-Math.abs(ball.vy);}
+  hitPaddle(player,1,'p');hitPaddle(ai,-1,'a');
+  var i,it,dx,dy;
+  for(i=items.length-1;i>=0;i--){
+    it=items[i];
+    it.life-=dt;
+    if(it.life<=0){items.splice(i,1);continue;}
+    if(lastHit){
+      dx=ball.x-it.x;dy=ball.y-it.y;
+      if(dx*dx+dy*dy<(ball.r+16)*(ball.r+16)){
+        apply(it,lastHit);
+        items.splice(i,1);
+      }
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].life-=dt;
+    if(floats[i].life<=0){floats.splice(i,1);}
+  }
+  if(ball.x<-30){sa++;afterPoint(-1);}
+  else if(ball.x>W+30){sp++;afterPoint(1);}
+}
+function pad(p,color){ctx.fillStyle=color;ctx.fillRect(p.x,p.y,p.w,p.h);}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(232,234,246,.14)';
+  ctx.lineWidth=3;ctx.setLineDash([10,14]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign='center';
+  ctx.font='bold 52px system-ui';
+  ctx.fillStyle='rgba(232,234,246,.85)';
+  ctx.fillText(sp,W/2-70,68);
+  ctx.fillText(sa,W/2+70,68);
+  ctx.font='13px system-ui';
+  ctx.fillStyle='#4ade80';
+  ctx.fillText('球撞道具触发效果 · 先得 7 分',W/2,H-14);
+  var i,it;
+  for(i=0;i<items.length;i++){
+    it=items[i];
+    if(it.life<120&&Math.floor(it.life/8)%2===0){continue;}
+    ctx.fillStyle=it.type.c;
+    ctx.globalAlpha=0.9;
+    ctx.fillRect(it.x-16,it.y-16,32,32);
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#0f1220';
+    ctx.font='bold 18px system-ui';
+    ctx.fillText(it.type.t,it.x,it.y+6);
+  }
+  pad(player,'#38bdf8');pad(ai,'#f472b6');
+  ctx.font='16px system-ui';ctx.fillStyle='#4ade80';
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].life/36);
+    ctx.fillText(floats[i].t,floats[i].x,floats[i].y+ (66-floats[i].life)*0.5);
+  }
+  ctx.globalAlpha=1;
+  if(serveT>0){
+    if(Math.floor(serveT/12)%2===0){
+      ctx.fillStyle='#facc15';
+      ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.font='20px system-ui';ctx.fillStyle='#facc15';
+    ctx.fillText('准备…',W/2,H/2-46);
+  }else{
+    ctx.fillStyle='#f8fafc';
+    ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(2.5,Math.max(0.2,(t-last)/16.7));
+  last=t;
+  if(state==='play'){update(dt);}
+  draw();
+  requestAnimationFrame(loop);
+}
+window.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=true;e.preventDefault();}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=false;}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=false;}
+});
+function ptrY(e){
+  var r=cv.getBoundingClientRect();
+  var cy=e.touches&&e.touches[0]?e.touches[0].clientY:e.clientY;
+  mouseY=(cy-r.top)*(H/r.height);
+}
+cv.addEventListener('mousemove',ptrY);
+cv.addEventListener('touchstart',function(e){e.preventDefault();ptrY(e);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();ptrY(e);},{passive:false});
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

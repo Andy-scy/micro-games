@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>反弹泡泡龙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>反弹泡泡龙</h1>
+  <p class="tips">场上有钢板挡路,直射打不到的角落要靠墙壁和钢板反弹切入!弹药有限,清空全部泡泡才能过关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">剩余弹药</div><div class="big" id="am">0</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">反弹泡泡龙</h2><p id="ovp">玩法说明:<br>· 移动瞄准后点击发射,同色三连即消除<br>· 场上的灰色钢板会挡住炮弹,直射行不通<br>· 善用左右墙与钢板反弹,从刁钻角度命中<br>· 虚线弹道会帮你预演反弹路径<br>· 每关弹药 = 泡泡数 + 8,用完未清场即失败<br>· 清空全部泡泡进入下一关,钢板越来越多</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=560,R=20,ROWH=34,TOP=8,SHX=210,SHY=522;
+var PAL=['#ff5c5c','#ffd166','#51d88a','#4da3ff'];
+var grid=[],sp=0,level=1,score=0;
+var cur=0,ball=null,aimA=-Math.PI/2,ammo=0;
+var blocks=[],falling=[],parts=[],state='idle',lastT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function off(r){return (r+sp)%2}
+function rowLen(r){return off(r)===0?10:9}
+function cx(r,c){return R+c*2*R+off(r)*R}
+function cy(r){return TOP+R+r*ROWH}
+function newRow(){var a=[];var len=rowLen(grid.length);for(var i=0;i<len;i++)a.push(-1);return a}
+function ensureRow(r){while(grid.length<=r)grid.push(newRow())}
+function neighbors(r,c){
+  var o=off(r),out=[[r,c-1],[r,c+1]];
+  if(o===0){out.push([r-1,c-1],[r-1,c],[r+1,c-1],[r+1,c]);}
+  else{out.push([r-1,c],[r-1,c+1],[r+1,c],[r+1,c+1]);}
+  return out;
+}
+function colorsPresent(){
+  var s=[];
+  for(var r=0;r<grid.length;r++)for(var c=0;c<grid[r].length;c++){
+    var v=grid[r][c];if(v>=0&&s.indexOf(v)<0)s.push(v);
+  }
+  return s;
+}
+function countCells(){
+  var n=0;
+  for(var r=0;r<grid.length;r++)for(var c=0;c<grid[r].length;c++)if(grid[r][c]>=0)n++;
+  return n;
+}
+function makeBlocks(){
+  blocks=[];
+  var n=1+Math.min(3,Math.ceil(level/1));
+  if(n>4)n=4;
+  var usedY=[];
+  for(var i=0;i<n;i++){
+    var w=rnd(80,150),tries=0,by=0,ok=false;
+    while(tries<30&&!ok){
+      tries++;
+      by=TOP+R+Math.floor(rnd(2,5))*ROWH-8;
+      ok=true;
+      for(var j=0;j<usedY.length;j++)if(Math.abs(usedY[j]-by)<18)ok=false;
+    }
+    usedY.push(by);
+    var x=rnd(20,W-20-w);
+    blocks.push({x:x,y:by,w:w,h:14});
+  }
+}
+function newBoard(){
+  grid=[];sp=0;falling=[];ball=null;
+  var rows=3+Math.min(level,4);
+  for(var r=0;r<rows;r++){
+    ensureRow(r);
+    for(var c=0;c<grid[r].length;c++)grid[r][c]=Math.floor(Math.random()*4);
+  }
+  makeBlocks();
+  ammo=countCells()+8;
+  cur=colorsPresent()[Math.floor(Math.random()*4)]||0;
+  updHud();
+}
+function resetGame(){
+  score=0;level=1;parts=[];
+  newBoard();
+}
+function updHud(){
+  $i('lv').textContent=level;
+  $i('sc').textContent=score;
+  $i('am').textContent=ammo;
+}
+function fire(){
+  if(ball||state!=='play'||ammo<=0)return;
+  ammo--;
+  ball={x:SHX,y:SHY,vx:Math.cos(aimA)*560,vy:Math.sin(aimA)*560,ci:cur,t:0};
+  var ps=colorsPresent();
+  cur=ps.length?ps[Math.floor(Math.random()*ps.length)]:0;
+  updHud();
+}
+function hitBlockRect(x,y,rad){
+  for(var i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    var nx=Math.max(b.x,Math.min(x,b.x+b.w));
+    var ny=Math.max(b.y,Math.min(y,b.y+b.h));
+    var dx=x-nx,dy=y-ny;
+    if(dx*dx+dy*dy<rad*rad)return b;
+  }
+  return null;
+}
+function hitGrid(x,y){
+  for(var r=0;r<grid.length;r++)for(var c=0;c<grid[r].length;c++){
+    if(grid[r][c]<0)continue;
+    var dx=x-cx(r,c),dy=y-cy(r);
+    if(dx*dx+dy*dy<(2*R-6)*(2*R-6))return true;
+  }
+  return false;
+}
+function snapCell(x,y){
+  var r0=Math.max(0,Math.floor((y-TOP-R)/ROWH)-1);
+  ensureRow(r0+3);
+  var best=null,bd=1e9;
+  for(var r=r0;r<=r0+3;r++){
+    for(var c=0;c<grid[r].length;c++){
+      if(grid[r][c]>=0)continue;
+      var dx=x-cx(r,c),dy=y-cy(r),d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=[r,c];}
+    }
+  }
+  return best;
+}
+function land(px,py){
+  if(!ball)return;
+  var cell=snapCell(ball.x,ball.y);
+  var ci=ball.ci;ball=null;
+  if(!cell)return;
+  grid[cell[0]][cell[1]]=ci;
+  resolve(cell[0],cell[1]);
+}
+function flood(r0,c0,ci){
+  var seen={},out=[],st=[[r0,c0]];
+  while(st.length){
+    var p=st.pop(),r=p[0],c=p[1];
+    if(r<0||c<0||r>=grid.length||c>=grid[r].length)continue;
+    if(grid[r][c]!==ci)continue;
+    var k=r+'_'+c;if(seen[k])continue;seen[k]=1;out.push(p);
+    var nb=neighbors(r,c);
+    for(var i=0;i<nb.length;i++)st.push(nb[i]);
+  }
+  return out;
+}
+function dropFloaters(){
+  var seen={},st=[];
+  if(grid.length)for(var c=0;c<grid[0].length;c++)if(grid[0][c]>=0)st.push([0,c]);
+  while(st.length){
+    var p=st.pop(),r=p[0],c=p[1];
+    if(r<0||c<0||r>=grid.length||c>=grid[r].length)continue;
+    if(grid[r][c]<0)continue;
+    var k=r+'_'+c;if(seen[k])continue;seen[k]=1;
+    var nb=neighbors(r,c);
+    for(var i=0;i<nb.length;i++)st.push(nb[i]);
+  }
+  for(var r2=0;r2<grid.length;r2++)for(var c2=0;c2<grid[r2].length;c2++){
+    if(grid[r2][c2]>=0&&!seen[r2+'_'+c2]){
+      falling.push({x:cx(r2,c2),y:cy(r2),vx:rnd(-40,40),vy:rnd(-70,0),c:PAL[grid[r2][c2]]});
+      grid[r2][c2]=-1;score+=25;
+    }
+  }
+}
+function resolve(r,c){
+  var ci=grid[r][c],grp=flood(r,c,ci);
+  if(grp.length>=3){
+    for(var i=0;i<grp.length;i++)grid[grp[i][0]][grp[i][1]]=-1;
+    score+=grp.length*15;
+    dropFloaters();
+    burst(cx(r,c),cy(r),PAL[ci]);
+  }
+  if(countCells()===0){
+    score+=200;level++;
+    newBoard();
+    showTip('第 '+level+' 关!');
+    return;
+  }
+  if(ammo<=0){
+    state='over';
+    $i('ovt').textContent='弹药耗尽!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达关卡:第 '+level+' 关<br>还剩 '+countCells()+' 个泡泡';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+}
+function burst(x,y,c){
+  for(var k=0;k<12;k++){var a=rnd(0,6.28),s=rnd(60,190);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+var tip='',tipT=0;
+function showTip(t){tip=t;tipT=1.4}
+function aimAt(p){
+  var dx=p.x-SHX,dy=p.y-SHY;
+  if(dy>-14)dy=-14;
+  aimA=Math.atan2(dy,dx);
+  if(aimA>-0.14)aimA=-0.14;
+  if(aimA<-Math.PI+0.14)aimA=-Math.PI+0.14;
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointermove',function(e){if(state==='play')aimAt(pt(e))});
+cv.addEventListener('pointerdown',function(e){if(state==='play')aimAt(pt(e))});
+cv.addEventListener('pointerup',function(e){
+  if(state!=='play')return;
+  aimAt(pt(e));fire();
+});
+window.addEventListener('keydown',function(e){
+  if(state!=='play')return;
+  if(e.code==='ArrowLeft'){aimA-=0.05;if(aimA<-Math.PI+0.14)aimA=-Math.PI+0.14;e.preventDefault();}
+  if(e.code==='ArrowRight'){aimA+=0.05;if(aimA>-0.14)aimA=-0.14;e.preventDefault();}
+  if(e.code==='Space'){fire();e.preventDefault();}
+});
+function reflect(x,y,px,py,vx,vy){
+  var b=hitBlockRect(x,y,R);
+  if(!b)return null;
+  if(px<=b.x-R||px>=b.x+b.w+R)return {vx:-vx,vy:vy};
+  return {vx:vx,vy:-vy};
+}
+function trace(){
+  var pts=[],x=SHX,y=SHY,vx=Math.cos(aimA)*560,vy=Math.sin(aimA)*560,step=0.012;
+  for(var i=0;i<220;i++){
+    var px=x,py=y;
+    x+=vx*step;y+=vy*step;
+    if(x<R){x=2*R-x;vx=-vx;}
+    if(x>W-R){x=2*(W-R)-x;vx=-vx;}
+    var rf=reflect(x,y,px,py,vx,vy);
+    if(rf){vx=rf.vx;vy=rf.vy;pts.push([x,y]);continue;}
+    if(y<=TOP+R||hitGrid(x,y)){pts.push([x,y]);break;}
+    if(i%4===0)pts.push([x,y]);
+  }
+  return pts;
+}
+function update(dt){
+  if(state!=='play')return;
+  var i;
+  if(ball){
+    ball.t+=dt;
+    for(var s=0;s<2&&ball;s++){
+      var px=ball.x,py=ball.y;
+      ball.x+=ball.vx*dt/2;ball.y+=ball.vy*dt/2;
+      if(ball.x<R){ball.x=2*R-ball.x;ball.vx=-ball.vx;}
+      if(ball.x>W-R){ball.x=2*(W-R)-ball.x;ball.vx=-ball.vx;}
+      var rf=reflect(ball.x,ball.y,px,py,ball.vx,ball.vy);
+      if(rf){ball.vx=rf.vx;ball.vy=rf.vy;continue;}
+      if(ball.y<=TOP+R){land();break;}
+      if(hitGrid(ball.x,ball.y)){land();break;}
+      if(ball.t>4){land();break;}
+    }
+  }
+  for(i=falling.length-1;i>=0;i--){
+    var f=falling[i];f.vy+=700*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;
+    if(f.y>H+40)falling.splice(i,1);
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  if(tipT>0)tipT-=dt;
+}
+function drawBubble(x,y,r,c){
+  ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fillStyle=c;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.3)';ctx.stroke();
+  ctx.beginPath();ctx.arc(x-r*0.32,y-r*0.32,r*0.26,0,6.2832);ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var r,c,i;
+  for(r=0;r<grid.length;r++)for(c=0;c<grid[r].length;c++){
+    if(grid[r][c]>=0)drawBubble(cx(r,c),cy(r),R,PAL[grid[r][c]]);
+  }
+  for(i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    ctx.fillStyle='#565f8a';
+    ctx.fillRect(b.x,b.y,b.w,b.h);
+    ctx.fillStyle='#3a4266';
+    ctx.fillRect(b.x,b.y+b.h-4,b.w,4);
+    ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;
+    ctx.strokeRect(b.x,b.y,b.w,b.h);
+  }
+  for(i=0;i<falling.length;i++)drawBubble(falling[i].x,falling[i].y,R,falling[i].c);
+  if(state==='play'&&!ball){
+    var pts=trace();
+    for(i=0;i<pts.length;i++){
+      ctx.globalAlpha=0.35;ctx.beginPath();ctx.arc(pts[i][0],pts[i][1],3.2,0,6.2832);
+      ctx.fillStyle='#8fd3ff';ctx.fill();ctx.globalAlpha=1;
+    }
+  }
+  ctx.save();ctx.translate(SHX,SHY);ctx.rotate(aimA+Math.PI/2);
+  ctx.fillStyle='#3a4470';ctx.fillRect(-7,-34,14,34);ctx.restore();
+  ctx.beginPath();ctx.arc(SHX,SHY,16,0,6.2832);ctx.fillStyle='#232a48';ctx.fill();
+  if(state==='play')drawBubble(SHX,SHY,R-3,PAL[cur]);
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2.2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  if(tipT>0){
+    ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.globalAlpha=Math.min(1,tipT*2);ctx.fillStyle='#ffd166';
+    ctx.fillText(tip,W/2,320);ctx.globalAlpha=1;
+  }
+}
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  resetGame();state='play';
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

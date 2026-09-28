@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分秒必争</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>分秒必争</h1>
+  <p class="hint">方向键 / WASD 转向 · 触屏滑动 · 60 秒极限快局</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>果实 <b id="fruit">0/15</b></span>
+    <span>剩余 <b id="time">60.0s</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="448" height="448"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">分秒必争</h2>
+      <p id="ovDesc">迷你竞技场 14×14,超快节奏!60 秒内吃满 15 枚果实即刻获胜;时间耗尽或咬到自己则挑战失败。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=14,ROWS=14,CELL=32,W=448,H=448,GOAL=15,LIMIT=60000;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elFruit=$("fruit"),elTime=$("time");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu";
+var snake,dir,queue,food,score,fruits,timeLeft,stepMs,acc,lastT,pulse;
+
+function inSnake(x,y){
+  var i;
+  for(i=0;i<snake.length;i++){if(snake[i].x===x&&snake[i].y===y)return true;}
+  return false;
+}
+function freeCell(){
+  var p;
+  while(true){
+    p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0};
+    if(!inSnake(p.x,p.y))return p;
+  }
+}
+function spawnFood(){food=freeCell();}
+function reset(){
+  snake=[{x:7,y:7},{x:6,y:7},{x:5,y:7}];
+  dir={x:1,y:0};queue=[];
+  score=0;fruits=0;timeLeft=LIMIT;stepMs=95;acc=0;pulse=0;
+  spawnFood();
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elFruit.textContent=fruits+"/"+GOAL;
+  elTime.textContent=Math.max(0,timeLeft/1000).toFixed(1)+"s";
+  elTime.style.color=timeLeft<10000?"#f87171":"#4ade80";
+}
+function queueDir(d){
+  var last=queue.length?queue[queue.length-1]:dir;
+  if(d.x===-last.x&&d.y===-last.y)return;
+  if(d.x===last.x&&d.y===last.y)return;
+  if(queue.length<2)queue.push(d);
+}
+function finish(win,msg){
+  state="over";
+  ovTitle.textContent=win?"挑战成功!":"挑战失败";
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 果实 "+fruits+"/"+GOAL;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h=snake[0];
+  var nh={x:(h.x+dir.x+COLS)%COLS,y:(h.y+dir.y+ROWS)%ROWS};
+  var ate=(nh.x===food.x&&nh.y===food.y);
+  snake.unshift(nh);
+  if(ate){
+    score+=10;
+    fruits++;
+    spawnFood();
+    if(fruits>=GOAL){updateHud();finish(true,"在时限内吃满了 15 枚果实,手速惊人!");return;}
+  }
+  else snake.pop();
+  var i;
+  for(i=1;i<snake.length;i++){
+    if(snake[i].x===nh.x&&snake[i].y===nh.y){
+      finish(false,"疾速之中咬到了自己!");
+      return;
+    }
+  }
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var x,y,i,s;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.035)";
+  for(x=0;x<COLS;x++)for(y=0;y<ROWS;y++){if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);}
+  var pr=8+Math.sin(pulse)*2;
+  ctx.fillStyle="#f87171";
+  ctx.shadowColor="#f87171";ctx.shadowBlur=14;
+  ctx.beginPath();ctx.arc(food.x*CELL+CELL/2,food.y*CELL+CELL/2,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  for(i=snake.length-1;i>=0;i--){
+    s=snake[i];
+    ctx.fillStyle=i===0?"#86efac":"#4ade80";
+    rr(s.x*CELL+2,s.y*CELL+2,CELL-4,CELL-4,7);ctx.fill();
+  }
+  var h=snake[0],cx=h.x*CELL+CELL/2,cy=h.y*CELL+CELL/2;
+  var ex=dir.x*5.5,ey=dir.y*5.5,px=dir.y!==0?5:0,py=dir.x!==0?5:0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(cx+ex-px,cy+ey-py,2.8,0,Math.PI*2);
+  ctx.arc(cx+ex+px,cy+ey+py,2.8,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle=timeLeft<10000?"rgba(248,113,113,0.85)":"rgba(255,255,255,0.25)";
+  ctx.fillRect(0,H-6,W*(Math.max(0,timeLeft)/LIMIT),6);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.006;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;updateHud();finish(false,"时间耗尽!还差 "+(GOAL-fruits)+" 枚果实。");}
+    if(state==="playing"){
+      acc+=dt;
+      var guard=0;
+      while(acc>=stepMs&&state==="playing"&&guard<6){acc-=stepMs;step();guard++;}
+    }
+  }
+  draw();
+}
+function keyDir(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")return{x:0,y:-1};
+  if(k==="ArrowDown"||k==="s"||k==="S")return{x:0,y:1};
+  if(k==="ArrowLeft"||k==="a"||k==="A")return{x:-1,y:0};
+  if(k==="ArrowRight"||k==="d"||k==="D")return{x:1,y:0};
+  return null;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=keyDir(e);
+  if(d){e.preventDefault();queueDir(d);}
+  else if(e.key===" ")e.preventDefault();
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueDir({x:dx>0?1:-1,y:0});
+  else queueDir({x:0,y:dy>0?1:-1});
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

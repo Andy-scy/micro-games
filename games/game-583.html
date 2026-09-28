@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极速还原</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:12px}
+#fill{height:100%;width:100%;background:#4cc9f0;transition:width .2s linear}
+.card{background:#151a30;border-radius:14px;padding:14px;text-align:center}
+#zh{font-size:16px;color:#8ecae6;margin-bottom:12px}
+#slots{display:flex;justify-content:center;gap:8px;min-height:56px;margin-bottom:14px}
+.slot{width:46px;height:52px;border:2px dashed #2a3160;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer;color:#fff}
+.slot.full{border-style:solid;border-color:#4cc9f0;background:#10142a}
+.slot.bad{border-color:#ff6b8a;color:#ff6b8a}
+#pool{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;min-height:56px;margin-bottom:12px}
+.tile{width:46px;height:52px;border:none;border-radius:10px;background:#232a4d;color:#ffd166;font-size:26px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+.tile.used{visibility:hidden}
+.btns{display:flex;gap:10px;justify-content:center}
+.btns button{padding:8px 22px;font-size:14px;border:none;border-radius:999px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit}
+.btns button:active{transform:scale(.95)}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+.ok{animation:pop .35s}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1)}}
+</style>
+</head>
+<body>
+<h1>极速还原</h1>
+<p id="tip">把打乱的字母点回正确顺序拼出单词 · 点槽位可退回字母 · 90 秒内连对越多分越高,卡住可跳过(扣 6 秒)</p>
+<div id="wrap">
+<div id="hud"><span>得分 <b id="score">0</b></span><span>连对 <b id="combo">0</b></span><span>剩余 <b id="time">90</b> 秒</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div class="card">
+<div id="zh"></div>
+<div id="slots"></div>
+<div id="pool"></div>
+<div class="btns"><button id="mixB">重新打乱</button><button id="skipB">跳过 -6秒</button></div>
+</div>
+<div id="ov"><h2 id="ovT">极速还原</h2><p id="ovP">打乱的字母 + 中文释义
+点击字母按正确顺序拼回单词
+90 秒,看你能还原多少个</p><button id="ovB">开始挑战</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  ["apple","苹果"],["bread","面包"],["chair","椅子"],["cloud","云"],["dance","跳舞"],
+  ["dream","梦想"],["eagle","老鹰"],["field","田野"],["grape","葡萄"],["heart","心脏"],
+  ["juice","果汁"],["light","光"],["money","钱"],["night","夜晚"],["ocean","海洋"],
+  ["piano","钢琴"],["queen","女王"],["river","河流"],["snake","蛇"],["sugar","糖"],
+  ["table","桌子"],["voice","声音"],["whale","鲸鱼"],["zebra","斑马"],["beach","海滩"],
+  ["brush","刷子"],["clock","时钟"],["lemon","柠檬"],["mouse","老鼠"],["plant","植物"]
+];
+var TOTAL = 90;
+var zhEl = document.getElementById("zh");
+var slotsEl = document.getElementById("slots");
+var poolEl = document.getElementById("pool");
+var scoreEl = document.getElementById("score");
+var comboEl = document.getElementById("combo");
+var timeEl = document.getElementById("time");
+var fillEl = document.getElementById("fill");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var score = 0, combo = 0, solved = 0;
+var timeLeft = TOTAL, playing = false, lastTs = 0, rafId = 0;
+var cur = null;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function newWord() {
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  var letters = pick[0].split("");
+  var scrambled = letters.slice();
+  var tries = 0;
+  do { shuffle(scrambled); tries++; } while (scrambled.join("") === pick[0] && tries < 20);
+  cur = { word: pick[0], zh: pick[1], pool: [], slots: [] };
+  for (var i = 0; i < scrambled.length; i++) {
+    cur.pool.push({ ch: scrambled[i], used: false });
+    cur.slots.push(-1);
+  }
+  zhEl.textContent = "释义:" + pick[1] + " · " + pick[0].length + " 个字母";
+  render();
+}
+
+function render() {
+  slotsEl.innerHTML = "";
+  poolEl.innerHTML = "";
+  var i;
+  for (i = 0; i < cur.slots.length; i++) {
+    (function (idx) {
+      var d = document.createElement("div");
+      d.className = "slot" + (cur.slots[idx] >= 0 ? " full" : "");
+      if (cur.slots[idx] >= 0) d.textContent = cur.pool[cur.slots[idx]].ch;
+      d.onclick = function () { takeBack(idx); };
+      slotsEl.appendChild(d);
+    })(i);
+  }
+  for (i = 0; i < cur.pool.length; i++) {
+    (function (idx) {
+      var b = document.createElement("button");
+      b.className = "tile" + (cur.pool[idx].used ? " used" : "");
+      b.textContent = cur.pool[idx].ch;
+      b.onclick = function () { place(idx); };
+      poolEl.appendChild(b);
+    })(i);
+  }
+}
+
+function firstEmpty() {
+  for (var i = 0; i < cur.slots.length; i++) if (cur.slots[i] < 0) return i;
+  return -1;
+}
+
+function place(pi) {
+  if (!playing || cur.pool[pi].used) return;
+  var s = firstEmpty();
+  if (s < 0) return;
+  cur.slots[s] = pi;
+  cur.pool[pi].used = true;
+  render();
+  if (firstEmpty() < 0) check();
+}
+
+function takeBack(si) {
+  if (!playing || cur.slots[si] < 0) return;
+  cur.pool[cur.slots[si]].used = false;
+  cur.slots[si] = -1;
+  render();
+}
+
+function check() {
+  var s = "";
+  for (var i = 0; i < cur.slots.length; i++) s += cur.pool[cur.slots[i]].ch;
+  if (s === cur.word) {
+    score += 10 + combo * 2;
+    combo++;
+    solved++;
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    slotsEl.classList.add("ok");
+    setTimeout(function () { slotsEl.classList.remove("ok"); newWord(); }, 350);
+  } else {
+    combo = 0;
+    comboEl.textContent = combo;
+    for (var j = 0; j < cur.slots.length; j++) {
+      var d = slotsEl.children[j];
+      if (d) d.classList.add("bad");
+    }
+    setTimeout(function () {
+      for (var k = 0; k < cur.slots.length; k++) { cur.pool[cur.slots[k]].used = false; cur.slots[k] = -1; }
+      render();
+    }, 500);
+  }
+}
+
+function remix() {
+  if (!playing || !cur) return;
+  var chars = [];
+  for (var i = 0; i < cur.pool.length; i++) chars.push(cur.pool[i].ch);
+  var tries = 0;
+  do { shuffle(chars); tries++; } while (chars.join("") === cur.word && tries < 20 && chars.length > 1);
+  for (var k = 0; k < cur.pool.length; k++) { cur.pool[k].ch = chars[k]; cur.pool[k].used = false; cur.slots[k] = -1; }
+  render();
+}
+
+function skip() {
+  if (!playing) return;
+  timeLeft = Math.max(0.5, timeLeft - 6);
+  combo = 0;
+  comboEl.textContent = combo;
+  newWord();
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    endGame();
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  fillEl.style.width = (timeLeft / TOTAL * 100) + "%";
+  rafId = requestAnimationFrame(loop);
+}
+
+function endGame() {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  ovT.textContent = "时间到!";
+  ovP.textContent = "还原 " + solved + " 个单词\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  score = 0; combo = 0; solved = 0; timeLeft = TOTAL; lastTs = 0;
+  scoreEl.textContent = "0"; comboEl.textContent = "0";
+  playing = true;
+  ov.classList.add("hide");
+  newWord();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+document.getElementById("mixB").onclick = remix;
+document.getElementById("skipB").onclick = skip;
+ovB.onclick = start;
+</script>
+</body>
+</html>

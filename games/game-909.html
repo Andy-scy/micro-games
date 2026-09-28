@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>乒乓对攻</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#66bb6a;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#66bb6a;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#66bb6a;color:#0f2e14;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>乒乓对攻</h1>
+<p class="tip">移动鼠标或手指（←/→ 键）带球拍接球回击 · 球越打越快 · 先得 7 分获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,PS=76,PW=16,BR=9;
+var pP,pV,aP,aV,ball,ps,as,rally,serveT,server,phase,msg,msgT,keys,keyV;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function reset(){
+  pP=W/2;pV=0;aP=W/2;aV=0;ps=0;as=0;rally=0;phase='serve';serveT=0.9;server=Math.random()<0.5?0:1;
+  ball={x:W/2,y:H/2,vx:0,vy:0,spin:0};msg='';msgT=0;keys={};keyV=0;
+}
+function serve(){
+  var dir=server===0?1:-1;
+  ball={x:W/2+rnd(-60,60),y:H/2+dir*40,vx:rnd(-90,90),vy:dir*330,spin:0};
+  rally=0;phase='play';
+}
+function hitPaddle(px,up){
+  var rel=(ball.x-px)/(PS/2);
+  if(rel>1)rel=1;if(rel<-1)rel=-1;
+  var spd=Math.min(940,Math.hypot(ball.vx,ball.vy)*1.045+16);
+  var ang=rel*1.05;
+  ball.vx=Math.sin(ang)*spd+pV*0.35;
+  ball.vy=(up?-1:1)*Math.sqrt(Math.max(spd*spd-ball.vx*ball.vx,spd*spd*0.36));
+  rally++;
+}
+function update(dt){
+  msgT-=dt;
+  if(phase==='serve'){serveT-=dt;if(serveT<=0)serve();}
+  if(phase==='play'){
+    var steps=Math.max(1,Math.ceil(dt/0.005)),sd=dt/steps;
+    for(var s=0;s<steps;s++){
+      ball.x+=ball.vx*sd;ball.y+=ball.vy*sd;
+      if(ball.x<BR){ball.x=BR;ball.vx=Math.abs(ball.vx);}
+      if(ball.x>W-BR){ball.x=W-BR;ball.vx=-Math.abs(ball.vx);}
+      if(ball.vy<0&&ball.y<62+BR&&ball.y>62-PW&&ball.y<80){
+        if(Math.abs(ball.x-aP)<PS/2+BR){ball.y=62+BR;hitPaddle(aP,false);}
+      }
+      if(ball.vy>0&&ball.y>H-62-BR&&ball.y<H-62+PW&&ball.y>H-80){
+        if(Math.abs(ball.x-pP)<PS/2+BR){ball.y=H-62-BR;hitPaddle(pP,true);}
+      }
+      if(ball.y<-30){as++;msgT=1;msg='对方得分 '+(rally>3?'（'+rally+' 板对攻）':'');endCheck();return;}
+      if(ball.y>H+30){ps++;msgT=1;msg='得分！'+(rally>3?'（'+rally+' 板对攻）':'');endCheck();return;}
+    }
+    var d=ball.x+ball.spin*40-aP;
+    var err=(as-ps)*22;
+    if(d>err+6)aV=390;else if(d<err-6)aV=-390;else aV=0;
+    aP+=aV*dt;
+    if(aP<PS/2){aP=PS/2;aV=0;}
+    if(aP>W-PS/2){aP=W-PS/2;aV=0;}
+    if(ball.vy<0)ball.spin+=((aP-ball.x)*0.02-ball.spin)*dt*3;
+  }
+  keyV=0;
+  if(keys.ArrowLeft)keyV-=560;
+  if(keys.ArrowRight)keyV+=560;
+  if(keyV!==0){pV=keyV;pP+=keyV*dt;}
+  else pV*=0.82;
+  if(pP<PS/2){pP=PS/2;if(pV<0)pV=0;}
+  if(pP>W-PS/2){pP=W-PS/2;if(pV>0)pV=0;}
+}
+function endCheck(){
+  ball={x:W/2,y:H/2,vx:0,vy:0,spin:0};
+  if(ps>=7||as>=7){
+    phase='over';
+    ovT.textContent=ps>=7?'胜利！':'惜败';
+    ovX.textContent='最终 '+ps+' : '+as+'，最多 '+rally+' 板对攻'+(ps>=7?'。你的球拍快如闪电！':'。贴边回击能把球打向斜线。');
+    ov.classList.remove('hidden');
+  }else{
+    server=server===0?1:0;
+    phase='serve';serveT=0.9;
+  }
+}
+function drawTable(){
+  ctx.fillStyle='#1b5e20';ctx.fillRect(30,62,W-60,H-124);
+  ctx.fillStyle='#2e7d32';ctx.fillRect(30,62,W-60,H/2-62);
+  ctx.strokeStyle='#e8f5e9';ctx.lineWidth=2;
+  ctx.strokeRect(30,62,W-60,H-124);
+  ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(30,H/2);ctx.lineTo(W-30,H/2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2,62);ctx.lineTo(W/2,H-62);ctx.setLineDash([6,8]);ctx.stroke();ctx.setLineDash([]);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawTable();
+  ctx.fillStyle='#90caf9';ctx.fillRect(aP-PS/2,62-PW/2,PS,PW);
+  ctx.fillStyle='#1e88e5';ctx.fillRect(aP-PS/2+6,62-PW/2+4,PS-12,PW-8);
+  ctx.fillStyle='#a5d6a7';ctx.fillRect(pP-PS/2,H-62-PW/2,PS,PW);
+  ctx.fillStyle='#43a047';ctx.fillRect(pP-PS/2+6,H-62-PW/2+4,PS-12,PW-8);
+  if(phase!=='over'&&!(phase==='serve'&&serveT>0)){
+    ctx.fillStyle='#ffffff';ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,7);ctx.fill();
+    ctx.fillStyle='#ff8a00';ctx.beginPath();ctx.arc(ball.x,ball.y,3.5,0,7);ctx.fill();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='22px system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText(as,W/2,44);
+  ctx.fillText(ps,W/2,H-26);
+  ctx.font='14px system-ui,sans-serif';ctx.fillStyle='#9fa8da';ctx.textAlign='left';
+  ctx.fillText('对攻 '+rally+' 板',14,28);
+  if(phase==='serve'){ctx.fillStyle='#a5d6a7';ctx.textAlign='center';ctx.fillText(server===0?'我方发球…':'对方发球…',W/2,H/2+80);}
+  if(msgT>0){ctx.fillStyle='#ffd54f';ctx.font='18px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,W/2,H/2-60);}
+}
+cv.addEventListener('pointermove',function(e){
+  var r=cv.getBoundingClientRect();
+  var x=(e.clientX-r.left)*(W/r.width);
+  pV=(x-pP)*22;
+  pP=x;
+  if(pP<PS/2)pP=PS/2;if(pP>W-PS/2)pP=W-PS/2;
+});
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='ArrowRight'){keys[e.code]=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){keys[e.code]=false;});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音迹连珠</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#818cf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#818cf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#818cf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#818cf8;color:#10143a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>音迹连珠</h1>
+  <p class="hint">按住并拖动光标,沿蛇形轨迹把音符珠逐个连起来 · 鼠标 / 触屏滑动</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">5</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">音迹连珠</h2>
+      <p id="ovDesc">音符珠按节拍沿蛇形轨道依次亮起并倒数。
+按住鼠标或手指,让光标滑进目标珠:
+在其倒数归零的一瞬扫过它,珠子即被串起!
+提前停在珠上也行,时机一到自动串起;
+漏珠 5 颗游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,BPM=110,beatInt=60000/BPM;
+var R=30,EARLY=270,LATE=230,PERROW=5;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g370");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sLink(per){tone("triangle",per?880:620,per?1320:620,0.12,0.22);}
+function sMiss(){tone("sawtooth",200,100,0.22,0.18);}
+function sTick(){noiseHit(0.035,0.05,8000);}
+
+function nodePos(i){
+  var row=Math.floor(i/PERROW),c=i%PERROW;
+  var x=row%2===0?60+c*90:420-c*90;
+  var y=96+(row%4)*112;
+  return {x:x,y:y};
+}
+var state="menu",nodes,cur,score,combo,life,maxCombo,t0,tickN,nextTick,px,py,holding,pops;
+function reset(){
+  nodes=[];cur=0;
+  score=0;combo=0;life=5;maxCombo=0;
+  t0=performance.now()+1800;
+  tickN=0;nextTick=t0;
+  px=W/2;py=H/2;holding=false;
+  ensureNodes();
+  pops=[];
+  upd();
+}
+function ensureNodes(){
+  while(nodes.length<cur+9){
+    var ai=cur+nodes.length;
+    var p=nodePos(ai);
+    nodes.push({ai:ai,x:p.x,y:p.y,t:t0+ai*beatInt,linked:false,missed:false});
+  }
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g370",best);}
+  upd();
+  ovTitle.textContent="珠链中断";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="串起 "+cur+" 颗音珠 · 最高连击 "+maxCombo+"\n稳住手,一气呵成再来一次!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function checkLink(now){
+  if(!holding||state!=="play")return;
+  var tg=null,i;
+  for(i=0;i<nodes.length;i++){if(nodes[i].ai===cur){tg=nodes[i];break;}}
+  if(!tg)return;
+  var dx=px-tg.x,dy=py-tg.y;
+  if(dx*dx+dy*dy>(R+10)*(R+10))return;
+  var dt=now-tg.t;
+  if(dt<-EARLY)return;
+  if(dt>LATE)return;
+  tg.linked=true;
+  if(Math.abs(dt)<=130){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=250+combo*10;
+    addPop(tg.x,tg.y-46,"完美串珠 +"+(250+combo*10),"#fbbf24");
+  }else{
+    combo++;score+=100;
+    addPop(tg.x,tg.y-46,"串上 +100","#818cf8");
+  }
+  sLink(Math.abs(dt)<=130);
+  cur++;
+  ensureNodes();
+  upd();
+}
+function schedule(now){
+  if(nextTick-now>4000)nextTick=now+200;
+  while(now>=nextTick){tickN++;sTick();nextTick+=beatInt;}
+  var i;
+  for(i=nodes.length-1;i>=0;i--){
+    if(nodes[i].ai<cur-1)nodes.splice(i,1);
+  }
+  ensureNodes();
+}
+function update(now){
+  var i,nd;
+  for(i=0;i<nodes.length;i++){
+    nd=nodes[i];
+    if(nd.ai!==cur||nd.linked)continue;
+    if(now>nd.t+LATE){
+      nd.missed=true;
+      combo=0;life--;sMiss();
+      addPop(nd.x,nd.y-46,"漏珠","#f87171");
+      cur++;
+      ensureNodes();
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>600)pops.splice(i,1);}
+}
+function draw(now){
+  var i,nd,p;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(129,140,248,0.12)";
+  ctx.beginPath();
+  for(i=0;i<nodes.length;i++){
+    nd=nodes[i];
+    if(i===0)ctx.moveTo(nd.x,nd.y);else ctx.lineTo(nd.x,nd.y);
+  }
+  ctx.stroke();
+  var prev=null;
+  for(i=0;i<nodes.length;i++){
+    nd=nodes[i];
+    if(nd.ai<cur-1){prev=nd;continue;}
+    if(nd.linked&&prev){
+      var ldx=nd.x-prev.x,ldy=nd.y-prev.y;
+      if(ldx*ldx+ldy*ldy<40000){
+        ctx.strokeStyle="rgba(129,140,248,0.85)";ctx.lineWidth=3;
+        ctx.beginPath();ctx.moveTo(prev.x,prev.y);ctx.lineTo(nd.x,nd.y);ctx.stroke();
+        ctx.lineWidth=1;
+      }
+    }
+    if(nd.ai>=cur+6)break;
+    var isCur=nd.ai===cur;
+    var dt=nd.t-now;
+    ctx.fillStyle=nd.linked?"rgba(129,140,248,0.9)":(nd.missed?"rgba(100,100,120,0.25)":"rgba(129,140,248,0.2)");
+    ctx.beginPath();ctx.arc(nd.x,nd.y,R,0,Math.PI*2);ctx.fill();
+    if(!nd.linked&&!nd.missed){
+      ctx.strokeStyle=isCur?"#818cf8":"rgba(129,140,248,0.4)";
+      ctx.lineWidth=isCur?3:2;
+      ctx.beginPath();ctx.arc(nd.x,nd.y,R,0,Math.PI*2);ctx.stroke();
+      ctx.lineWidth=1;
+      if(dt<EARLY&&dt>-400&&isCur){
+        var frac=Math.max(0,Math.min(1,(dt+EARLY)/(EARLY+LATE)));
+        ctx.strokeStyle="#fbbf24";ctx.lineWidth=4;
+        ctx.beginPath();
+        ctx.arc(nd.x,nd.y,R+8,-Math.PI/2,-Math.PI/2+frac*Math.PI*2);
+        ctx.stroke();ctx.lineWidth=1;
+      }
+    }
+    ctx.fillStyle=nd.linked?"rgba(10,12,24,0.9)":"rgba(232,234,246,0.85)";
+    ctx.font="bold 16px system-ui";ctx.textAlign="center";
+    ctx.fillText(String(nd.ai+1),nd.x,nd.y+6);
+    prev=nd;
+  }
+  ctx.strokeStyle="rgba(251,191,36,0.8)";
+  ctx.beginPath();ctx.arc(px,py,6,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle="rgba(251,191,36,0.3)";
+  ctx.beginPath();ctx.arc(px,py,16,0,Math.PI*2);ctx.stroke();
+  for(i=0;i<pops.length;i++){
+    p=pops[i];var pr=(now-p.t0)/600;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y-pr*24);
+    ctx.globalAlpha=1;
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+function onDown(cx,cy){
+  var p=toXY(cx,cy);px=p.x;py=p.y;holding=true;
+  checkLink(performance.now());
+}
+function onMove(cx,cy){
+  var p=toXY(cx,cy);px=p.x;py=p.y;
+  checkLink(performance.now());
+}
+function onUp(){holding=false;}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onDown(e.clientX,e.clientY);});
+  cv.addEventListener("pointermove",function(e){onMove(e.clientX,e.clientY);});
+  window.addEventListener("pointerup",onUp);
+}else{
+  cv.addEventListener("mousedown",function(e){onDown(e.clientX,e.clientY);});
+  cv.addEventListener("mousemove",function(e){onMove(e.clientX,e.clientY);});
+  window.addEventListener("mouseup",onUp);
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];onDown(t.clientX,t.clientY);},{passive:false});
+  cv.addEventListener("touchmove",function(e){e.preventDefault();var t=e.changedTouches[0];onMove(t.clientX,t.clientY);},{passive:false});
+  cv.addEventListener("touchend",function(e){e.preventDefault();onUp();},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

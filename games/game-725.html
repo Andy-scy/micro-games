@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>油尽灯枯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:4px}
+#fbar{height:100%;width:100%;background:#51d88a}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>油尽灯枯</h1>
+  <p class="tips">续航挑战:油箱一直在漏,路面的油桶是唯一补给。躲开车流、接住油桶,撑到 1500 米的服务区!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/1500</div></div>
+    <div class="stat"><div class="mut">油量</div><div class="big" id="sf">100%</div></div>
+    <div class="stat"><div class="mut">油桶</div><div class="big" id="sn">0</div></div>
+  </div><div class="bar"><div id="fbar"></div></div></div>
+  <div class="card"><canvas id="cv" width="400" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">油尽灯枯</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 左右移动(触屏拖动)<br>· 油量持续下降,车速越快耗油越猛<br>· 接住<b>黄色油桶</b> +20% 油量<br>· 躲开慢车,追尾即出局<br>· 目标:油箱见底前跑到 1500 米</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=560,TOTAL=1500;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var px,speed,dist,fuel,cansGot,running,stripe,spawnT,canT,dead;
+var cars=[],cans=[],parts=[];
+var keys={};
+var PY=H-100;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;speed=280;dist=0;fuel=100;cansGot=0;stripe=0;spawnT=0.8;canT=1.2;dead=false;
+  cars.length=0;cans.length=0;parts.length=0;
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/1500';
+  $i('sf').textContent=Math.max(0,Math.floor(fuel))+'%';
+  $i('sn').textContent=cansGot;
+  var bar=$i('fbar');
+  bar.style.width=Math.max(0,fuel)+'%';
+  bar.style.background=fuel>40?'#51d88a':(fuel>18?'#ffd166':'#ff5c5c');
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawnCar(){
+  var x=40+Math.random()*(W-80),i;
+  for(i=0;i<cars.length;i++){
+    if(cars[i].y<140&&Math.abs(cars[i].x-x)<90)return;
+  }
+  cars.push({x:x,y:-90,spd:150+Math.random()*70,c:['#4da3ff','#b07cff','#ff9f43','#51d88a'][Math.floor(Math.random()*4)]});
+}
+function spawnCan(){
+  var x=50+Math.random()*(W-100),i;
+  for(i=0;i<cars.length;i++){
+    if(cars[i].y<120&&Math.abs(cars[i].x-x)<70)return;
+  }
+  cans.push({x:x,y:-60});
+}
+function burst(x,y,c){
+  var k;
+  for(k=0;k<8;k++){
+    var an=Math.random()*6.28,s=60+Math.random()*160;
+    parts.push({x:x,y:y,vx:Math.cos(an)*s,vy:Math.sin(an)*s,life:0.5,c:c});
+  }
+}
+function update(dt){
+  speed=Math.min(420,speed+6*dt);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%80;
+  fuel-=(4.5+speed/250)*dt;
+  spawnT-=dt;canT-=dt;
+  if(spawnT<=0){spawnCar();spawnT=1.5+Math.random()*0.9;}
+  if(canT<=0){spawnCan();canT=2.4+Math.random()*0.9;}
+  var st=340;
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  px=Math.max(38,Math.min(W-38,px));
+  var i,c;
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    c.y+=(speed-c.spd)*dt;
+    if(c.y>H+100){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<38&&Math.abs(c.y-PY)<62){
+      endRun('撞车了!','跑到 '+Math.floor(dist)+' m / 1500 m<br>收集油桶 '+cansGot+' 个<br>别为一桶油拼命,绕开再抢!');
+      return;
+    }
+  }
+  for(i=cans.length-1;i>=0;i--){
+    c=cans[i];
+    c.y+=speed*dt;
+    if(c.y>H+60){cans.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<32&&Math.abs(c.y-PY)<50){
+      cans.splice(i,1);cansGot++;
+      fuel=Math.min(100,fuel+20);
+      burst(px,PY-20,'#ffd166');
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(fuel<=0){
+    fuel=0;
+    speed-=300*dt;
+    if(speed<=10){
+      endRun('油尽灯枯','燃料耗尽,滑行到 '+Math.floor(dist)+' m / 1500 m<br>收集油桶 '+cansGot+' 个<br>少踩一脚油,多接一桶油!');
+      return;
+    }
+  }
+  if(dist>=TOTAL){
+    endRun('抵达服务区!','剩余油量 '+Math.floor(fuel)+'%<br>收集油桶 '+cansGot+' 个<br>漂亮的续航管理!');
+    return;
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-20,y-34,40,68,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-15,y-19,30,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-15,y+6,30,17,5);ctx.fill();
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(20,0,W-40,H);
+  ctx.strokeStyle='rgba(255,255,255,.75)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(22,0);ctx.lineTo(22,H);ctx.moveTo(W-22,0);ctx.lineTo(W-22,H);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=3;
+  ctx.setLineDash([26,34]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2-66,0);ctx.lineTo(W/2-66,H);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W/2+66,0);ctx.lineTo(W/2+66,H);ctx.stroke();
+  ctx.setLineDash([]);
+  var i,c;
+  for(i=0;i<cans.length;i++){
+    c=cans[i];
+    ctx.fillStyle='#ffd166';rr(c.x-13,c.y-15,26,30,5);ctx.fill();
+    ctx.fillStyle='#8a6d1a';ctx.fillRect(c.x-5,c.y-21,10,7);
+    ctx.fillStyle='#8a6d1a';ctx.font='bold 13px system-ui';ctx.textAlign='center';
+    ctx.fillText('油',c.x,c.y+5);
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].c);
+  drawCar(px,PY,'#ff5c5c');
+  ctx.fillStyle='#ff3b3b';ctx.fillRect(px-17,PY+28,10,5);ctx.fillRect(px+7,PY+28,10,5);
+  for(i=0;i<parts.length;i++){
+    ctx.globalAlpha=Math.max(0,parts[i].life*2);
+    ctx.fillStyle=parts[i].c;
+    ctx.beginPath();ctx.arc(parts[i].x,parts[i].y,4,0,6.2832);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  if(fuel<18&&running){
+    ctx.fillStyle='rgba(255,60,60,'+(0.4+0.3*Math.sin(Date.now()*0.012))+')';
+    ctx.font='bold 18px system-ui';ctx.textAlign='center';
+    ctx.fillText('油量告急!',W/2,60);
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn&&running)px=Math.max(38,Math.min(W-38,ptrX(e)));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

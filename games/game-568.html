@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掷点爬塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#b892ff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 16px;font-size:14px;background:#b892ff;color:#1c1033;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+#tower{display:flex;flex-direction:column-reverse;gap:4px;max-width:280px;margin:0 auto}
+.lvl{padding:6px 12px;border-radius:8px;background:#232a48;font-size:13px;color:#9aa3c0;display:flex;justify-content:space-between}
+.lvl.me{background:#4a3a75;color:#fff;box-shadow:inset 0 0 0 2px #b892ff}
+.die{position:relative;width:44px;height:44px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#b892ff}
+.mut{color:#9aa3c0;font-size:13px}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#b892ff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>掷点爬塔</h1>
+  <p class="tips">十层古塔,60 回合体力。每层有「门槛」点数:<b>稳步</b>掷 1 骰(门槛-3,失败不动)、<b>攀跳</b>掷 2 骰(达门槛升 1 层,失败跌 1 层)、<b>飞跃</b>掷 2 骰(双 6 直接升 3 层,失败跌 2 层)。登顶越快评价越高!</p>
+  <div class="row">
+    <div class="card" style="flex:1;text-align:center"><div class="mut">当前层</div><div class="big" id="fl">地面</div></div>
+    <div class="card" style="flex:1;text-align:center"><div class="mut">剩余体力</div><div class="big" id="tp">60</div></div>
+  </div>
+  <div class="card"><div id="tower"></div></div>
+  <div class="card" style="text-align:center">
+    <div class="row" id="dice"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="safe">稳步(1 骰)</button>
+      <button class="btn" id="jump">攀跳(2 骰)</button>
+      <button class="btn sec" id="fly">飞跃(双 6)</button>
+    </div>
+  </div>
+  <div class="card log" id="log">脚下是塔底,选择攀爬方式开始登塔!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var floor=0,turns=60,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function thr(f){return Math.min(2+f,10)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function drawDice(arr){
+  var box=$('dice');box.innerHTML='';
+  for(var i=0;i<arr.length;i++){
+    var d=document.createElement('div');d.className='die';setDie(d,arr[i]);box.appendChild(d);
+  }
+}
+function drawTower(){
+  var T=$('tower');T.innerHTML='';
+  for(var l=10;l>=1;l--){
+    var d=document.createElement('div');
+    d.className='lvl'+(l===floor?' me':'');
+    d.innerHTML='<span>第 '+l+' 层</span><span>门槛 '+thr(l-1)+'</span>';
+    T.appendChild(d);
+  }
+  var g=document.createElement('div');
+  g.className='lvl'+(floor===0?' me':'');
+  g.innerHTML='<span>塔底地面</span><span>—</span>';
+  T.appendChild(g);
+  $('fl').textContent=floor===0?'地面':floor+' 层';
+  $('tp').textContent=turns;
+}
+function say(m){$('log').textContent=m}
+function setBtns(on){$('safe').disabled=!on||over;$('jump').disabled=!on||over;$('fly').disabled=!on||over}
+function spend(){
+  turns--;
+  if(floor>=10){finish(true);return true}
+  if(turns<=0){finish(false);return true}
+  drawTower();setBtns(true);
+  return false;
+}
+function animRoll(n,cb){
+  setBtns(false);
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<560){
+      if(t-last>70){last=t;var a=[];for(var i=0;i<n;i++)a.push(rnd());drawDice(a)}
+      requestAnimationFrame(step);
+    }else{
+      var f=[];for(var i=0;i<n;i++)f.push(rnd());
+      drawDice(f);cb(f);
+    }
+  }
+  requestAnimationFrame(step);
+}
+$('safe').onclick=function(){
+  if(over)return;
+  var T=thr(floor);
+  animRoll(1,function(f){
+    var v=f[0];
+    if(v>=T-3){floor++;spend();say('稳步掷出 '+v+' ≥ '+(T-3)+',安然上升!剩 '+turns+' 体力。')}
+    else{spend();say('稳步掷出 '+v+',不足 '+(T-3)+',原地踏步。')}
+  });
+};
+$('jump').onclick=function(){
+  if(over)return;
+  var T=thr(floor);
+  animRoll(2,function(f){
+    var s=f[0]+f[1];
+    if(s>=T){floor++;spend();say('攀跳 '+f[0]+'+'+f[1]+'='+s+' ≥ '+T+',再上一层!')}
+    else{floor=Math.max(0,floor-1);spend();say('攀跳 '+s+' 点不足 '+T+',失足跌落一层!')}
+  });
+};
+$('fly').onclick=function(){
+  if(over)return;
+  animRoll(2,function(f){
+    var s=f[0]+f[1];
+    if(s===12){floor=Math.min(10,floor+3);spend();say('双 6 飞跃!连升三层,塔身都在震颤!')}
+    else{floor=Math.max(0,floor-2);spend();say('飞跃失败('+s+' 点),坠落两层!')}
+  });
+};
+function finish(good){
+  over=true;setBtns(false);drawTower();
+  if(good){
+    var t=turns>=45?'神速登顶!':turns>=35?'稳健登顶!':'成功登顶!';
+    $('ovt').textContent=t;
+    $('ovp').innerHTML='剩余体力 <b>'+turns+'</b>,综合评价:'+(turns>=45?'★★★':turns>=35?'★★☆':'★☆☆')+'<br>再快一点,冲击三星!';
+  }else{
+    $('ovt').textContent='体力耗尽';
+    $('ovp').innerHTML='60 回合过去,你停在第 <b>'+Math.min(floor,10)+'</b> 层。选择比蛮干更重要,再来!';
+  }
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  floor=0;turns=60;over=false;
+  $('overlay').classList.remove('show');
+  drawDice([]);drawTower();setBtns(true);
+  say('新的古塔已就位,开始攀登!');
+};
+drawDice([]);drawTower();setBtns(true);
+</script>
+</body>
+</html>

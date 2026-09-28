@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>汉诺塔</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px;flex-wrap:wrap}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:14px 10px;margin-bottom:12px}
+#pegs{display:flex;justify-content:space-around;gap:8px}
+.peg{width:30%;min-width:90px;display:flex;flex-direction:column;align-items:center;cursor:pointer}
+.base{width:100%;height:10px;background:#3a4470;border-radius:4px;margin-top:2px}
+.pole{width:10px;height:96px;background:#3a4470;border-radius:5px;margin-bottom:-6px}
+.disks{display:flex;flex-direction:column-reverse;justify-content:flex-start;align-items:center;min-height:100px}
+.disk{height:17px;border-radius:8px;margin-bottom:2px;transition:outline .1s}
+.disk.sel{outline:2px solid #ffd668;outline-offset:1px}
+.pegname{color:#8f97c0;font-size:12px;text-align:center;margin-top:6px}
+.pegname b{color:#e8eaf6}
+#msg{text-align:center;min-height:20px;font-size:14px;color:#ff9aa8;margin-bottom:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btn.on{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>汉诺塔</h1>
+<p class="tip">每次移动一根柱顶的盘,大盘不能压在小盘上。<br>把全部盘子移到第三根柱即获胜,试试用最少步数!</p>
+<div class="hud"><span id="hD">盘子 5</span><span id="hM">步数 0</span><span id="hMin">最少 31 步</span><span id="hT">用时 0 秒</span></div>
+<div class="panel">
+  <div id="pegs"></div>
+</div>
+<div id="msg"></div>
+<div class="btnrow">
+  <button class="btn lv" data-n="3">3 盘</button>
+  <button class="btn lv" data-n="4">4 盘</button>
+  <button class="btn lv on" data-n="5">5 盘</button>
+  <button class="btn lv" data-n="6">6 盘</button>
+</div>
+<div class="btnrow"><button class="btn" id="bUndo">撤销</button><button class="btn pri" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const COLORS=["#4f6ef7","#22d3ee","#4ade80","#fbbf24","#f97362","#a78bfa"];
+let n=5,pegs=[],sel=-1,moves=0,sec=0,timer=null,over=false,hist=[];
+const pegsEl=document.getElementById("pegs");
+function buildPegs(){
+  pegsEl.innerHTML="";
+  for(let p=0;p<3;p++){
+    const col=document.createElement("div");col.className="peg";
+    const disks=document.createElement("div");disks.className="disks";disks.id="dk"+p;
+    const pole=document.createElement("div");pole.className="pole";
+    const base=document.createElement("div");base.className="base";
+    const name=document.createElement("div");name.className="pegname";
+    name.innerHTML="点击选盘<br><b>"+["甲","乙","丙"][p]+"柱</b>";
+    col.appendChild(disks);col.appendChild(pole);col.appendChild(base);col.appendChild(name);
+    col.addEventListener("click",()=>clickPeg(p));
+    pegsEl.appendChild(col);
+  }
+}
+function minMoves(k){return Math.pow(2,k)-1;}
+function render(){
+  for(let p=0;p<3;p++){
+    const box=document.getElementById("dk"+p);
+    box.innerHTML="";
+    pegs[p].forEach((size,idx)=>{
+      const d=document.createElement("div");
+      d.className="disk";
+      d.style.width=(34+size*13)+"px";
+      d.style.background=COLORS[(size-1)%COLORS.length];
+      if(sel===p&&idx===pegs[p].length-1)d.classList.add("sel");
+      box.appendChild(d);
+    });
+  }
+}
+function clickPeg(p){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(sel<0){
+    if(!pegs[p].length){msg.textContent="这根柱上没有盘子";return;}
+    sel=p;msg.textContent="";render();return;
+  }
+  if(sel===p){sel=-1;msg.textContent="";render();return;}
+  const d=pegs[sel][pegs[sel].length-1];
+  const top=pegs[p][pegs[p].length-1];
+  if(pegs[p].length&&top<d){msg.textContent="大盘不能压在小盘上";return;}
+  pegs[p].push(pegs[sel].pop());
+  moves++;hist.push([sel,p]);sel=-1;msg.textContent="";
+  updHud();render();
+  if(pegs[2].length===n)winGame();
+}
+function undo(){
+  if(over||!hist.length)return;
+  const m=hist.pop();
+  pegs[m[0]].push(pegs[m[1]].pop());
+  moves=Math.max(0,moves-1);sel=-1;
+  updHud();render();
+}
+function updHud(){
+  document.getElementById("hM").textContent="步数 "+moves;
+  document.getElementById("hD").textContent="盘子 "+n;
+  document.getElementById("hMin").textContent="最少 "+minMoves(n)+" 步";
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function winGame(){
+  over=true;clearInterval(timer);
+  const m=minMoves(n);
+  const rate=(moves===m)?"最优解!":("最少需要 "+m+" 步,你还差 "+(moves-m)+" 步");
+  show("塔已归位!",rate+" · 用时 "+sec+" 秒");
+}
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hT").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(k){
+  if(k)n=k;
+  pegs=[[],[],[]];
+  for(let s=n;s>=1;s--)pegs[0].push(s);
+  sel=-1;moves=0;sec=0;over=false;hist=[];
+  document.getElementById("msg").textContent="";
+  document.getElementById("hT").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  document.querySelectorAll(".lv").forEach(b=>b.classList.toggle("on",parseInt(b.dataset.n,10)===n));
+  updHud();render();startTimer();
+}
+document.querySelectorAll(".lv").forEach(b=>b.addEventListener("click",()=>init(parseInt(b.dataset.n,10))));
+document.getElementById("bUndo").addEventListener("click",undo);
+document.getElementById("bNew").addEventListener("click",()=>init());
+document.getElementById("ovB").addEventListener("click",()=>init());
+document.addEventListener("keydown",e=>{
+  if(e.key==="1")clickPeg(0);
+  else if(e.key==="2")clickPeg(1);
+  else if(e.key==="3")clickPeg(2);
+});
+buildPegs();
+init(5);
+</script>
+</body>
+</html>

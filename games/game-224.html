@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字连线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative}
+#grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.cell{height:58px;background:#11152a;border:1px solid #232849;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#e8eaf6;cursor:pointer;user-select:none}
+.cell:active{transform:scale(.96)}
+.cell.done{background:#14532d;border-color:#166534;color:#bbf7d0;opacity:.55;cursor:default}
+.cell.err{background:#7f1d1d;border-color:#b91c1c;color:#fecaca}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#2e1065;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>数字连线</h1>
+  <p class="hint">按 1 → 20 的顺序尽快点完 · 点错一次罚 2 秒</p>
+  <div class="hud">
+    <span>下一个 <b id="next">1</b></span>
+    <span>用时 <b id="time">0.0s</b></span>
+    <span>罚时 <b id="pen">0.0s</b></span>
+    <span>最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <div id="grid"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">数字连线</h2>
+      <p id="ovDesc">20 个数字被打乱散落在格子里,从 1 开始按顺序一路点到 20,计时越短越强!点错数字罚 2 秒,眼疾手快才是王道。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var grid=$("grid"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elNext=$("next"),elTime=$("time"),elPen=$("pen"),elBest=$("best");
+var KEY="mg_s224";
+var state="menu",nums=[],cells=[],next=1,penalty=0,startAt=0,elapsed=0,errTimer=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseFloat(localStorage.getItem(k));return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildGrid(){
+  var i;
+  for(i=0;i<20;i++){
+    (function(idx){
+      var cell=document.createElement("div");
+      cell.className="cell";
+      cell.addEventListener("pointerdown",function(){pick(idx);});
+      grid.appendChild(cell);
+      cells.push(cell);
+    })(i);
+  }
+}
+function shuffle(){
+  var i,j,tmp;
+  nums=[];
+  for(i=1;i<=20;i++)nums.push(i);
+  for(i=nums.length-1;i>0;i--){
+    j=(Math.random()*(i+1))|0;
+    tmp=nums[i];nums[i]=nums[j];nums[j]=tmp;
+  }
+}
+function updateHud(){
+  elNext.textContent=next<=20?next:"完";
+  elPen.textContent=(penalty/1000).toFixed(1)+"s";
+  elBest.textContent=best>0?best.toFixed(1)+"s":"--";
+}
+function pick(idx){
+  if(state!=="playing")return;
+  var cell=cells[idx];
+  if(nums[idx]===next){
+    cell.classList.add("done");
+    next++;
+    if(next>20)finish();
+  }else{
+    penalty+=2000;
+    cell.classList.add("err");
+    clearTimeout(errTimer);
+    errTimer=setTimeout(function(){cell.classList.remove("err");},260);
+  }
+  updateHud();
+}
+function finish(){
+  state="over";
+  elapsed=performance.now()-startAt+penalty;
+  var total=elapsed/1000;
+  if(best===0||total<best){best=total;saveBest(KEY,best);}
+  ovTitle.textContent="全部连完!";
+  ovDesc.textContent="纯用时 "+((elapsed-penalty)/1000).toFixed(1)+"s · 罚时 "+(penalty/1000).toFixed(1)+"s";
+  ovScore.style.display="block";
+  ovScore.textContent="总用时 "+total.toFixed(1)+" 秒";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){
+  var i;
+  shuffle();
+  for(i=0;i<20;i++){
+    cells[i].textContent=nums[i];
+    cells[i].classList.remove("done");
+    cells[i].classList.remove("err");
+  }
+  next=1;penalty=0;elapsed=0;
+  state="playing";
+  startAt=performance.now();
+  ov.classList.add("hide");
+  updateHud();
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(state!=="playing")return;
+  elapsed=performance.now()-startAt+penalty;
+  elTime.textContent=(elapsed/1000).toFixed(1)+"s";
+}
+buildGrid();
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

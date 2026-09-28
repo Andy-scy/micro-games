@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词义连线</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:12px}
+#fill{height:100%;width:100%;background:#4cc9f0}
+#cols{display:flex;gap:14px;justify-content:center}
+.col{display:flex;flex-direction:column;gap:10px;width:180px}
+.col button{padding:14px 6px;font-size:17px;border:none;border-radius:12px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit;text-align:center}
+.col.l button{font-family:Consolas,monospace;font-weight:bold}
+.col button.sel{background:#4cc9f0;color:#08131c}
+.col button.good{background:#2ec27e;color:#08131c;cursor:default}
+.col button.err{background:#ff6b8a;color:#1a1d33}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:20px;margin-top:12px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.err{animation:shk .35s}
+</style>
+</head>
+<body>
+<h1>词义连线</h1>
+<p id="tip">左边是英文单词 右边是中文释义 · 先点一个词 再点对应释义配对成功即连线 · 连错扣 4 秒,120 秒内连完 3 组</p>
+<div id="wrap">
+<div id="hud"><span>第 <b id="setN">1</b>/3 组</span><span>已配对 <b id="cnt">0</b></span><span>剩余 <b id="time">120</b> 秒</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div id="cols">
+<div class="col l" id="leftCol"></div>
+<div class="col" id="rightCol"></div>
+</div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">词义连线</h2><p id="ovP">把英文单词和中文释义配成对
+每5对一组 共3组
+配错一次扣 4 秒</p><button id="ovB">开始连线</button></div>
+</div>
+<script>
+"use strict";
+var SETS = [
+  [["tiger","老虎"],["ocean","海洋"],["apple","苹果"],["cloud","云"],["piano","钢琴"]],
+  [["river","河流"],["zebra","斑马"],["lemon","柠檬"],["storm","风暴"],["money","钱"]],
+  [["whale","鲸鱼"],["sugar","糖"],["eagle","老鹰"],["bread","面包"],["night","夜晚"]]
+];
+var TOTAL = 120;
+var setNEl = document.getElementById("setN");
+var cntEl = document.getElementById("cnt");
+var timeEl = document.getElementById("time");
+var fillEl = document.getElementById("fill");
+var leftCol = document.getElementById("leftCol");
+var rightCol = document.getElementById("rightCol");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var setIdx = 0, pairs = 0, timeLeft = TOTAL, playing = false, lastTs = 0, rafId = 0;
+var selL = -1, matched = [];
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function renderSet() {
+  var data = SETS[setIdx];
+  var rights = [];
+  for (var i = 0; i < data.length; i++) rights.push(i);
+  shuffle(rights);
+  leftCol.innerHTML = "";
+  rightCol.innerHTML = "";
+  for (var l = 0; l < data.length; l++) {
+    (function (li) {
+      var b = document.createElement("button");
+      b.textContent = data[li][0];
+      b.onclick = function () { pickLeft(li); };
+      leftCol.appendChild(b);
+    })(l);
+  }
+  for (var r = 0; r < data.length; r++) {
+    (function (pos, wordIdx) {
+      var b = document.createElement("button");
+      b.textContent = data[wordIdx][1];
+      b.onclick = function () { pickRight(pos, wordIdx); };
+      rightCol.appendChild(b);
+    })(r, rights[r]);
+  }
+  selL = -1;
+  matched = [];
+  setNEl.textContent = setIdx + 1;
+  cntEl.textContent = pairs;
+}
+
+function markLeft(idx, cls) {
+  leftCol.children[idx].className = cls ? cls : "";
+}
+
+function pickLeft(idx) {
+  if (!playing || matched.indexOf(idx) >= 0) return;
+  selL = idx;
+  for (var i = 0; i < leftCol.children.length; i++) {
+    if (matched.indexOf(i) < 0) leftCol.children[i].className = (i === idx ? "sel" : "");
+  }
+}
+
+function pickRight(pos, wordIdx) {
+  if (!playing || selL < 0) return;
+  var rb = rightCol.children[pos];
+  if (wordIdx === selL) {
+    matched.push(selL);
+    pairs++;
+    markLeft(selL, "good");
+    rb.className = "good";
+    rb.onclick = null;
+    leftCol.children[selL].onclick = null;
+    selL = -1;
+    cntEl.textContent = pairs;
+    msgEl.textContent = "配对成功 +1";
+    if (matched.length === SETS[setIdx].length) {
+      setIdx++;
+      if (setIdx >= SETS.length) {
+        playing = false;
+        cancelAnimationFrame(rafId);
+        var used = Math.round(TOTAL - timeLeft);
+        ovT.textContent = "全部连线!";
+        ovP.textContent = "3 组共 " + pairs + " 对全部配对成功\n用时 " + used + " 秒";
+        ovB.textContent = "再来一局";
+        ov.classList.remove("hide");
+        return;
+      }
+      msgEl.textContent = "进入下一组!";
+      setTimeout(renderSet, 600);
+    }
+  } else {
+    timeLeft = Math.max(0, timeLeft - 4);
+    rb.className = "err";
+    setTimeout(function () {
+      if (rb.className === "err") rb.className = "";
+    }, 400);
+    msgEl.textContent = "配对错误 -4 秒";
+  }
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    playing = false;
+    ovT.textContent = "时间到";
+    ovP.textContent = "完成第 " + setIdx + " 组\n共配对 " + pairs + " 对";
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  fillEl.style.width = (timeLeft / TOTAL * 100) + "%";
+  rafId = requestAnimationFrame(loop);
+}
+
+function start() {
+  setIdx = 0; pairs = 0; timeLeft = TOTAL; lastTs = 0;
+  playing = true;
+  msgEl.textContent = "";
+  ov.classList.add("hide");
+  renderSet();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+ovB.onclick = start;
+</script>
+</body>
+</html>

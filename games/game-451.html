@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>加速环道</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:18px;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#4ade80;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>加速环道</h1>
+  <p class="hint">拖拽反向出杆 · 球滚上箭头加速带会被猛推一把,借加速带绕中央岛一周 · 9 杆内进洞</p>
+  <div class="hud">
+    <span>杆数 <b id="st">0</b>/9</span>
+    <span>标准杆 <b>4</b></span>
+    <span>加速 <b id="bo">0</b> 次</span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">加速环道</h2>
+      <p id="ovDesc">中央矗立着一座圆形岛台,环岛一圈铺了三条单向加速带:滚上去的球会立刻被推向箭头方向并提速。规划路线,借加速带的推力环岛而行,最后把球送进左上角的洞口!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var W=480,H=600,R=8,HR=14,MAXDRAG=170,MAXV=1.05;
+var elSt=$("st"),elBo=$("bo"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s451");
+var state="menu",strokes=0,par=4,limit=9,boN=0;
+var hole={x:70,y:62};
+var ball={x:60,y:518,vx:0,vy:0,move:false};
+var prePos={x:60,y:518};
+var walls=[
+  {x:0,y:0,w:480,h:12},{x:0,y:588,w:480,h:12},{x:0,y:0,w:12,h:600},{x:468,y:0,w:12,h:600},
+  {x:120,y:180,w:240,h:240}
+];
+var pads=[
+  {x:100,y:496,w:220,h:44,dx:1,dy:0,in:false,flash:0},
+  {x:408,y:150,w:44,h:220,dx:0,dy:-1,in:false,flash:0},
+  {x:150,y:40,w:280,h:44,dx:-1,dy:0,in:false,flash:0}
+];
+var aim=false,aimP={x:0,y:0},bounces=0,trail=[],msgT=0;
+function say(t){elMsg.textContent=t;msgT=1800;}
+function circleRect(px,py,r){
+  var cx=Math.max(r.x,Math.min(px,r.x+r.w)),cy=Math.max(r.y,Math.min(py,r.y+r.h));
+  var dx=px-cx,dy=py-cy;
+  return dx*dx+dy*dy<R*R;
+}
+function wallAt(px,py){
+  for(var i=0;i<walls.length;i++){if(circleRect(px,py,walls[i]))return true;}
+  return false;
+}
+function surfaceAt(x,y){return{fr:0.986,rest:0.78};}
+function forces(sdt){}
+function adjustShot(pw){return pw;}
+function onStroke(){}
+function updateHud(){elSt.textContent=strokes;elBo.textContent=boN;}
+function holeCheck(){
+  var dx=hole.x-ball.x,dy=hole.y-ball.y;
+  if(dx*dx+dy*dy<(HR-3)*(HR-3)&&Math.hypot(ball.vx,ball.vy)<0.55){onSunk();return true;}
+  return false;
+}
+function extra(){
+  var i;
+  for(i=0;i<pads.length;i++){
+    var p=pads[i];
+    var inside=ball.x>p.x&&ball.x<p.x+p.w&&ball.y>p.y&&ball.y<p.y+p.h;
+    if(inside&&!p.in){
+      p.in=true;p.flash=320;
+      ball.vx=p.dx*0.9;ball.vy=p.dy*0.9;
+      boN++;updateHud();
+      say("加速带启动!");
+    }else if(!inside)p.in=false;
+  }
+  return holeCheck();
+}
+function onStop(){if(strokes>=limit)doFail();}
+function shoot(dx,dy,pw){
+  pw=adjustShot(pw);
+  strokes++;updateHud();
+  prePos.x=ball.x;prePos.y=ball.y;
+  ball.vx=dx*MAXV*pw;ball.vy=dy*MAXV*pw;
+  ball.move=true;bounces=0;onStroke();
+}
+function sub(sdt){
+  var sf=surfaceAt(ball.x,ball.y);
+  var nx=ball.x+ball.vx*sdt;
+  if(wallAt(nx,ball.y)&&!wallAt(ball.x,ball.y)){ball.vx=-ball.vx*sf.rest;bounces++;}
+  else ball.x=nx;
+  var ny=ball.y+ball.vy*sdt;
+  if(wallAt(ball.x,ny)&&!wallAt(ball.x,ball.y)){ball.vy=-ball.vy*sf.rest;bounces++;}
+  else ball.y=ny;
+  var k=Math.pow(sf.fr,sdt/16.7);
+  ball.vx*=k;ball.vy*=k;
+  forces(sdt);
+  if(extra())return;
+  trail.push({x:ball.x,y:ball.y,l:320});
+  if(trail.length>40)trail.shift();
+  if(Math.hypot(ball.vx,ball.vy)<0.015){ball.vx=0;ball.vy=0;ball.move=false;onStop();}
+}
+function tick(dt){
+  if(!ball.move)return;
+  var sp=Math.hypot(ball.vx,ball.vy);
+  var n=Math.max(1,Math.ceil(sp*dt/4)),sdt=dt/n,i;
+  for(i=0;i<n;i++){sub(sdt);if(!ball.move)break;}
+}
+function anim(dt){
+  var i;
+  for(i=trail.length-1;i>=0;i--){trail[i].l-=dt;if(trail[i].l<=0)trail.splice(i,1);}
+  for(i=0;i<pads.length;i++)if(pads[i].flash>0)pads[i].flash-=dt;
+  if(msgT>0){msgT-=dt;if(msgT<=0)elMsg.textContent="";}
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="play")tick(dt);
+  anim(dt);
+  draw();
+}
+function drawAim(){
+  if(!aim)return;
+  var dx=ball.x-aimP.x,dy=ball.y-aimP.y,d=Math.hypot(dx,dy);
+  if(d<14)return;
+  var pw=Math.min(1,d/MAXDRAG),ux=dx/d,uy=dy/d;
+  var len=30+pw*130,ax=ball.x+ux*len,ay=ball.y+uy*len;
+  ctx.strokeStyle="rgba(240,244,255,0.8)";ctx.lineWidth=3;ctx.setLineDash([7,7]);
+  ctx.beginPath();ctx.moveTo(ball.x+ux*12,ball.y+uy*12);ctx.lineTo(ax,ay);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle="#fbbf24";
+  ctx.beginPath();ctx.moveTo(ax+ux*11,ay+uy*11);ctx.lineTo(ax-uy*6,ay+ux*6);ctx.lineTo(ax+uy*6,ay-ux*6);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=pw>0.85?"#f87171":"#4ade80";ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,14.5,-Math.PI/2,-Math.PI/2+pw*Math.PI*2);ctx.stroke();
+}
+function roundRectPath(x,y,w,h,r){
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);
+}
+function drawPad(p){
+  ctx.fillStyle="rgba(74,222,128,0.16)";
+  roundRectPath(p.x,p.y,p.w,p.h,10);ctx.fill();
+  ctx.strokeStyle=p.flash>0?"#fbbf24":"rgba(74,222,128,0.7)";
+  ctx.lineWidth=p.flash>0?3:2;
+  roundRectPath(p.x,p.y,p.w,p.h,10);ctx.stroke();
+  var cx2=p.x+p.w/2,cy2=p.y+p.h/2,i;
+  ctx.strokeStyle=p.flash>0?"#fbbf24":"#4ade80";
+  ctx.lineWidth=3;
+  for(i=-1;i<2;i++){
+    var ox=cx2+p.dx*i*22-8*Math.abs(p.dy),oy=cy2+p.dy*i*22-8*Math.abs(p.dx);
+    ctx.beginPath();
+    if(p.dx!==0){
+      ctx.moveTo(ox-6*p.dx,oy-8);ctx.lineTo(ox+8*p.dx,oy);ctx.lineTo(ox-6*p.dx,oy+8);
+    }else{
+      ctx.moveTo(ox-8,oy-6*p.dy);ctx.lineTo(ox,oy+8*p.dy);ctx.lineTo(ox+8,oy-6*p.dy);
+    }
+    ctx.stroke();
+  }
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d2b1e";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.025)";
+  for(i=0;i<13;i++)if(i%2===0)ctx.fillRect(12,12+i*45,456,45);
+  ctx.fillStyle="rgba(0,0,0,0.25)";
+  ctx.beginPath();ctx.arc(hole.x,hole.y,HR+5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#050d09";
+  ctx.beginPath();ctx.arc(hole.x,hole.y,HR,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#2f5d46";ctx.lineWidth=2;ctx.stroke();
+  ctx.strokeStyle="#e2e8f0";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(hole.x,hole.y);ctx.lineTo(hole.x,hole.y-36);ctx.stroke();
+  ctx.fillStyle="#f87171";
+  ctx.beginPath();ctx.moveTo(hole.x,hole.y-36);ctx.lineTo(hole.x+22,hole.y-28);ctx.lineTo(hole.x,hole.y-20);ctx.closePath();ctx.fill();
+  ctx.fillStyle="rgba(234,240,255,0.95)";
+  ctx.beginPath();
+  ctx.moveTo(120,180);
+  if(ctx.roundRect)ctx.roundRect(120,180,240,240,18);else ctx.rect(120,180,240,240);
+  ctx.fill();
+  ctx.fillStyle="rgba(90,140,110,0.9)";
+  ctx.font="bold 22px system-ui";ctx.textAlign="center";
+  ctx.fillText("岛台",240,300);
+  ctx.font="13px system-ui";
+  ctx.fillText("绕行",240,330);
+  ctx.textAlign="left";
+  for(i=0;i<walls.length;i++){
+    var w0=walls[i];
+    if(w0.w===240&&w0.h===240)continue;
+    ctx.fillStyle="#39415f";
+    roundRectPath(w0.x,w0.y,w0.w,w0.h,5);ctx.fill();
+    ctx.strokeStyle="#525d85";ctx.lineWidth=1;ctx.stroke();
+  }
+  for(i=0;i<pads.length;i++)drawPad(pads[i]);
+  for(i=0;i<trail.length;i++){
+    var tr=trail[i];
+    ctx.globalAlpha=tr.l/320*0.3;
+    ctx.fillStyle="#e8eaf6";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  drawAim();
+  ctx.fillStyle="#f5f7ff";ctx.shadowColor="#f5f7ff";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,R,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(90,110,160,0.5)";
+  ctx.beginPath();ctx.arc(ball.x-2.5,ball.y-2.5,2.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(200,210,240,0.35)";ctx.font="12px system-ui";
+  ctx.fillText("PAR 4 · 借力环岛",200,570);
+}
+function showOv(title,desc,score,btnText){
+  ovT.textContent=title;ovD.textContent=desc;
+  ovS.style.display=score?"block":"none";ovS.textContent=score||"";
+  btn.textContent=btnText;
+  ov.classList.remove("hide");
+}
+function doFail(){
+  state="over";
+  showOv("杆数用尽","环道没绕明白?下一局先规划好加速带路线!","本局杆数 "+strokes+" · 加速 "+boN+" 次","再来一局");
+}
+function onSunk(){
+  state="win";
+  var diff=strokes-par;
+  var rank=diff<=-2?"风驰电掣!":diff===-1?"小鸟球!":diff===0?"标准杆":diff===1?"柏忌":diff===2?"双柏忌":"+"+diff+" 杆";
+  if(best===0||strokes<best){best=strokes;saveBest("mg_s451",best);}
+  showOv("进洞!","你用 "+strokes+" 杆完成本洞("+rank+"),共触发加速 "+boN+" 次。","本洞 "+strokes+" 杆 · 标准杆 "+par+" · 最少杆数纪录 "+best,"再来一局");
+}
+function evPos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function canAim(){return state==="play"&&!ball.move;}
+function fire(){
+  var dx=ball.x-aimP.x,dy=ball.y-aimP.y,d=Math.hypot(dx,dy);
+  if(d<14)return;
+  shoot(dx/d,dy/d,Math.min(1,d/MAXDRAG));
+}
+cv.addEventListener("mousedown",function(e){if(!canAim())return;aim=true;aimP=evPos(e);e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(aim)aimP=evPos(e);});
+window.addEventListener("mouseup",function(){if(!aim)return;aim=false;fire();});
+cv.addEventListener("touchstart",function(e){if(!canAim())return;aim=true;aimP=evPos(e.touches[0]);e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(aim){aimP=evPos(e.touches[0]);e.preventDefault();}},{passive:false});
+function endTouch(){if(aim){aim=false;fire();}}
+cv.addEventListener("touchend",endTouch);
+cv.addEventListener("touchcancel",endTouch);
+function startGame(){
+  strokes=0;bounces=0;trail.length=0;msgT=0;boN=0;
+  var i;
+  for(i=0;i<pads.length;i++){pads[i].in=false;pads[i].flash=0;}
+  ball.x=60;ball.y=518;ball.vx=0;ball.vy=0;ball.move=false;
+  state="play";ov.classList.add("hide");elMsg.textContent="";
+  updateHud();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

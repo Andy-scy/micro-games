@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右分流</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>左右分流</h1>
+  <p class="hint">亮点出现在哪半边,就按哪边:← / A 或 → / D · 触屏点对应半区</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="streak">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">左右分流</h2>
+      <p id="ovDesc">亮点会随机闪现在左半边或右半边,立即按对应方向键(触屏点对应半区)。反应窗口会越缩越短,按错或超时扣一次机会,3 次机会用完即败!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=300,KEY="mg_s223";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elStreak=$("streak"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,streak=0,correct=0,lives=3,signal=null,nextAt=0;
+var flashSide=-1,flashUntil=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function windowMs(){return Math.max(450,1000-correct*22);}
+function spawn(t){
+  var side=Math.random()<0.5?0:1;
+  signal={side:side,x:side===0?60+Math.random()*120:300+Math.random()*120,y:80+Math.random()*170,born:t};
+}
+function updateHud(){
+  elScore.textContent=score;elStreak.textContent=streak;elLives.textContent=lives;elBest.textContent=best;
+}
+function fail(t,side){
+  lives--;streak=0;
+  flashSide=side;flashUntil=t+300;
+  signal=null;
+  if(lives<=0){
+    state="over";
+    if(score>best){best=score;saveBest(KEY,best);}
+    ovTitle.textContent="游戏结束";
+    ovDesc.textContent="成功分流 "+correct+" 次";
+    ovScore.style.display="block";
+    ovScore.textContent="得分 "+score+" · 最佳 "+best;
+    btnGo.textContent="再来一局";
+    ov.classList.remove("hide");
+  }else{
+    nextAt=t+520;
+  }
+  updateHud();
+}
+function input(side){
+  if(state!=="playing")return;
+  var t=performance.now();
+  if(!signal)return;
+  if(side===signal.side){
+    correct++;streak++;
+    score+=10+(streak>=5?5:0);
+    signal=null;
+    nextAt=t+260;
+  }else{
+    fail(t,side);
+  }
+  updateHud();
+}
+function drawArrow(cx,cy,dir,col){
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  if(dir<0){ctx.moveTo(cx-14,cy);ctx.lineTo(cx+10,cy-13);ctx.lineTo(cx+10,cy+13);}
+  else{ctx.moveTo(cx+14,cy);ctx.lineTo(cx-10,cy-13);ctx.lineTo(cx-10,cy+13);}
+  ctx.closePath();ctx.fill();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#232849";
+  ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(W/2,20);ctx.lineTo(W/2,H-20);ctx.stroke();
+  ctx.setLineDash([]);
+  drawArrow(120,44,-1,"#3b457c");
+  drawArrow(360,44,1,"#3b457c");
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.16)";
+    if(flashSide===0)ctx.fillRect(0,0,W/2,H);
+    else ctx.fillRect(W/2,0,W/2,H);
+  }
+  if(signal){
+    var s=signal,frac=1-(t-s.born)/windowMs();
+    if(frac<0)frac=0;
+    ctx.beginPath();ctx.arc(s.x,s.y,16,0,Math.PI*2);
+    ctx.fillStyle="#38bdf8";ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,26,-Math.PI/2,-Math.PI/2+Math.PI*2*frac);
+    ctx.strokeStyle=frac>0.35?"#4ade80":"#f87171";
+    ctx.lineWidth=5;ctx.stroke();ctx.lineWidth=1;
+  }else if(state==="playing"){
+    ctx.fillStyle="#3b457c";
+    ctx.font="14px system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("准备…",W/2,H/2);
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state==="playing"){
+    if(!signal&&t>=nextAt)spawn(t);
+    if(signal&&t-signal.born>windowMs())fail(t,signal.side);
+  }
+  draw(t);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function onTap(e){
+  var p=pos(e);
+  input(p.x<W/2?0:1);
+}
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onTap(e);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();input(0);}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();input(1);}
+});
+function startGame(){
+  score=0;streak=0;correct=0;lives=3;signal=null;
+  nextAt=performance.now()+500;
+  state="playing";
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

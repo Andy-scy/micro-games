@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>激流回旋</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>激流回旋</h1>
+<p class="tip">这不是格子跳跃,而是真·游泳!按住方向键持续划水,水流会把你左右冲偏,<br>漩涡会把你螺旋吸入——被卷进中心就完了。躲开礁石,一路游到对岸!按住越久游越快。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>关卡 <b id="sC">1</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=420,H=560,TOP=44,BOT=508;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sC=document.getElementById("sC");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var bands,whirls,rocks,frog,score,lives,level,deadT,state,gt=0;
+var keys={up:false,down:false,left:false,right:false};
+function rnd(a,b){return a+Math.random()*(b-a);}
+function buildLevel(){
+  bands=[];var i;
+  for(i=0;i<12;i++)bands.push((i%2===0?1:-1)*(46+level*7+(i%3)*16));
+  whirls=[];
+  for(i=0;i<3;i++)whirls.push({x:rnd(70,350),y:rnd(110,440),R:52,ph:rnd(0,6)});
+  rocks=[];
+  for(i=0;i<4;i++)rocks.push({x:rnd(40,380),y:rnd(80,470),r:rnd(15,22)});
+}
+function resetFrog(){frog={x:210,y:540,vx:0,vy:0};}
+function updHud(){sS.textContent=score;sL.textContent=lives;sC.textContent=level;}
+function reset(){score=0;lives=3;level=1;deadT=0;buildLevel();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.8;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",游到第 "+level+" 关。");}
+}
+function cross(){
+  score+=200+level*30;level++;
+  buildLevel();resetFrog();updHud();
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var ax=0,ay=0;
+  if(keys.left)ax-=430;
+  if(keys.right)ax+=430;
+  if(keys.up)ay-=430;
+  if(keys.down)ay+=430;
+  frog.vx+=ax*dt;frog.vy+=ay*dt;
+  if(frog.y>TOP&&frog.y<BOT){
+    var bi=Math.max(0,Math.min(11,Math.floor((frog.y-TOP)/40)));
+    frog.vx+=bands[bi]*dt*0.9;
+  }
+  var i,w,dx,dy,dist,k;
+  for(i=0;i<whirls.length;i++){
+    w=whirls[i];
+    w.x+=Math.sin(gt*0.4+w.ph)*8*dt;
+    dx=frog.x-w.x;dy=frog.y-(w.y);dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist<w.R&&dist>0.01){
+      k=1-dist/w.R;
+      frog.vx+=((-dy/dist)*175-(dx/dist)*95)*k*dt;
+      frog.vy+=((dx/dist)*175-(dy/dist)*95)*k*dt;
+      if(dist<16){die("被漩涡卷进深处!");return;}
+    }
+  }
+  for(i=0;i<rocks.length;i++){
+    var rk=rocks[i];
+    dx=frog.x-rk.x;dy=frog.y-rk.y;dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist<rk.r+10&&dist>0.01){
+      var nx=dx/dist,ny=dy/dist;
+      frog.x=rk.x+nx*(rk.r+10);frog.y=rk.y+ny*(rk.r+10);
+      var vd=frog.vx*nx+frog.vy*ny;
+      frog.vx-=1.6*vd*nx;frog.vy-=1.6*vd*ny;
+    }
+  }
+  var drag=Math.max(0,1-2.1*dt);
+  frog.vx*=drag;frog.vy*=drag;
+  frog.x+=frog.vx*dt;frog.y+=frog.vy*dt;
+  if(frog.x<12){frog.x=12;frog.vx*=-0.4;}
+  if(frog.x>408){frog.x=408;frog.vx*=-0.4;}
+  if(frog.y>530){frog.y=530;frog.vy*=-0.4;}
+  if(frog.y<34){cross();return;}
+}
+function draw(){
+  var i,j,g;
+  g=ctx.createLinearGradient(0,TOP,0,BOT);
+  g.addColorStop(0,"#1b3f74");g.addColorStop(1,"#12305c");
+  ctx.fillStyle=g;ctx.fillRect(0,TOP,420,BOT-TOP);
+  ctx.fillStyle="#1e3b26";ctx.fillRect(0,0,420,TOP);ctx.fillRect(0,BOT,420,H-BOT);
+  ctx.fillStyle="#2c5a37";
+  for(i=0;i<9;i++){ctx.fillRect(i*52+6,TOP-6,36,6);ctx.fillRect(i*52+22,H-6,36,6);}
+  for(i=0;i<12;i++){
+    var fl=bands[i],ay2=TOP+i*40+22;
+    ctx.strokeStyle="rgba(140,200,255,.28)";ctx.lineWidth=2;
+    for(j=0;j<4;j++){
+      var ax=((j*110+i*47+gt*fl*0.55)%460+460)%460-20;
+      ctx.beginPath();
+      if(fl>0){ctx.moveTo(ax,ay2-5);ctx.lineTo(ax+10,ay2);ctx.lineTo(ax,ay2+5);}
+      else{ctx.moveTo(ax+10,ay2-5);ctx.lineTo(ax,ay2);ctx.lineTo(ax+10,ay2+5);}
+      ctx.stroke();
+    }
+  }
+  for(i=0;i<whirls.length;i++){
+    var w2=whirls[i];
+    ctx.save();
+    ctx.translate(w2.x,w2.y);
+    ctx.rotate(gt*3+w2.ph);
+    ctx.strokeStyle="rgba(190,120,255,.85)";ctx.lineWidth=3;
+    for(j=0;j<3;j++){
+      ctx.beginPath();ctx.arc(0,0,w2.R*(0.35+j*0.28),j*2.1,j*2.1+4.2);ctx.stroke();
+    }
+    ctx.fillStyle="rgba(30,10,60,.8)";
+    ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  for(i=0;i<rocks.length;i++){
+    var rk=rocks[i];
+    ctx.fillStyle="#565f74";
+    ctx.beginPath();ctx.arc(rk.x,rk.y,rk.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#767f96";
+    ctx.beginPath();ctx.arc(rk.x-rk.r*0.3,rk.y-rk.r*0.3,rk.r*0.5,0,Math.PI*2);ctx.fill();
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="rgba(120,220,255,.25)";
+    ctx.beginPath();ctx.arc(frog.x-frog.vx*0.06,frog.y-frog.vy*0.06,9,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y,11,13,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-5,frog.y-8,4.5,0,Math.PI*2);ctx.arc(frog.x+5,frog.y-8,4.5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,210,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」下水",210,260);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("按住方向持续游动 · 箭头=水流 · 紫圈=漩涡",210,290);
+    ctx.fillText("漩涡会把您螺旋吸入,小心!",210,312);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();keys[k]=true;}});
+window.addEventListener("keyup",function(e){var k=KM[e.key];if(k)keys[k]=false;});
+window.addEventListener("blur",function(){keys.up=false;keys.down=false;keys.left=false;keys.right=false;});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){
+    var k=b.getAttribute("data-k");
+    function on(e){e.preventDefault();keys[k]=true;}
+    function off(){keys[k]=false;}
+    b.addEventListener("pointerdown",on);
+    b.addEventListener("pointerup",off);
+    b.addEventListener("pointerleave",off);
+    b.addEventListener("pointercancel",off);
+  })(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("激流回旋","全系列唯一的「自由泳」关卡:按住方向键持续划水,对抗横向水流与漩涡的螺旋吸力,绕开礁石游到对岸。每一关水流更急。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

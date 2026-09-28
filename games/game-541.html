@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>二十一点 对决荷官</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 14px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:760px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;min-height:78px}
+.card{width:52px;height:76px;border-radius:8px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.45);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:16px;font-weight:800}
+.card .s{font-size:26px;line-height:1.05}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>二十一点 · 对决荷官</h1>
+<p id="how">先押注,再「要牌」凑点;超过 21 点即爆。A 可作 1 或 11,荷官不到 17 点必须补牌。筹码达到 200 即胜利,归零则失败。</p>
+<div id="bar"><span>筹码 <b id="chips">100</b></span><span>本局押注 <b id="betv">0</b></span><span>胜利目标 200</span></div>
+<div id="table">
+  <div class="lab">荷官 <span id="dt"></span></div>
+  <div class="row" id="drow"></div>
+  <div class="lab">你的手牌 <span id="pt"></span></div>
+  <div class="row" id="prow"></div>
+  <div id="msg"></div>
+  <div id="btns">
+    <button id="b10">押 10</button><button id="b25">押 25</button><button id="b50">押 50</button><button id="bclr">清零</button>
+    <button id="deal" class="acc">发牌</button>
+    <button id="hit" disabled>要牌</button><button id="stand" disabled>停牌</button><button id="dbl" disabled>加倍</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],player=[],dealer=[],chips=100,bet=0,phase='bet',reveal=false,timer=null;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function draw(){if(deck.length<6)refill();return deck.pop();}
+function total(h){var t=0,a=0;for(var i=0;i<h.length;i++){var c=h[i];if(c.r==='A'){t+=11;a++;}else if(c.r==='J'||c.r==='Q'||c.r==='K'){t+=10;}else{t+=parseInt(c.r,10);}}while(t>21&&a>0){t-=10;a--;}return t;}
+function cardHTML(c,back){
+  if(back)return '<div class="card back"><span class="r">·</span><span class="s">·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('chips').textContent=chips;$('betv').textContent=bet;
+  var dh='';for(var i=0;i<dealer.length;i++)dh+=cardHTML(dealer[i],(i===1&&!reveal));
+  $('drow').innerHTML=dh;
+  $('dt').textContent=dealer.length===0?'':(reveal||dealer.length<2?('点数 '+total(dealer)):('明牌 '+total([dealer[0]])));
+  var ph='';for(var k=0;k<player.length;k++)ph+=cardHTML(player[k],false);
+  $('prow').innerHTML=ph;
+  $('pt').textContent=player.length===0?'':('点数 '+total(player));
+  var canBet=(phase==='bet');
+  $('b10').disabled=$('b25').disabled=$('b50').disabled=!canBet;
+  $('bclr').disabled=!canBet;
+  $('deal').disabled=!canBet||bet<=0;
+  $('hit').disabled=$('stand').disabled=(phase!=='play');
+  $('dbl').disabled=!(phase==='play'&&player.length===2&&chips>=bet);
+}
+function msg(s){$('msg').textContent=s;}
+function setBet(n){if(phase!=='bet')return;if(bet+n>chips)bet=chips;else bet+=n;render();}
+function afterHand(txt){
+  msg(txt);
+  if(chips>=200){end(true,'筹码达到 '+chips+'，达成 200 目标！');return;}
+  if(chips<=0){end(false,'筹码归零，被荷官清场');return;}
+  phase='bet';bet=0;reveal=false;player=[];dealer=[];render();
+}
+function deal(){
+  if(phase!=='bet'||bet<=0)return;
+  chips-=bet;player=[];dealer=[];reveal=false;phase='play';
+  player.push(draw());dealer.push(draw());player.push(draw());dealer.push(draw());
+  msg('要牌还是停牌？');
+  if(total(player)===21){reveal=true;render();timer=setTimeout(dealerTurn,500);return;}
+  render();
+}
+function hit(){if(phase!=='play')return;player.push(draw());if(total(player)>21){afterHand('爆牌！失去 '+bet+' 筹码');}else{msg('继续要牌或停牌');}render();}
+function stand(){if(phase!=='play')return;dealerTurn();}
+function dbl(){
+  if(!(phase==='play'&&player.length===2&&chips>=bet))return;
+  chips-=bet;bet*=2;player.push(draw());
+  if(total(player)>21){render();afterHand('加倍后爆牌！失去 '+bet+' 筹码');}else{dealerTurn();}
+  render();
+}
+function dealerTurn(){
+  phase='dealer';reveal=true;render();step();
+}
+function step(){
+  if(total(dealer)<17){dealer.push(draw());render();timer=setTimeout(step,600);}
+  else{settle();}
+}
+function settle(){
+  var p=total(player),d=total(dealer);
+  if(p>21){afterHand('爆牌，荷官胜');return;}
+  if(d>21||p>d){
+    chips+=bet*2;var txt='你赢了 +'+bet+'！';
+    if(player.length===2&&p===21){chips+=Math.floor(bet/2);txt='黑杰克！3:2 赔付 +'+(bet+Math.floor(bet/2))+'！';}
+    afterHand(txt);return;
+  }
+  if(p===d){chips+=bet;afterHand('平局，押注退回');return;}
+  afterHand('荷官 '+d+' 点压过你的 '+p+' 点，失去 '+bet);
+}
+function end(win,info){
+  phase='done';if(timer){clearTimeout(timer);timer=null;}
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终筹码：'+Math.max(0,chips);
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(timer){clearTimeout(timer);timer=null;}
+  refill();player=[];dealer=[];chips=100;bet=0;phase='bet';reveal=false;
+  $('over').classList.add('hide');msg('请押注后点「发牌」');render();
+}
+$('b10').onclick=function(){setBet(10);};
+$('b25').onclick=function(){setBet(25);};
+$('b50').onclick=function(){setBet(50);};
+$('bclr').onclick=function(){if(phase==='bet'){bet=0;render();}};
+$('deal').onclick=deal;
+$('hit').onclick=hit;
+$('stand').onclick=stand;
+$('dbl').onclick=dbl;
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

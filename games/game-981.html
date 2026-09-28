@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>泡泡纸治愈屋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#7dd3fc;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#7dd3fc}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#7dd3fc;color:#082f49;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>泡泡纸治愈屋</h1>
+  <p class="hint">按住并划过泡泡即可捏破 · 捏完整张自动换新 · 连捏三张即圆满</p>
+  <div class="hud">
+    <span>张数 <b id="hSheet">1</b>/3</span>
+    <span>本张剩余 <b id="hLeft">104</b></span>
+    <span>累计 <b id="hTotal">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">泡泡纸治愈屋</h2>
+      <p id="ovD"></p>
+      <div class="big" id="ovB" style="display:none"></div>
+      <button id="btnGo">开始捏泡泡</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hSheet=$("hSheet"),hLeft=$("hLeft"),hTotal=$("hTotal");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo");
+var W=470,H=310,TAU=Math.PI*2;
+var PALS=[["#7dd3fc","#bae6fd"],["#fda4af","#fecdd3"],["#fcd34d","#fde68a"]];
+var bubbles=[],fx=[],sheet=1,total=0,left=104,state="menu",pressing=false,time=0;
+var ac=null;
+function beep(f,d,v){try{
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+  var o=ac.createOscillator(),g=ac.createGain();
+  o.type="sine";o.frequency.value=f;g.gain.value=v||0.05;
+  g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+d);
+  o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d);
+}catch(e){}}
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function buildSheet(){
+  bubbles=[];var c,r;
+  for(r=0;r<8;r++)for(c=0;c<13;c++){
+    bubbles.push({x:21+c*34,y:26+r*34,r:13,alive:true,pop:0,sh:Math.random()*TAU});
+  }
+  left=104;hLeft.textContent=left;
+}
+function popAt(p){
+  var i,b;
+  for(i=0;i<bubbles.length;i++){b=bubbles[i];
+    if(!b.alive)continue;
+    var dx=b.x-p.x,dy=b.y-p.y,rr=(b.r+7)*(b.r+7);
+    if(dx*dx+dy*dy<rr){
+      b.alive=false;b.pop=1;left--;total++;
+      hLeft.textContent=left;hTotal.textContent=total;
+      beep(330+Math.random()*420,0.07,0.045);
+      if(total===100)addFx(235,90,"指尖生花 · 百颗","#fbbf24");
+      if(total===200)addFx(235,90,"渐入佳境 · 两百","#7dd3fc");
+      if(total===300)addFx(235,90,"心手如一 · 三百","#fda4af");
+      if(left<=0){sheetDone();return;}
+    }
+  }
+}
+function sheetDone(){
+  state="done";
+  if(sheet<3){
+    ovT.textContent="第 "+sheet+" 张 · 捏完";
+    ovD.textContent="本张 104 颗尽数化泡,累计 "+total+" 颗。\n深呼吸,还有 "+(3-sheet)+" 张。";
+    btnGo.textContent="换下一张";
+  }else{
+    ovT.textContent="禅心圆满";
+    ovD.textContent="三张泡泡纸尽数捏完,累计 "+total+" 颗。\n噼啪声落,心也静了。";
+    btnGo.textContent="再来一次";
+  }
+  ov.classList.remove("hide");
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;popAt(ptr(e));}
+function mv(e){if(!pressing||state!=="play")return;e.preventDefault();popAt(ptr(e));}
+function up(){pressing=false;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+btnGo.addEventListener("click",function(){
+  if(left<=0){
+    if(sheet>=3){sheet=1;total=0;hTotal.textContent="0";}
+    else sheet++;
+    hSheet.textContent=sheet;
+    buildSheet();
+  }
+  state="play";ov.classList.add("hide");
+});
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var pal=PALS[sheet-1],i,b;
+  for(i=0;i<bubbles.length;i++){b=bubbles[i];
+    if(b.alive){
+      var r2=b.r+Math.sin(time*2+b.sh)*0.5;
+      ctx.fillStyle=pal[i%2];
+      ctx.beginPath();ctx.arc(b.x,b.y,r2,0,TAU);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,.35)";
+      ctx.beginPath();ctx.arc(b.x-r2*0.32,b.y-r2*0.35,r2*0.28,0,TAU);ctx.fill();
+      ctx.strokeStyle="rgba(255,255,255,.16)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(b.x,b.y,r2,0,TAU);ctx.stroke();
+    }else if(b.pop>0){
+      b.pop-=0.045;
+      ctx.strokeStyle="rgba(186,230,253,"+(b.pop*0.8).toFixed(3)+")";ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(b.x,b.y,(1-b.pop)*20+8,0,TAU);ctx.stroke();
+      ctx.fillStyle="rgba(255,255,255,.05)";
+      ctx.beginPath();ctx.arc(b.x,b.y,7,0,TAU);ctx.fill();
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.t-=0.01;
+    if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*30);ctx.globalAlpha=1;}
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  time=t/1000;
+  draw();
+}
+function showMenu(){
+  ovT.textContent="泡泡纸治愈屋";
+  ovD.textContent="一张铺满泡泡的气泡纸,按住拖过即可逐颗捏破,伴随轻响。\n捏完整张自动换新,连捏三张即达圆满。\n无失败、无计时,只有指尖的节奏。";
+  btnGo.textContent="开始捏泡泡";
+  ov.classList.remove("hide");
+}
+buildSheet();
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

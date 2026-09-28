@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多米诺连锁</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f97316;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f97316;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.ctrl{display:flex;gap:10px;justify-content:center;margin-top:10px}
+.ctrl button{background:#f97316;color:#3a1a04;border:none;border-radius:10px;padding:9px 22px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+.ctrl button:disabled{opacity:.4;cursor:default}
+.ctrl button:active{transform:scale(.96)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f97316}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#f97316;color:#3a1a04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>多米诺连锁</h1>
+  <p class="hint">点击空槽放置骨牌(库存有限)· 点已放的收回 · 排好后点「开始滚球」</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>库存 <b id="inv">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">多米诺连锁</h2>
+      <p id="ovDesc">小球从坡顶滚下会一路减速,撞倒骨牌才能获得加速。点击空槽放下有限库存的骨牌,借连锁推力把球送到终点铜钟。注意:岩石会刮擦减速小球,且挡断连锁!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div class="ctrl">
+    <button id="btnRun">开始滚球</button>
+    <button id="btnClear">重新摆放</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,GY=440,FR=0.00016,BR=9,BELL=446;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elInv=$("inv"),elLives=$("lives"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btnGo=$("btnGo");
+var btnRun=$("btnRun"),btnClear=$("btnClear");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s383");
+var LEVELS=[
+ {rocks:[3],pre:[0,1,5,8],inv:3},
+ {rocks:[2,6],pre:[0,4,8],inv:4},
+ {rocks:[1,4,7],pre:[0,8],inv:5}
+];
+var state,lv,score,lives,inv,slots,ball,msg,msgT,chainN;
+function slotX(i){return 90+i*40;}
+function reset(){lv=0;score=0;lives=3;loadLevel();}
+function loadLevel(){
+  var L=LEVELS[lv],i;
+  slots=[];
+  for(i=0;i<9;i++){
+    var t="empty";
+    if(L.rocks.indexOf(i)>=0)t="rock";
+    else if(L.pre.indexOf(i)>=0)t="full";
+    slots.push({type:t,state:t,player:false,toppleT:0,chained:false,scraped:false});
+  }
+  inv=L.inv;
+  ball={x:20,y:GY-BR,vx:0,rot:0};
+  chainN=0;state="placing";
+  elLv.textContent=lv+1;updateHud();
+  btnRun.disabled=false;btnClear.disabled=false;
+}
+function updateHud(){
+  elInv.textContent=inv;elLives.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+}
+function resetRun(){
+  var i;
+  for(i=0;i<slots.length;i++){slots[i].toppleT=0;slots[i].chained=false;slots[i].scraped=false;}
+  ball={x:20,y:GY-BR,vx:0,rot:0};chainN=0;
+}
+function topple(i,byBall){
+  var s=slots[i];
+  s.toppleT=0.001;score+=15;chainN++;
+  if(byBall)ball.vx=Math.min(0.42,ball.vx+0.07);
+  if(chainN===3){msg="连锁 x3!";msgT=1000;}
+  if(chainN===5){msg="连锁 x5 精彩!";msgT=1000;}
+  updateHud();
+}
+function winRun(){
+  score+=150;msg="叮!铜钟敲响 +150";msgT=1400;
+  btnRun.disabled=true;btnClear.disabled=true;
+  if(lv<LEVELS.length-1){
+    score+=100;state="transition";
+    window.setTimeout(function(){if(state==="transition"){lv++;loadLevel();}},1200);
+  }else{
+    score+=100;finish(true,"三关全部敲响铜钟,连锁大师!");
+  }
+  updateHud();
+}
+function failRun(){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"机会用尽,小球停在了半路…");return;}
+  msg="球停住了!调整骨牌再试 · 机会剩 "+lives;msgT=1600;
+  resetRun();state="placing";
+  btnRun.disabled=false;btnClear.disabled=false;
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s383",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="placing";ov.classList.add("hide");}
+btnGo.addEventListener("click",startGame);
+btnRun.addEventListener("click",function(){
+  if(state!=="placing")return;
+  ball.vx=0.30;state="rolling";
+  btnRun.disabled=true;btnClear.disabled=true;
+});
+btnClear.addEventListener("click",function(){
+  if(state!=="placing")return;
+  var i;
+  for(i=0;i<slots.length;i++){
+    if(slots[i].player){slots[i].state="empty";slots[i].player=false;inv++;}
+  }
+  updateHud();
+});
+cv.addEventListener("mousedown",function(e){
+  if(state!=="placing")return;
+  var r=cv.getBoundingClientRect(),p=e;
+  var px=(p.clientX-r.left)*W/r.width,py=(p.clientY-r.top)*H/r.height;
+  var i;
+  for(i=0;i<9;i++){
+    var sx=slotX(i),s=slots[i];
+    if(Math.abs(px-sx)<=18&&py>390&&py<GY+4){
+      if(s.type!=="empty")continue;
+      if(s.state==="empty"&&inv>0){s.state="full";s.player=true;inv--;}
+      else if(s.state==="full"&&s.player){s.state="empty";s.player=false;inv++;}
+      updateHud();break;
+    }
+  }
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing"&&state!=="placing")return;
+  var t=e.changedTouches[0],r=cv.getBoundingClientRect();
+  var px=(t.clientX-r.left)*W/r.width,py=(t.clientY-r.top)*H/r.height;
+  if(state!=="placing")return;
+  var i;
+  for(i=0;i<9;i++){
+    var sx=slotX(i),s=slots[i];
+    if(Math.abs(px-sx)<=18&&py>390&&py<GY+4){
+      if(s.type!=="empty")continue;
+      if(s.state==="empty"&&inv>0){s.state="full";s.player=true;inv--;}
+      else if(s.state==="full"&&s.player){s.state="empty";s.player=false;inv++;}
+      updateHud();break;
+    }
+  }
+  e.preventDefault();
+},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&(state==="menu"||state==="over")){e.preventDefault();startGame();}
+});
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="rolling"){
+    var i;
+    ball.vx=Math.max(0,ball.vx-FR*dt);
+    ball.x+=ball.vx*dt;ball.rot+=ball.vx*dt/BR;
+    for(i=0;i<slots.length;i++){
+      var sx=slotX(i),s=slots[i];
+      if(s.state==="full"&&s.type!=="rock"&&s.toppleT===0&&ball.x+BR>=sx-6&&ball.x<sx+30)topple(i,true);
+      if(s.type==="rock"&&!s.scraped&&ball.x+BR>=sx-10&&ball.x<sx+16){
+        s.scraped=true;ball.vx*=0.55;msg="岩石刮擦!球减速了";msgT=900;
+      }
+      if(s.toppleT>0&&s.toppleT<1){
+        s.toppleT=Math.min(1,s.toppleT+dt/260);
+        if(s.toppleT>=0.4&&!s.chained){
+          s.chained=true;
+          var n=slots[i+1];
+          if(n&&n.type!=="rock"&&n.state==="full"&&n.toppleT===0)topple(i+1,false);
+        }
+      }
+    }
+    if(ball.x+BR>=BELL)winRun();
+    else if(ball.vx<=0.004)failRun();
+  }
+  draw();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawDomino(sx,s){
+  ctx.save();
+  ctx.translate(sx+7,GY);
+  ctx.rotate(s.toppleT*Math.PI/2);
+  ctx.fillStyle="#c98b4b";
+  rr(-7,-46,14,46,3);ctx.fill();
+  ctx.fillStyle="#8f5a26";
+  ctx.fillRect(-5,-42,10,6);
+  ctx.restore();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2540";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#273356";ctx.fillRect(0,GY,W,4);
+  ctx.fillStyle="#232d4c";
+  ctx.beginPath();ctx.moveTo(0,GY-52);ctx.lineTo(64,GY);ctx.lineTo(0,GY);ctx.closePath();ctx.fill();
+  for(i=0;i<9;i++){
+    var sx=slotX(i),s=slots[i];
+    if(s.type==="rock"){
+      ctx.fillStyle="#565f78";
+      ctx.beginPath();
+      ctx.moveTo(sx-12,GY);ctx.lineTo(sx-8,GY-26);ctx.lineTo(sx+4,GY-32);ctx.lineTo(sx+13,GY-20);ctx.lineTo(sx+12,GY);
+      ctx.closePath();ctx.fill();
+      ctx.fillStyle="#6b7492";ctx.fillRect(sx-6,GY-24,8,5);
+    }else if(s.state==="full"){
+      drawDomino(sx,s);
+    }else{
+      ctx.strokeStyle="rgba(249,115,22,0.45)";ctx.setLineDash([4,4]);ctx.lineWidth=2;
+      ctx.strokeRect(sx-9,GY-30,18,30);
+      ctx.setLineDash([]);
+    }
+  }
+  ctx.fillStyle="#3a4668";ctx.fillRect(BELL-26,GY-84,5,84);
+  ctx.fillStyle="#fbbf24";
+  ctx.shadowColor="#fbbf24";ctx.shadowBlur=12;
+  ctx.beginPath();
+  ctx.moveTo(BELL-12,GY-58);ctx.quadraticCurveTo(BELL-16,GY-24,BELL-20,GY-16);
+  ctx.lineTo(BELL+20,GY-16);ctx.quadraticCurveTo(BELL+16,GY-24,BELL+12,GY-58);
+  ctx.closePath();ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#7c580e";ctx.beginPath();ctx.arc(BELL,GY-60,4,0,Math.PI*2);ctx.fill();
+  if(state!=="over"&&ball.x<BELL-10){
+    ctx.save();
+    ctx.translate(ball.x,ball.y);
+    ctx.rotate(ball.rot);
+    ctx.fillStyle="#fb923c";
+    ctx.beginPath();ctx.arc(0,0,BR,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#7c2d12";
+    ctx.beginPath();ctx.arc(4,0,2.6,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  if(state==="placing"){
+    ctx.fillStyle="#8b90b0";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("摆放阶段:点击虚线槽放置 / 收回骨牌",W/2,60);
+    ctx.textAlign="left";
+  }
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#4ade80";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,100);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

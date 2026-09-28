@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>环转乾坤</title>
+<style>
+:root{--bg:#0f1220;--card:#1a1f36;--ink:#eef1ff;--dim:#9aa3c7;--acc:#b794f4;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px;}
+.wrap{width:100%;max-width:400px;text-align:center;}
+h1{font-size:22px;letter-spacing:3px;margin-bottom:6px;}
+.tip{color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:10px;}
+.bar{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;font-size:14px;margin-bottom:10px;color:var(--dim);}
+.bar b{color:var(--acc);font-size:15px;}
+.btn{background:var(--acc);border:none;border-radius:8px;color:#241536;font-family:inherit;font-size:14px;font-weight:700;padding:7px 14px;cursor:pointer;}
+.btn.ghost{background:#2a3154;color:var(--ink);}
+.ringmid{display:flex;gap:8px;align-items:stretch;}
+.ringcol{display:grid;grid-template-rows:repeat(3,1fr);gap:6px;width:40px;}
+.ringrow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:calc(100% - 96px);margin:6px auto;}
+.key{background:#2a3154;color:var(--ink);border:1px solid #38406e;border-radius:8px;font-size:16px;font-family:inherit;cursor:pointer;padding:0;min-height:34px;}
+.key:active{background:var(--acc);color:#241536;}
+.board{aspect-ratio:1/1;flex:1;background:var(--card);border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.4),inset 0 0 0 1px #2c3560;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:6px;padding:8px;}
+.cell{display:flex;align-items:center;justify-content:center;border-radius:9px;background:linear-gradient(145deg,#322b52,#282243);color:var(--ink);font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);}
+.foot{color:var(--dim);font-size:12px;line-height:1.7;margin-top:10px;}
+.overlay{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(7,9,20,.8);display:none;align-items:center;justify-content:center;z-index:20;}
+.overlay.show{display:flex;}
+.panel{background:var(--card);border:1px solid #2c3560;border-radius:16px;padding:28px 32px;text-align:center;max-width:86vw;box-shadow:0 16px 50px rgba(0,0,0,.55);}
+.panel h2{color:var(--acc);font-size:24px;letter-spacing:2px;margin-bottom:10px;}
+.panel p{color:var(--dim);font-size:14px;line-height:1.9;margin-bottom:18px;white-space:pre-line;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>环转乾坤</h1>
+  <p class="tip">无空格环形滑移:棋盘没有空位,点击箭头让整行或整列循环移动一格,把 1–9 复原成标准顺序。</p>
+  <div class="bar">
+    <span>步数 <b id="stMoves">0</b></span>
+    <span>归位 <b id="stFit">0/9</b></span>
+    <button class="btn ghost" id="resetBtn">重开</button>
+  </div>
+  <div class="ringrow" id="colTop"></div>
+  <div class="ringmid">
+    <div class="ringcol" id="rowLeft"></div>
+    <div class="board" id="board"></div>
+    <div class="ringcol" id="rowRight"></div>
+  </div>
+  <div class="ringrow" id="colBottom"></div>
+  <p class="foot">上下箭头让对应的列向下/向上循环滚动,左右箭头让对应的行向右/向左循环滚动;边缘的方块会绕到另一侧。</p>
+</div>
+<div class="overlay" id="overlay"><div class="panel">
+  <h2 id="ovTitle"></h2>
+  <p id="ovInfo"></p>
+  <button class="btn" id="againBtn">再来一局</button>
+</div></div>
+<script>
+(function(){
+'use strict';
+const N=3,TOTAL=N*N,K=16;
+let tiles=[],moves=0,playing=false,startAt=0;
+const boardEl=document.getElementById('board');
+const movesEl=document.getElementById('stMoves'),fitEl=document.getElementById('stFit');
+const overlay=document.getElementById('overlay'),ovTitle=document.getElementById('ovTitle'),ovInfo=document.getElementById('ovInfo');
+const cellEls=[];
+for(let i=0;i<TOTAL;i++){const d=document.createElement('div');d.className='cell';boardEl.appendChild(d);cellEls.push(d);}
+function makeKey(container,text,type,idx,dir){
+  const b=document.createElement('button');b.className='key';b.textContent=text;
+  b.addEventListener('click',function(){if(!playing)return;doRot(type,idx,dir);});
+  container.appendChild(b);
+}
+for(let c=0;c<N;c++){makeKey(document.getElementById('colTop'),'▼','col',c,1);makeKey(document.getElementById('colBottom'),'▲','col',c,-1);}
+for(let r=0;r<N;r++){makeKey(document.getElementById('rowLeft'),'▶','row',r,1);makeKey(document.getElementById('rowRight'),'◀','row',r,-1);}
+function rotRow(r,dir){
+  const row=[tiles[r*3],tiles[r*3+1],tiles[r*3+2]];
+  for(let c=0;c<3;c++)tiles[r*3+((c+dir+3)%3)]=row[c];
+}
+function rotCol(c,dir){
+  const col=[tiles[c],tiles[3+c],tiles[6+c]];
+  for(let r=0;r<3;r++)tiles[((r+dir+3)%3)*3+c]=col[r];
+}
+function doRot(type,idx,dir){
+  if(type==='row')rotRow(idx,dir);else rotCol(idx,dir);
+  moves++;render();hud();
+  if(isSolved())finish();
+}
+function render(){for(let i=0;i<TOTAL;i++)cellEls[i].textContent=tiles[i];}
+function isSolved(){for(let i=0;i<TOTAL;i++)if(tiles[i]!==i+1)return false;return true;}
+function countFit(){let k=0;for(let i=0;i<TOTAL;i++)if(tiles[i]===i+1)k++;return k+'/9';}
+function hud(){movesEl.textContent=moves;fitEl.textContent=countFit();}
+function scrambleRing(){
+  do{
+    for(let s=0;s<K;s++){
+      const type=Math.random()<0.5?'row':'col';
+      const idx=(Math.random()*3)|0;
+      const dir=Math.random()<0.5?1:-1;
+      if(type==='row')rotRow(idx,dir);else rotCol(idx,dir);
+    }
+  }while(isSolved());
+}
+function fit(){const w=boardEl.clientWidth;if(w)boardEl.style.fontSize=Math.max(14,Math.min(46,w/N*0.42))+'px';}
+function finish(){
+  playing=false;
+  const sec=(Date.now()-startAt)/1000;
+  const m=Math.floor(sec/60),s=Math.floor(sec%60);
+  ovTitle.textContent='乾坤归位!';
+  ovInfo.textContent='用时 '+m+':'+(s<10?'0':'')+s+' · 循环步数 '+moves+'\n不用空位的华容道,别有一番乾坤';
+  overlay.classList.add('show');
+}
+function newGame(){
+  overlay.classList.remove('show');
+  tiles=[1,2,3,4,5,6,7,8,9];
+  scrambleRing();render();
+  moves=0;startAt=Date.now();playing=true;hud();
+  fit();
+}
+document.getElementById('resetBtn').addEventListener('click',newGame);
+document.getElementById('againBtn').addEventListener('click',newGame);
+window.addEventListener('resize',fit);
+newGame();
+})();
+</script>
+</body>
+</html>

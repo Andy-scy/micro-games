@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>共振波</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>共振波</h1>
+  <p class="tips">点击泡泡引爆它并发出一圈共振波,波前扫到的同色泡泡会接连殉爆、再发新波!用最少的发波次数清空全场。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">剩余发波</div><div class="big" id="wv">0</div></div>
+      <div class="stat"><div class="mut">剩余泡泡</div><div class="big" id="rm">0</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">共振波</h2><p id="ovp">玩法说明:<br>· 点击任意泡泡,它爆炸并从爆心发出扩散圆波<br>· 圆波扫到「同色」泡泡时,它也会爆炸并再发新波<br>· 连锁越深,每个泡泡得分越高(10 + 链深×10)<br>· 异色泡泡对波动免疫,注意选起爆点<br>· 每关发波次数有限,清空全场才能过关<br>· 泡泡会缓慢漂移,耐心等它们靠在一起!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff'];
+var bubbles=[],rings=[],parts=[],floats=[];
+var level=1,score=0,waves=0,left=0;
+var state='idle',lastT=0,tip='',tipT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function newBoard(){
+  bubbles=[];rings=[];parts=[];
+  var n=Math.min(18,6+level*2);
+  var nc=level<3?3:4;
+  for(var i=0;i<n;i++){
+    bubbles.push({x:rnd(40,W-40),y:rnd(50,H-40),
+      vx:rnd(-28,28),vy:rnd(-24,24),
+      r:rnd(16,21),ci:Math.floor(Math.random()*nc)});
+  }
+  waves=Math.ceil(n*0.6)+1;
+  left=n;
+  upd();
+}
+function resetGame(){
+  level=1;score=0;floats=[];
+  newBoard();
+}
+function upd(){
+  $i('lv').textContent=level;
+  $i('sc').textContent=score;
+  $i('wv').textContent=waves;
+  $i('rm').textContent=left;
+}
+function popBubble(b,chain){
+  var idx=bubbles.indexOf(b);
+  if(idx<0)return;
+  bubbles.splice(idx,1);
+  left--;
+  var gain=10+chain*10;
+  score+=gain;
+  floats.push({x:b.x,y:b.y,txt:chain>1?'+'+gain+' x'+chain:'+'+gain,c:COLORS[b.ci],life:0.8});
+  rings.push({x:b.x,y:b.y,ci:b.ci,r:b.r*0.6,max:150,depth:chain});
+  for(var k=0;k<8;k++){var a=rnd(0,6.28),s=rnd(50,150);
+    parts.push({x:b.x,y:b.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,4),c:COLORS[b.ci],life:rnd(0.3,0.5)});}
+}
+function update(dt){
+  if(state!=='play')return;
+  var i,j;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<b.r+4){b.x=b.r+4;b.vx=Math.abs(b.vx);}
+    if(b.x>W-b.r-4){b.x=W-b.r-4;b.vx=-Math.abs(b.vx);}
+    if(b.y<b.r+4){b.y=b.r+4;b.vy=Math.abs(b.vy);}
+    if(b.y>H-b.r-4){b.y=H-b.r-4;b.vy=-Math.abs(b.vy);}
+  }
+  for(i=rings.length-1;i>=0;i--){
+    var rg=rings[i];
+    rg.r+=250*dt;
+    if(rg.r>=rg.max){rings.splice(i,1);continue;}
+    for(j=bubbles.length-1;j>=0;j--){
+      var bb=bubbles[j];
+      if(bb.ci!==rg.ci)continue;
+      var dx=bb.x-rg.x,dy=bb.y-rg.y;
+      if(dx*dx+dy*dy<=rg.r*rg.r){
+        popBubble(bb,chainDepth(rg)+1);
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=36*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+  if(tipT>0)tipT-=dt;
+  upd();
+  if(left===0){
+    score+=100;level++;
+    if(level>6)level=6;
+    floats.push({x:W/2,y:H/2,txt:'清场!+100',c:'#ffd166',life:1.2});
+    newBoard();
+  }else if(waves<=0&&rings.length===0){
+    state='over';
+    $i('ovt').textContent='发波次数用完!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达关卡:第 '+level+' 关<br>还剩 '+left+' 个泡泡';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+}
+function chainDepth(rg){
+  return rg.depth||1;
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(state!=='play'||waves<=0)return;
+  var p=pt(e),hit=null;
+  for(var i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y;
+    if(dx*dx+dy*dy<=(b.r+8)*(b.r+8)){hit=b;break;}
+  }
+  if(!hit){
+    tip='要点在泡泡上!';tipT=1;
+    return;
+  }
+  waves--;
+  popBubble(hit,1);
+  upd();
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  resetGame();state='play';
+});
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.2832);
+    ctx.fillStyle=COLORS[b.ci];ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.3)';ctx.stroke();
+    ctx.beginPath();ctx.arc(b.x-b.r*0.32,b.y-b.r*0.32,b.r*0.26,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+  }
+  for(i=0;i<rings.length;i++){
+    var rg=rings[i],t=1-rg.r/rg.max;
+    ctx.globalAlpha=t*0.8;
+    ctx.beginPath();ctx.arc(rg.x,rg.y,rg.r,0,6.2832);
+    ctx.strokeStyle=COLORS[rg.ci];ctx.lineWidth=4;ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  if(tipT>0){
+    ctx.font='bold 17px system-ui';ctx.fillStyle='#ff9f43';
+    ctx.fillText(tip,W/2,60);
+  }
+}
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

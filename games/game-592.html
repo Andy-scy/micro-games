@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词根工坊</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#hud .hp{color:#ff6b8a}
+.card{background:#151a30;border-radius:14px;padding:16px;text-align:center}
+#zh{font-size:18px;color:#8ecae6;margin-bottom:4px}
+#part{font-size:13px;color:#9aa3c7;margin-bottom:14px;min-height:18px}
+#slots{display:flex;justify-content:center;gap:8px;min-height:58px;margin-bottom:14px;flex-wrap:wrap}
+.slot{min-width:52px;height:54px;border-bottom:3px solid #4cc9f0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:bold;font-family:Consolas,monospace;color:#4cc9f0;padding:0 6px}
+.slot.bad{border-bottom-color:#ff6b8a;color:#ff6b8a}
+#pool{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;min-height:56px;margin-bottom:12px}
+.tile{min-width:52px;height:54px;border:none;border-radius:10px;background:#232a4d;color:#ffd166;font-size:19px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer;padding:0 8px}
+.tile.used{visibility:hidden}
+#note{font-size:13px;color:#7ee2a8;min-height:20px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.bad{animation:shk .35s}
+</style>
+</head>
+<body>
+<h1>词根工坊</h1>
+<p id="tip">按正确的词法顺序点击积木 拼出对应中文含义的单词 · 如 un + happy = unhappy · 填满自动判定,拼错扣一颗心</p>
+<div id="wrap">
+<div id="hud"><span>题号 <b id="prog">1</b>/10</span><span>得分 <b id="score">0</b></span><span class="hp" id="hp">♥♥♥</span></div>
+<div class="card">
+<div id="zh"></div>
+<div id="part"></div>
+<div id="slots"></div>
+<div id="pool"></div>
+<div id="note"></div>
+</div>
+<div id="ov"><h2 id="ovT">词根工坊</h2><p id="ovP">前缀 词根 后缀 是单词的积木
+按顺序把它们拼成完整单词
+拼对还会学到词根小知识</p><button id="ovB">开工</button></div>
+</div>
+<script>
+"use strict";
+var ITEMS = [
+  { parts: ["un", "happy"], z: "不快乐的", note: "un-(否定) + happy(快乐)" },
+  { parts: ["re", "turn"], z: "返回 归还", note: "re-(回) + turn(转)" },
+  { parts: ["play", "er"], z: "运动员 播放器", note: "play(玩) + -er(…的人)" },
+  { parts: ["care", "ful"], z: "小心的 仔细的", note: "care(小心) + -ful(充满…的)" },
+  { parts: ["kind", "ness"], z: "善良 仁慈", note: "kind(善良) + -ness(性质)" },
+  { parts: ["teach", "er"], z: "教师", note: "teach(教) + -er(…的人)" },
+  { parts: ["help", "ful"], z: "有帮助的", note: "help(帮助) + -ful(充满…的)" },
+  { parts: ["use", "less"], z: "无用的", note: "use(用) + -less(没有…的)" },
+  { parts: ["luck", "y"], z: "幸运的", note: "luck(运气) + -y(形容词后缀)" },
+  { parts: ["slow", "ly"], z: "缓慢地", note: "slow(慢) + -ly(副词后缀)" },
+  { parts: ["un", "lock"], z: "开锁 解锁", note: "un-(反向) + lock(锁)" },
+  { parts: ["dis", "like"], z: "不喜欢", note: "dis-(否定) + like(喜欢)" },
+  { parts: ["re", "read"], z: "重读 再读", note: "re-(再) + read(读)" },
+  { parts: ["color", "ful"], z: "多彩的", note: "color(颜色) + -ful(充满…的)" },
+  { parts: ["friend", "ly"], z: "友好的", note: "friend(朋友) + -ly(…的)" },
+  { parts: ["sad", "ness"], z: "悲伤", note: "sad(悲伤) + -ness(性质)" },
+  { parts: ["act", "or"], z: "演员", note: "act(表演) + -or(…的人)" },
+  { parts: ["art", "ist"], z: "艺术家", note: "art(艺术) + -ist(…家)" },
+  { parts: ["read", "er"], z: "读者", note: "read(读) + -er(…的人)" },
+  { parts: ["farm", "er"], z: "农民", note: "farm(农场) + -er(…的人)" }
+];
+var TOTALQ = 10;
+var progEl = document.getElementById("prog");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var zhEl = document.getElementById("zh");
+var partEl = document.getElementById("part");
+var slotsEl = document.getElementById("slots");
+var poolEl = document.getElementById("pool");
+var noteEl = document.getElementById("note");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var qNum = 0, score = 0, hp = 3, playing = false;
+var cur = null;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function makeQ() {
+  var item = ITEMS[Math.floor(Math.random() * ITEMS.length)];
+  var order = [];
+  for (var i = 0; i < item.parts.length; i++) order.push(i);
+  var tries = 0;
+  do { shuffle(order); tries++; } while (order.join(",") === item.parts.map(function (p, k) { return k; }).join(",") && tries < 20 && item.parts.length > 1);
+  cur = { item: item, order: order, placed: [] };
+  zhEl.textContent = "拼出含义为「" + item.z + "」的单词";
+  partEl.textContent = "共 " + item.parts.length + " 块积木";
+  noteEl.textContent = "";
+  render();
+}
+
+function render() {
+  slotsEl.innerHTML = "";
+  for (var s = 0; s < cur.item.parts.length; s++) {
+    (function (si) {
+      var d = document.createElement("div");
+      d.className = "slot";
+      if (cur.placed[si] !== undefined) {
+        d.textContent = cur.item.parts[cur.placed[si]].toLowerCase();
+        d.onclick = function () { takeBack(si); };
+      } else {
+        d.textContent = "?";
+        d.style.color = "#5a6189";
+      }
+      slotsEl.appendChild(d);
+    })(s);
+  }
+  poolEl.innerHTML = "";
+  for (var p = 0; p < cur.order.length; p++) {
+    (function (pi) {
+      var b = document.createElement("button");
+      var used = cur.placed.indexOf(pi) >= 0;
+      b.className = "tile" + (used ? " used" : "");
+      b.textContent = cur.item.parts[pi].toLowerCase();
+      b.onclick = function () { place(pi); };
+      poolEl.appendChild(b);
+    })(p);
+  }
+}
+
+function place(pi) {
+  if (!playing || cur.placed.indexOf(pi) >= 0) return;
+  if (cur.placed.length >= cur.item.parts.length) return;
+  cur.placed.push(pi);
+  render();
+  if (cur.placed.length === cur.item.parts.length) check();
+}
+
+function takeBack(si) {
+  if (!playing) return;
+  var last = cur.placed.length - 1;
+  if (si !== last) return;
+  cur.placed.pop();
+  noteEl.textContent = "";
+  render();
+}
+
+function check() {
+  var ok = true;
+  for (var i = 0; i < cur.placed.length; i++) {
+    if (cur.placed[i] !== i) ok = false;
+  }
+  if (ok) {
+    score += 10;
+    scoreEl.textContent = score;
+    noteEl.textContent = cur.item.note + " = " + cur.item.parts.join("");
+    setTimeout(next, 1200);
+  } else {
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    for (var s = 0; s < slotsEl.children.length; s++) {
+      var d = slotsEl.children[s];
+      var pi = cur.placed[s];
+      if (pi !== undefined && pi !== s) d.classList.add("bad");
+    }
+    if (hp <= 0) {
+      setTimeout(lose, 700);
+    } else {
+      setTimeout(function () {
+        cur.placed = [];
+        render();
+      }, 800);
+    }
+  }
+}
+
+function next() {
+  qNum++;
+  if (qNum >= TOTALQ) {
+    playing = false;
+    ovT.textContent = "今日完工!";
+    ovP.textContent = "10 个派生词全部拼装成功\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  progEl.textContent = qNum + 1;
+  makeQ();
+}
+
+function lose() {
+  playing = false;
+  ovT.textContent = "工坊失火";
+  ovP.textContent = "进行到第 " + (qNum + 1) + " 题\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  qNum = 0; score = 0; hp = 3;
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  progEl.textContent = "1";
+  playing = true;
+  ov.classList.add("hide");
+  makeQ();
+}
+
+ovB.onclick = start;
+</script>
+</body>
+</html>

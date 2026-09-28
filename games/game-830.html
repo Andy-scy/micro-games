@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字填色</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#f472b6;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #831843;background:#10141f;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:pointer}
+.pal{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:10px}
+.pal button{display:flex;align-items:center;gap:6px;background:#241d33;color:#e8eaf6;border:1px solid #4c3a72;border-radius:9px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.pal button i{width:15px;height:15px;border-radius:4px;display:inline-block}
+.pal button.on{border-color:#f472b6;box-shadow:0 0 0 2px rgba(244,114,182,.35)}
+.msg{text-align:center;color:#f87171;font-size:13px;height:18px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(16,8,14,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f472b6}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#f472b6;color:#500724;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>数字填色</h1>
+  <p class="hint">选下方颜色(编号 1~5),点画布里对应<b style="color:#f472b6">数字区域</b>上色;<br>色号选错会扣一颗心,三颗心扣完就得重画本图!</p>
+  <div class="hud"><span>画作 <b id="lv">1/3</b></span><span>生命 <b id="life">♥♥♥</b></span><span>得分 <b id="score">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">数字填色</h2>
+      <p id="ovP">三幅线稿等着上色:小房子、小鱼、小花。每个区域标了数字,选对色号点一下就上色。零失误通关有额外加分!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始填色</button>
+    </div>
+  </div>
+  <div class="pal" id="pal"></div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elLv=$("lv"),elLife=$("life"),elScore=$("score"),elMsg=$("msg"),palEl=$("pal");
+var LV=[
+ {name:"小房子",regs:[
+  {n:1,t:"p",pts:[[140,205],[240,112],[340,205]]},
+  {n:2,t:"p",pts:[[162,205],[318,205],[318,362],[162,362]]},
+  {n:3,t:"p",pts:[[218,282],[266,282],[266,362],[218,362]]},
+  {n:4,t:"p",pts:[[182,232],[228,232],[228,272],[182,272]]},
+  {n:5,t:"c",x:408,y:88,r:30}]},
+ {name:"小鱼",regs:[
+  {n:1,t:"p",pts:[[112,240],[160,182],[276,176],[340,214],[340,266],[276,304],[160,298]]},
+  {n:2,t:"p",pts:[[340,214],[402,168],[402,312],[340,266]]},
+  {n:3,t:"c",x:152,y:228,r:11},
+  {n:4,t:"c",x:244,y:118,r:15}]},
+ {name:"小花",regs:[
+  {n:1,t:"c",x:240,y:132,r:36},{n:1,t:"c",x:178,y:176,r:36},{n:1,t:"c",x:302,y:176,r:36},
+  {n:1,t:"c",x:200,y:244,r:36},{n:1,t:"c",x:280,y:244,r:36},
+  {n:2,t:"c",x:240,y:198,r:30},
+  {n:3,t:"p",pts:[[230,268],[250,268],[250,420],[230,420]]},
+  {n:4,t:"p",pts:[[250,330],[322,300],[322,352],[250,372]]},
+  {n:5,t:"c",x:406,y:84,r:26}]}
+];
+var CMAP={1:"#ef4444",2:"#facc15",3:"#3b82f6",4:"#22c55e",5:"#f97316"};
+var CNAMES={1:"红",2:"黄",3:"蓝",4:"绿",5:"橙"};
+var state="menu",lv=0,lives=3,score=0,selN=1,solved=[],flashIdx=-1,flashT=0;
+function inPoly(x,y,pts){
+  var ins=false,i,j,n=pts.length;
+  for(i=0,j=n-1;i<n;j=i++){
+    if(((pts[i][1]>y)!==(pts[j][1]>y))&&(x<(pts[j][0]-pts[i][0])*(y-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0]))ins=!ins;
+  }
+  return ins;
+}
+function hitReg(x,y){
+  var regs=LV[lv].regs,i;
+  for(i=regs.length-1;i>=0;i--){
+    var r=regs[i];
+    if(solved[i])continue;
+    if(r.t==="c"){
+      var dx=x-r.x,dy=y-r.y;
+      if(dx*dx+dy*dy<=r.r*r.r)return i;
+    }else if(inPoly(x,y,r.pts))return i;
+  }
+  return -1;
+}
+function centroid(r){
+  if(r.t==="c")return [r.x,r.y];
+  var sx=0,sy=0,i;
+  for(i=0;i<r.pts.length;i++){sx+=r.pts[i][0];sy+=r.pts[i][1];}
+  return [sx/r.pts.length,sy/r.pts.length];
+}
+function draw(){
+  var regs=LV[lv].regs,i;
+  ctx.fillStyle="#10141f";ctx.fillRect(0,0,480,480);
+  for(i=0;i<regs.length;i++){
+    var r=regs[i],c=centroid(r);
+    ctx.beginPath();
+    if(r.t==="c")ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
+    else{
+      var k;
+      for(k=0;k<r.pts.length;k++){
+        if(k===0)ctx.moveTo(r.pts[k][0],r.pts[k][1]);else ctx.lineTo(r.pts[k][0],r.pts[k][1]);
+      }
+      ctx.closePath();
+    }
+    if(solved[i]){
+      ctx.fillStyle=CMAP[r.n];ctx.fill();
+      ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=2;ctx.stroke();
+    }else{
+      ctx.fillStyle="#232a45";ctx.fill();
+      ctx.strokeStyle=flashIdx===i&&flashT>0?"#f87171":"#4a5580";ctx.lineWidth=2;ctx.stroke();
+      ctx.font="bold 18px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+      ctx.fillStyle="#8b90b0";
+      ctx.fillText(String(r.n),c[0],c[1]);
+    }
+  }
+}
+function hud(){
+  elLv.textContent=(lv+1)+"/3";
+  var s="";for(var i=0;i<lives;i++)s+="♥";
+  elLife.textContent=s||"—";elScore.textContent=score;
+}
+function loadLevel(){
+  solved=[];var regs=LV[lv].regs,i;
+  for(i=0;i<regs.length;i++)solved.push(false);
+  lives=3;flashIdx=-1;elMsg.textContent="";
+  hud();draw();
+}
+function pick(e){
+  if(state!=="playing")return;
+  var rc=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  var x=(t.clientX-rc.left)*cv.width/rc.width,y=(t.clientY-rc.top)*cv.height/rc.height;
+  var idx=hitReg(x,y);
+  if(idx<0)return;
+  var reg=LV[lv].regs[idx];
+  if(reg.n===selN){
+    solved[idx]=true;elMsg.textContent="";
+    draw();
+    var done=true,i;
+    for(i=0;i<solved.length;i++)if(!solved[i]){done=false;break;}
+    if(done){
+      var gain=60+lives*20;
+      score+=gain;hud();
+      lv++;
+      if(lv>=3){finish();return;}
+      setTimeout(function(){loadLevel();},50);
+    }
+  }else{
+    lives--;flashIdx=idx;flashT=0.5;hud();
+    elMsg.textContent="色号不对!这里该用 "+reg.n+" 号"+CNAMES[reg.n]+"色";
+    if(lives<=0)failLevel();
+  }
+}
+cv.addEventListener("mousedown",pick);
+cv.addEventListener("touchstart",function(e){e.preventDefault();pick(e);},{passive:false});
+function failLevel(){
+  state="over";
+  ovT.textContent="调色盘打翻了";
+  ovP.textContent="三颗心都扣完了,这幅《"+LV[lv].name+"》先放一放。\n看清数字再下笔,稳稳当当就没问题!";
+  ovS.style.display="block";ovS.textContent="当前得分 "+score;
+  btnGo.textContent="重画本图";
+  ov.classList.remove("hide");
+}
+function finish(){
+  state="over";
+  ovT.textContent="画展开展!";
+  ovP.textContent="三幅数字填色全部完工,童趣满分。";
+  ovS.style.display="block";ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+var i;
+for(i=1;i<=5;i++){
+  (function(n){
+    var b=document.createElement("button");
+    b.innerHTML='<i style="background:'+CMAP[n]+'"></i>'+n+" "+CNAMES[n];
+    if(n===1)b.className="on";
+    b.addEventListener("click",function(){
+      selN=n;
+      var bs=palEl.children,k;
+      for(k=0;k<bs.length;k++)bs[k].className="";
+      b.className="on";
+    });
+    palEl.appendChild(b);
+  })(i);
+}
+btnGo.addEventListener("click",function(){
+  score=0;state="playing";lv=0;
+  ovS.style.display="none";ov.classList.add("hide");
+  loadLevel();
+});
+loadLevel();
+setInterval(function(){if(flashT>0){flashT-=0.1;if(flashT<=0)flashIdx=-1;draw();}},100);
+})();
+</script>
+</body>
+</html>

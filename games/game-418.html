@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>压舱浮塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#4dd4fa}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#4dd4fa;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#4dd4fa;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>压舱浮塔</h1>
+<p class="hint">塔建在浮筏上,重块压筏下沉 · 抓住时机放浮球减重,点击或空格投放</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">压舱浮塔</h2><p id="ovM">重块把浮筏压进水里,轻块影响小,浮球反而提供浮力!<br>塔顶离海面太近就输(共 3 次失误机会)。看清下一块是什么,规划好再放。</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=420,BH=22,WATER=470;
+var TYPES=[
+  {w:120,wt:13,c:'#845ef7',n:'重块',balloon:false},
+  {w:90,wt:9,c:'#4dabf7',n:'标准',balloon:false},
+  {w:60,wt:5,c:'#63e6be',n:'轻块',balloon:false},
+  {w:70,wt:-8,c:'#ffd166',n:'浮球',balloon:true}
+];
+var PICK=[0,0,0,1,1,1,1,2,2,3];
+var tower,queue,cur,drop,fx,pops,splash,score,state='ready',hearts,totalW,cam;
+
+function bargeY(){return GROUND+totalW*2.2;}
+function topB(){return tower[tower.length-1];}
+function topY(){return bargeY()-tower.length*BH;}
+function hoverWY(){return Math.max(20,topY()-cam-176)+cam;}
+function pickType(){return TYPES[PICK[Math.floor(Math.random()*PICK.length)]];}
+function reset(){
+  tower=[{x:210,w:150,c:'#5b679e',balloon:false}];
+  totalW=4;hearts=3;score=0;fx=[];pops=[];splash=[];drop=null;cam=0;
+  queue=[pickType(),pickType()];
+  spawn();
+}
+function spawn(){
+  cur={t:queue.shift(),x:60,dir:1,spd:2.3};
+  queue.push(pickType());
+}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#4dd4fa',life:1});}
+function tap(){
+  if(state!=='play')return;
+  if(!drop&&cur){
+    drop={x:cur.x,y:hoverWY(),vy:0,t:cur.t};
+    cur=null;
+  }
+}
+function finish(title){
+  state='over';
+  var h=tower.length-1;
+  window.setTimeout(function(){
+    ovT.textContent=title;
+    ovS.textContent='堆了 '+h+' 层 · 得分 '+score;
+    ovM.textContent='浮球是救命稻草,重块来之前留好余量';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },700);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  var i;
+  if(state==='play'){
+    if(cur){
+      cur.x+=cur.spd*cur.dir*dt*60;
+      var m=cur.t.w/2+6;
+      if(cur.x<m){cur.x=m;cur.dir=1;}
+      if(cur.x>W-m){cur.x=W-m;cur.dir=-1;}
+    }
+    if(drop){
+      drop.vy+=1600*dt;
+      drop.y+=drop.vy*dt;
+      var ty=topY();
+      if(drop.y+11>=ty){
+        var tp=topB();
+        var err=Math.abs(drop.x-tp.x);
+        if(err<(tp.w+drop.t.w)/2-4){
+          var pts=err<9?20:10;
+          score+=pts;
+          if(err<9)pop('完美 +20',drop.x,ty-16,'#7ee0a3');
+          tower.push({x:drop.x,w:drop.t.w,c:drop.t.c,balloon:drop.t.balloon});
+          totalW=Math.max(1,totalW+drop.t.wt);
+          if(drop.t.wt<0)pop('浮力 +',drop.x,ty-34,'#ffd166');
+          drop=null;spawn();
+        }else{
+          hearts--;
+          var k;
+          for(k=0;k<8;k++)splash.push({x:drop.x+(Math.random()*24-12),y:WATER,vx:Math.random()*140-70,vy:-100-Math.random()*150,life:0.8});
+          fx.push({x:drop.x,y:WATER-4,w:drop.t.w,vx:0,vy:60,rot:0.5,vr:1.4,life:1.1,c:drop.t.c});
+          drop=null;
+          if(hearts<=0){finish('滑落海中!');}
+          else{pop('落空!剩 '+hearts+' 次',210,topY()-150,'#ff6b6b');spawn();}
+        }
+      }
+    }
+    if(topY()>=WATER+14&&state==='play'){finish('货舱进水!');}
+    cam=Math.max(0,160-topY());
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=splash.length-1;i>=0;i--){var s=splash[i];s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=700*dt;s.life-=dt;if(s.life<=0)splash.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0e2438');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i,k,by=bargeY(),ty=topY(),cY=cam;
+  ctx.fillStyle='#123a52';
+  ctx.beginPath();ctx.moveTo(0,WATER-cY);
+  for(k=0;k<=W;k+=20)ctx.lineTo(k,WATER-cY+Math.sin(k*0.05+performance.now()*0.002)*4);
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(120,220,255,.4)';ctx.lineWidth=2;
+  ctx.beginPath();
+  for(k=0;k<=W;k+=20){var wy=WATER-cY+Math.sin(k*0.05+performance.now()*0.002)*4;if(k===0)ctx.moveTo(k,wy);else ctx.lineTo(k,wy);}
+  ctx.stroke();
+  ctx.fillStyle='#37415f';ctx.fillRect(210-100,by+2-cY,200,16);
+  ctx.fillStyle='#5b679e';ctx.fillRect(210-86,by+18-cY,18,10);ctx.fillRect(210+68,by+18-cY,18,10);
+  for(i=0;i<tower.length;i++){
+    var b=tower[i];var y=by-(tower.length-i)*BH-cY;
+    if(y<-BH||y>H)continue;
+    ctx.fillStyle=b.c;rr(b.x-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+    if(b.balloon){
+      ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(b.x,y+2);ctx.lineTo(b.x,y-20);ctx.stroke();
+      ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(b.x,y-30,12,0,6.283);ctx.fill();
+    }
+    ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(b.x-b.w/2+4,y+5,Math.max(0,b.w-8),4);
+  }
+  if(cur&&state==='play'){
+    var hv=hoverWY()-cY;
+    ctx.fillStyle=cur.t.c;rr(cur.x-cur.t.w/2,hv-13,cur.t.w,26,6);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=2;rr(cur.x-cur.t.w/2,hv-13,cur.t.w,26,6);ctx.stroke();
+  }
+  if(drop){
+    ctx.fillStyle=drop.t.c;rr(drop.x-drop.t.w/2,drop.y-11-cY,drop.t.w,BH-2,5);ctx.fill();
+    if(drop.t.balloon){
+      ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(drop.x,drop.y-30-cY,12,0,6.283);ctx.fill();
+    }
+  }
+  for(i=0;i<splash.length;i++){
+    var s=splash[i];ctx.globalAlpha=Math.max(0,s.life);ctx.fillStyle='#7fd8ff';ctx.fillRect(s.x,s.y-cY,3,3);
+  }
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cY);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  var nxt=queue[0];
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  for(i=0;i<3;i++){
+    ctx.beginPath();ctx.arc(300+i*24,26,8,0,6.283);
+    if(i<hearts){ctx.fillStyle='#ff6b6b';ctx.fill();}
+    else{ctx.strokeStyle='#3a4370';ctx.lineWidth=2;ctx.stroke();}
+  }
+  ctx.fillStyle='#9aa3c0';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('下一块:',352,58);
+  ctx.fillStyle=nxt.c;rr(336,66,32,16,4);ctx.fill();
+  ctx.fillStyle='#c3cae6';ctx.font='12px system-ui,sans-serif';ctx.fillText(nxt.n,352,100);
+  var gap=WATER-ty;
+  ctx.fillStyle=gap<26?'#ff6b6b':'#7ee0a3';ctx.font='bold 13px system-ui,sans-serif';
+  ctx.fillText('塔顶离海面 '+gap.toFixed(0)+' 米',210,140);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cY);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+if(window.PointerEvent){cv.addEventListener('pointerdown',function(e){e.preventDefault();tap();});}
+else{cv.addEventListener('mousedown',function(){tap();});cv.addEventListener('touchstart',function(e){e.preventDefault();tap();});}
+window.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowDown'||e.key===' '){e.preventDefault();tap();}});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

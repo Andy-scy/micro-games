@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视频扑克 换一张</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:760px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#pay{font-size:12px;color:#bcd0c4;display:grid;grid-template-columns:repeat(2,1fr);gap:2px 18px;background:rgba(0,0,0,.25);border-radius:10px;padding:8px 14px}
+#pay span b{color:#ffd166}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.slot{display:flex;flex-direction:column;align-items:center;gap:6px}
+.card{width:58px;height:84px;border-radius:9px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;transition:transform .15s}
+.card.red{color:#d62839}
+.card .r{font-size:18px;font-weight:800}
+.card .s{font-size:30px;line-height:1.05}
+.card.sel{outline:3px solid #4cc9f0;transform:translateY(-8px)}
+.holdtag{font-size:11px;color:#4cc9f0;min-height:14px;font-weight:700}
+#res{min-height:22px;font-size:16px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>视频扑克 · 换一张</h1>
+<p id="how">每局押 5 分发 5 张牌，点选要保留的牌（亮起「留」），其余自动换新。按牌型赔付，攒到 300 分胜利，不足 5 分结束。同花大顺 500 倍！</p>
+<div id="bar"><span>积分 <b id="credits">100</b></span><span>押注 5/局</span><span>胜利目标 300</span></div>
+<div id="table">
+  <div id="pay">
+    <span>同花大顺 <b>×100</b></span><span>同花顺 <b>×20</b></span>
+    <span>四条 <b>×8</b></span><span>葫芦 <b>×3</b></span>
+    <span>同花 <b>×2</b></span><span>顺子 <b>×1.5</b></span>
+    <span>三条 <b>×1</b></span><span>两对 <b>×1</b></span>
+    <span>J 以上对子 <b>×1</b></span><span>其他 <b>×0</b></span>
+  </div>
+  <div class="row" id="hand"></div>
+  <div id="res"></div>
+  <div id="btns">
+    <button id="deal" class="acc">发牌</button>
+    <button id="draw" disabled>换牌</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],hand=[],hold=[false,false,false,false,false],phase='idle',credits=100;
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+1;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function evaluate(h){
+  var vs=h.map(function(c){return vi(c.r);}).sort(function(a,b){return a-b;});
+  var cnt={},i;
+  for(i=0;i<5;i++)cnt[vs[i]]=(cnt[vs[i]]||0)+1;
+  var pairs=0,trip=false,quad=false,counts=[];
+  for(var k in cnt){counts.push(cnt[k]);if(cnt[k]===2)pairs++;if(cnt[k]===3)trip=true;if(cnt[k]===4)quad=true;}
+  var flush=true;for(i=1;i<5;i++)if(h[i].s!==h[0].s)flush=false;
+  var uniq=[];for(i=0;i<5;i++)if(i===0||vs[i]!==vs[i-1])uniq.push(vs[i]);
+  if(uniq.length===5&&uniq[0]===1&&uniq[1]===10)uniq=[10,11,12,13,14];
+  var straight=(uniq.length===5);
+  if(straight){for(i=1;i<5;i++)if(uniq[i]!==uniq[i-1]+1)straight=false;}
+  if(flush&&straight&&uniq[0]===10&&uniq[4]===14)return['同花大顺',100];
+  if(flush&&straight)return['同花顺',20];
+  if(quad)return['四条',8];
+  if(trip&&pairs===1)return['葫芦',3];
+  if(flush)return['同花',2];
+  if(straight)return['顺子',1.5];
+  if(trip)return['三条',1];
+  if(pairs===2)return['两对',1];
+  if(pairs===1){for(var r in cnt){if(cnt[r]===2&&parseInt(r,10)>=11)return['对子 J 以上',1];}}
+  return['散牌',0];
+}
+function cardHTML(c,sel){
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  var cls='card'+red+(sel?' sel':'');
+  return '<div class="'+cls+'" data-i="'+c._i+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('credits').textContent=credits;
+  var box=$('hand');box.innerHTML='';
+  for(var i=0;i<5;i++){
+    var slot=document.createElement('div');slot.className='slot';
+    var ht=document.createElement('div');ht.className='holdtag';ht.textContent=hold[i]?'留':'';slot.appendChild(ht);
+    var wrap=document.createElement('div');wrap.innerHTML=cardHTML(hand[i],hold[i]);
+    var el=wrap.firstChild;el._i=i;slot.appendChild(el);
+    box.appendChild(slot);
+  }
+  $('deal').disabled=(phase!=='idle'||credits<5);
+  $('draw').disabled=(phase!=='hold');
+}
+function deal(){
+  if(phase!=='idle'||credits<5)return;
+  credits-=5;refill();hand=[];hold=[false,false,false,false,false];
+  for(var i=0;i<5;i++)hand.push(deck.pop());
+  phase='hold';$('res').textContent='点选要保留的牌，再点「换牌」';render();
+}
+function toggle(e){
+  var t=e.target;
+  while(t&&!t.classList.contains('card'))t=t.parentElement;
+  if(!t||phase!=='hold')return;
+  var i=parseInt(t.getAttribute('data-i'),10);
+  hold[i]=!hold[i];render();
+}
+function drawCards(){
+  if(phase!=='hold')return;
+  for(var i=0;i<5;i++)if(!hold[i])hand[i]=deck.pop();
+  var r=evaluate(hand),mult=r[1],pay=Math.floor(5*mult);
+  phase='idle';
+  if(pay>0){credits+=pay;$('res').textContent='「'+r[0]+'」！赢得 '+pay+' 分';}
+  else{$('res').textContent='「'+r[0]+'」，本局未中';}
+  if(credits>=300){end(true,'积分达到 '+credits+'，豪取 300！');return;}
+  if(credits<5){end(false,'积分不足 5 分，无法开局');return;}
+  render();
+}
+function end(win,info){
+  phase='done';render();
+  $('ovt').textContent=win?'胜利':'游戏结束';
+  $('ovi').textContent=info+' 最终积分：'+credits;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  refill();hand=[];hold=[false,false,false,false,false];credits=100;phase='idle';
+  $('over').classList.add('hide');$('res').textContent='点「发牌」开始';render();
+}
+$('hand').addEventListener('click',toggle);
+$('deal').onclick=deal;
+$('draw').onclick=drawCards;
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

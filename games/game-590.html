@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接字拼词</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,480px)}
+canvas{display:block;width:100%;background:#151a30;border-radius:14px;touch-action:none}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>接字拼词</h1>
+<p id="tip">按顺序接住单词需要的字母 · 方向键/AD 或手指拖动移动托盘 · 接错字母扣一颗心,拼完 5 个单词获胜</p>
+<div id="wrap">
+<canvas id="cv" width="480" height="620"></canvas>
+<div id="ov"><h2 id="ovT">接字拼词</h2><p id="ovP">字母从天而降
+移动托盘按顺序接住单词的每个字母
+接错字母 -1 心 共 3 心</p><button id="ovB">开始游戏</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  ["apple", "苹果"], ["bread", "面包"], ["tiger", "老虎"], ["house", "房子"], ["cloud", "云"]
+];
+var cv = document.getElementById("cv");
+var ctx = cv.getContext("2d");
+var W = cv.width, H = cv.height;
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var SIZE = 42, TRAYW = 92, TRAYH = 16, FALL = 130;
+var wi = 0, filled = 0, score = 0, hp = 3;
+var trayX = W / 2, drops = [], spawnT = 0, playing = false;
+var keys = {}, lastTs = 0, rafId = 0, shake = 0;
+
+function need() { return WORDS[wi][0][filled]; }
+
+function spawn() {
+  var needCh = need();
+  var ch;
+  if (Math.random() < 0.55) {
+    ch = needCh;
+  } else {
+    ch = "abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 26)];
+  }
+  drops.push({
+    x: 30 + Math.random() * (W - 60),
+    y: 90,
+    ch: ch,
+    v: FALL + Math.random() * 40 + wi * 10
+  });
+}
+
+function startWord() {
+  filled = 0;
+  drops = [];
+  spawnT = 0;
+}
+
+function update(dt) {
+  var speed = 340;
+  if (keys["ArrowLeft"] || keys["a"]) trayX -= speed * dt;
+  if (keys["ArrowRight"] || keys["d"]) trayX += speed * dt;
+  if (trayX < TRAYW / 2) trayX = TRAYW / 2;
+  if (trayX > W - TRAYW / 2) trayX = W - TRAYW / 2;
+  spawnT -= dt;
+  if (spawnT <= 0) {
+    spawn();
+    spawnT = 0.85;
+  }
+  var trayY = H - 60;
+  for (var i = drops.length - 1; i >= 0; i--) {
+    var d = drops[i];
+    d.y += d.v * dt;
+    if (d.y + SIZE / 2 >= trayY && d.y < trayY + 30 && Math.abs(d.x - trayX) < TRAYW / 2 + SIZE / 4) {
+      drops.splice(i, 1);
+      if (d.ch === need()) {
+        filled++;
+        score += 10;
+        if (filled >= WORDS[wi][0].length) {
+          score += 20;
+          wi++;
+          if (wi >= WORDS.length) {
+            win();
+            return;
+          }
+          startWord();
+        }
+      } else {
+        hp--;
+        shake = 0.3;
+        if (hp <= 0) { lose(); return; }
+      }
+    } else if (d.y > H + SIZE) {
+      drops.splice(i, 1);
+    }
+  }
+  if (shake > 0) shake -= dt;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  var ox = 0;
+  if (shake > 0) ox = Math.sin(shake * 60) * 6;
+  ctx.save();
+  ctx.translate(ox, 0);
+  ctx.fillStyle = "#9aa3c7";
+  ctx.font = "13px system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText("第 " + (wi + 1) + "/5 词", 14, 24);
+  ctx.fillText("得分 " + score, 14, 44);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#ff6b8a";
+  ctx.fillText("心 " + Math.max(0, hp), W - 14, 24);
+  ctx.fillStyle = "#8ecae6";
+  ctx.fillText(WORDS[wi][1], W - 14, 44);
+  var word = WORDS[wi][0];
+  var n = word.length;
+  var cellW = 52, total = n * cellW, x0 = (W - total) / 2;
+  for (var i = 0; i < n; i++) {
+    ctx.fillStyle = i < filled ? "#2ec27e" : "#232a4d";
+    ctx.fillRect(x0 + i * cellW + 2, 54, cellW - 4, 44);
+    ctx.fillStyle = i < filled ? "#08131c" : "#5a6189";
+    ctx.font = "bold 26px Consolas,monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(i < filled ? word[i].toUpperCase() : "?", x0 + i * cellW + cellW / 2 - 2, 85);
+  }
+  for (var j = 0; j < drops.length; j++) {
+    var d = drops[j];
+    ctx.fillStyle = d.ch === need() ? "rgba(255,209,102,.12)" : "rgba(35,42,77,.7)";
+    ctx.strokeStyle = d.ch === need() ? "#ffd166" : "#3a4165";
+    ctx.lineWidth = 2;
+    var r = 9;
+    var x = d.x - SIZE / 2, y = d.y - SIZE / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + SIZE, y, x + SIZE, y + SIZE, r);
+    ctx.arcTo(x + SIZE, y + SIZE, x, y + SIZE, r);
+    ctx.arcTo(x, y + SIZE, x, y, r);
+    ctx.arcTo(x, y, x + SIZE, y, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 24px Consolas,monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(d.ch.toUpperCase(), d.x, d.y + 8);
+  }
+  var trayY = H - 60;
+  ctx.fillStyle = "#4cc9f0";
+  ctx.fillRect(trayX - TRAYW / 2, trayY, TRAYW, TRAYH);
+  ctx.fillStyle = "#1a1d33";
+  ctx.fillRect(trayX - TRAYW / 2 + 6, trayY + 4, TRAYW - 12, 4);
+  ctx.restore();
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  var dt = Math.min(0.05, (ts - lastTs) / 1000);
+  lastTs = ts;
+  update(dt);
+  if (playing) {
+    draw();
+    rafId = requestAnimationFrame(loop);
+  }
+}
+
+function win() {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  ovT.textContent = "全部拼完!";
+  ovP.textContent = "5 个单词全部接住\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function lose() {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  ovT.textContent = "心用完了";
+  ovP.textContent = "拼到第 " + (wi + 1) + " 个词\n得分 " + score;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+function start() {
+  wi = 0; score = 0; hp = 3;
+  trayX = W / 2;
+  keys = {};
+  startWord();
+  playing = true;
+  lastTs = 0;
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+document.addEventListener("keydown", function (e) {
+  keys[e.key] = true;
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") e.preventDefault();
+});
+document.addEventListener("keyup", function (e) {
+  keys[e.key] = false;
+});
+function moveTo(clientX) {
+  var rect = cv.getBoundingClientRect();
+  trayX = (clientX - rect.left) / rect.width * W;
+  if (trayX < TRAYW / 2) trayX = TRAYW / 2;
+  if (trayX > W - TRAYW / 2) trayX = W - TRAYW / 2;
+}
+cv.addEventListener("mousemove", function (e) { if (playing) moveTo(e.clientX); });
+cv.addEventListener("touchmove", function (e) {
+  if (playing) { moveTo(e.touches[0].clientX); e.preventDefault(); }
+}, { passive: false });
+ovB.onclick = start;
+</script>
+</body>
+</html>

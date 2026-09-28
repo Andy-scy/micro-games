@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>像素小鸟</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#38bdf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#38bdf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#38bdf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#38bdf8;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>像素小鸟</h1>
+  <p class="hint">空格 / 鼠标点击 / 触屏点按 = 拍翅膀 · 穿过管道缝隙 +1 分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">像素小鸟</h2>
+      <p id="ovDesc">经典像素飞行:每次点按让小鸟向上拍翅一次,松手后受重力下坠。穿过一对管道缝隙得 1 分,撞到管道或坠落地面即结束。稳住节奏,看你能飞多远!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=72,GAP=150,SPACE=236,GRAV=1500,FLAP=-380,BX=120,BR=13;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,pipes,popups,score,best=0,tick;
+var stars=[],i;
+for(i=0;i<40;i++)stars.push({x:Math.random()*W,y:Math.random()*GROUND,r:Math.random()*1.4+0.4});
+function newPipe(x){return{x:x,gy:60+Math.random()*(GROUND-120-GAP),passed:false};}
+function reset(){
+  bird={y:270,vy:0,fl:0};
+  pipes=[newPipe(W+150)];
+  popups=[];score=0;tick=0;
+  elScore.textContent="0";
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,p;
+  tick+=dt;
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("小鸟一头栽到了地面!");return;}
+  for(i=0;i<pipes.length;i++)pipes[i].x-=150*dt;
+  if(pipes[pipes.length-1].x<W-SPACE)pipes.push(newPipe(W+24));
+  if(pipes[0].x<-PW-12)pipes.shift();
+  for(i=0;i<pipes.length;i++){
+    p=pipes[i];
+    if(!p.passed&&p.x+PW<BX-BR){
+      p.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    if(circleRect(BX,bird.y,BR,p.x,0,PW,p.gy)||circleRect(BX,bird.y,BR,p.x,p.gy+GAP,PW,GROUND-p.gy-GAP)){
+      die("咚!撞上了管道。");return;
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawPipe(p){
+  ctx.fillStyle="#2f9e57";
+  ctx.fillRect(p.x,0,PW,p.gy);
+  ctx.fillRect(p.x,p.gy+GAP,PW,GROUND-p.gy-GAP);
+  ctx.fillStyle="#54d98c";
+  ctx.fillRect(p.x+6,0,8,p.gy);
+  ctx.fillRect(p.x+6,p.gy+GAP,8,GROUND-p.gy-GAP);
+  ctx.fillStyle="#1c5e35";
+  ctx.fillRect(p.x-4,p.gy-14,PW+8,14);
+  ctx.fillRect(p.x-4,p.gy+GAP,PW+8,14);
+}
+function draw(){
+  var i,p;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0e1526";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(200,220,255,0.5)";
+  for(i=0;i<stars.length;i++)ctx.fillRect(stars[i].x,stars[i].y,stars[i].r,stars[i].r);
+  for(i=0;i<pipes.length;i++)drawPipe(pipes[i]);
+  ctx.fillStyle="#20263f";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#2d3557";
+  var off=(tick*150)%24;
+  for(i=-1;i<W/24+1;i++)ctx.fillRect(i*24-off,GROUND,12,6);
+  ctx.fillStyle="#fbbf24";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f59e0b";
+  ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(BX+6,bird.y-4,1.8,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f97316";
+  ctx.beginPath();ctx.moveTo(BX+BR-2,bird.y);ctx.lineTo(BX+BR+8,bird.y+2);ctx.lineTo(BX+BR-2,bird.y+6);ctx.closePath();ctx.fill();
+  var wy=bird.y+Math.sin(tick*22)*(3+bird.fl*5)-2;
+  ctx.fillStyle="#fde68a";
+  ctx.beginPath();ctx.ellipse(BX-6,wy,8,5,-0.5,0,Math.PI*2);ctx.fill();
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(251,191,36,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

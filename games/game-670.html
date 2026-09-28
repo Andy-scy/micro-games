@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>传送带抢收</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>传送带抢收</h1>
+  <p class="tips">小推车停在传送带上,会被皮带带着往右溜!← → 或 A/D 抢控制权,触屏拖动。包裹必须半空接住;落带被冲走一个 -1 生命,带速还会越来越快!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">带速</div><div class="big" id="bv">64</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">传送带抢收</h2><p id="ovp">玩法:会被皮带拖走的接货战。<br>· 小推车随传送带自动右移,需不断往回控<br>· 键盘 ← → 或 A/D,触屏按住拖动<br>· 半空接住包裹 +10,带速 +2(越接越快)<br>· 包裹落到带上会被冲出右端:-1 生命<br>· 共 3 条生命,考验反向控车!</p><button class="btn" id="obtn">开始抢收</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var BELT_Y=H-64;
+var S=null;
+function reset(){S={on:false,score:0,lives:3,beltV:64,off:0,cx:W/2,st:0.9,t:0,boxes:[],pops:[],keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('bv').textContent='64';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.cx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.cx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.cx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function update(dt){
+  S.t+=dt;
+  S.cx+=S.beltV*dt;
+  var l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.cx-=330*dt;
+  if(r)S.cx+=140*dt;
+  S.cx=Math.max(26,Math.min(W-26,S.cx));
+  S.off=(S.off+S.beltV*dt)%26;
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.95+Math.random()*0.45;
+    S.boxes.push({x:30+Math.random()*(W-60),y:-16,v:165+S.t*3+Math.random()*50,m:0,rot:0});
+  }
+  for(var i=S.boxes.length-1;i>=0;i--){
+    var b=S.boxes[i];
+    if(b.m===0){
+      b.y+=b.v*dt;
+      if(b.y>=BELT_Y-52&&b.y<=BELT_Y-22&&Math.abs(b.x-S.cx)<30){
+        S.score+=10;$('sc').textContent=S.score;
+        S.beltV=Math.min(150,S.beltV+2);$('bv').textContent=Math.round(S.beltV);
+        pop(b.x,BELT_Y-70,'+10','#51d88a');
+        S.boxes.splice(i,1);continue;
+      }
+      if(b.y>=BELT_Y-10){
+        b.m=1;b.y=BELT_Y-12;
+        pop(b.x,BELT_Y-40,'掉在带上了!','#9aa3c0');
+      }
+    }else{
+      b.x+=S.beltV*dt;b.rot+=S.beltV*dt*0.012;
+      if(b.x>W+16){
+        S.boxes.splice(i,1);
+        S.lives--;$('hp').textContent=hearts();
+        pop(W-60,BELT_Y-60,'包裹被冲走!-1 生命','#ff6b6b');
+        if(S.lives<=0)gameOver();
+      }
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='包裹冲走了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>最终带速 <b>'+Math.round(S.beltV)+'</b><br>逆流而上才是真本事,再来!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#232a48';ctx.fillRect(0,BELT_Y,W,26);
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=3;
+  for(var x=-26+S.off;x<W+26;x+=26){
+    ctx.beginPath();ctx.moveTo(x,BELT_Y+3);ctx.lineTo(x+10,BELT_Y+23);ctx.stroke();
+  }
+  ctx.fillStyle='#3d4470';
+  for(var r2=13;r2<W;r2+=52){ctx.beginPath();ctx.arc(r2,BELT_Y+31,5,0,Math.PI*2);ctx.fill()}
+  for(var i=0;i<S.boxes.length;i++){
+    var b=S.boxes[i];
+    ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.rot);
+    ctx.fillStyle='#b5854e';rr(-13,-13,26,26,4);ctx.fill();
+    ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(-13,-13,26,26,4);ctx.stroke();
+    ctx.strokeStyle='#e8d5b0';
+    ctx.beginPath();ctx.moveTo(0,-13);ctx.lineTo(0,13);ctx.moveTo(-13,0);ctx.lineTo(13,0);ctx.stroke();
+    ctx.restore();
+  }
+  ctx.fillStyle='#4cc9f0';rr(S.cx-24,BELT_Y-30,48,22,5);ctx.fill();
+  ctx.strokeStyle='#081226';ctx.lineWidth=2;rr(S.cx-24,BELT_Y-30,48,22,5);ctx.stroke();
+  ctx.fillStyle='#23273a';
+  ctx.beginPath();ctx.arc(S.cx-14,BELT_Y-5,5,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(S.cx+14,BELT_Y-5,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#081226';ctx.font='bold 11px system-ui';ctx.textAlign='center';
+  ctx.fillText('推车',S.cx,BELT_Y-16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

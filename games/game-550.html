@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>花色速叠 分秒必争</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:640px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#stage{min-height:132px;display:flex;align-items:center;justify-content:center}
+.card{width:84px;height:120px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .18s ease}
+@keyframes pop{from{transform:scale(.6) rotate(-6deg)}to{transform:scale(1) rotate(0)}}
+.card.red{color:#d62839}
+.card .r{font-size:30px;font-weight:800}
+.card .s{font-size:44px;line-height:1}
+.card.none{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.none span{visibility:hidden}
+#bins{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.bin{width:74px;padding:8px 0;border-radius:10px;background:#1a1f35;border:2px solid #3d4570;cursor:pointer;text-align:center;user-select:none}
+.bin .bs{font-size:26px;line-height:1}
+.bin .bn{font-size:12px;color:#9aa3c0;margin-top:2px}
+.bin:hover{border-color:#4cc9f0}
+.bin.done{border-color:#ffd166}
+#msg{min-height:20px;font-size:14px;color:#ffd166;text-align:center}
+#timebar{width:100%;max-width:420px;height:12px;border-radius:6px;background:#0a0d18;overflow:hidden}
+#tfill{height:100%;width:100%;background:linear-gradient(90deg,#ff6b6b,#ffd166)}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>花色速叠 · 分秒必争</h1>
+<p id="how">翻开一张牌，若它正好是某花色需要的下一张（从 A 顺到 K），就点对应花色堆叠得分 +10；点错花色或点数扣一颗心。点不对的牌可「弃掉」换下一张。75 秒内拿 150 分即胜利。</p>
+<div id="bar"><span>得分 <b id="sc">0</b></span><span>心 <b id="lv">♥♥♥</b></span><span>剩余 <b id="tm">75</b> 秒</span><span>胜利线 150</span></div>
+<div id="table">
+  <div id="timebar"><div id="tfill"></div></div>
+  <div id="stage"></div>
+  <div id="msg"></div>
+  <div id="bins"></div>
+  <div id="btns2" style="display:flex;gap:10px">
+    <button id="drop">弃牌换张</button><button id="rst" class="acc">重开</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],cur=null,needed={},score=0,lives=3,timeLeft=75,phase='run',raf=null,lastTs=0,shownSec=75;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function vi(r){return RANKS.indexOf(r);}
+function cardHTML(c){
+  if(!c)return '<div class="card none"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'·';
+  $('lv').textContent=h;
+  $('stage').innerHTML=cardHTML(cur);
+  var box=$('bins');box.innerHTML='';
+  for(var k=0;k<4;k++){
+    var s=SUITS[k],done=needed[s]>=13;
+    var d=document.createElement('div');
+    d.className='bin'+(done?' done':'');
+    d.setAttribute('data-s',s);
+    d.innerHTML='<div class="bs'+((s==='♥'||s==='♦')?'':'')+'" style="color:'+(done?'#ffd166':((s==='♥'||s==='♦')?'#d62839':'#e8eaf2'))+'">'+s+'</div><div class="bn">'+(done?'完成':'需要 '+RANKS[needed[s]])+'</div>';
+    box.appendChild(d);
+  }
+}
+function nextCard(){
+  if(deck.length===0)return false;
+  cur=deck.pop();return true;
+}
+function afterAction(){
+  if(!nextCard()){
+    end(true,'整副 52 张全部归位，超神手速！总分 '+score);
+    return;
+  }
+  render();
+  if(score>=150){end(true,'提前冲上 '+score+' 分，胜利！');}
+}
+function clickBin(s){
+  if(phase!=='run'||!cur)return;
+  if(cur.s===s&&vi(cur.r)===needed[s]){
+    needed[s]++;score+=10;msg('+'+10+'！'+s+' 叠到 '+RANKS[needed[s]-1]);afterAction();
+  }else{
+    lives--;msg('放错了！'+(lives>0?'剩 '+lives+' 颗心':'心用完了'));
+    if(lives<=0){render();end(false,'三次放错，手忙脚乱');return;}
+    render();
+  }
+}
+function drop(){
+  if(phase!=='run'||!cur)return;
+  msg('弃掉 '+cur.r+cur.s);
+  afterAction();
+}
+function msg(s){$('msg').textContent=s;}
+function master(ts){
+  raf=requestAnimationFrame(master);
+  if(phase!=='run')return;
+  if(lastTs===0)lastTs=ts;
+  var dt=(ts-lastTs)/1000;lastTs=ts;
+  if(dt>0.2)dt=0.2;
+  timeLeft-=dt;
+  var sec=Math.max(0,Math.ceil(timeLeft));
+  if(sec!==shownSec){shownSec=sec;$('tm').textContent=sec;}
+  $('tfill').style.width=Math.max(0,timeLeft/75*100)+'%';
+  if(timeLeft<=0){
+    if(score>=150)end(true,'时间到！'+score+' 分达标，胜利');
+    else end(false,'时间到！'+score+' 分未达 150 分');
+  }
+}
+function end(win,info){
+  if(phase==='done')return;
+  phase='done';
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 叠牌 '+Math.round(score/10)+' 张';
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(raf)cancelAnimationFrame(raf);
+  deck=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});
+  shuffle(deck);
+  needed={};for(var k=0;k<4;k++)needed[SUITS[k]]=0;
+  score=0;lives=3;timeLeft=75;phase='run';lastTs=0;shownSec=75;
+  cur=deck.pop();
+  $('over').classList.add('hide');msg('看准花色和顺序，快！');render();
+  raf=requestAnimationFrame(master);
+}
+$('bins').addEventListener('click',function(e){
+  var t=e.target;
+  while(t&&!t.classList.contains('bin'))t=t.parentElement;
+  if(!t)return;
+  clickBin(t.getAttribute('data-s'));
+});
+$('drop').onclick=drop;
+$('rst').onclick=newGame;
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

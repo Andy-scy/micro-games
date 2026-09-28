@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>口算闪电战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+#eq{height:110px;background:#0b0e1a;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:38px;font-weight:700;letter-spacing:2px;margin-bottom:12px;transition:color .06s}
+#eq.good{color:#4ade80}
+#eq.bad{color:#ef4444}
+.btns{display:flex;gap:12px}
+.btns button{flex:1;border:none;border-radius:12px;padding:16px 0;font-size:20px;font-weight:700;cursor:pointer;font-family:inherit}
+#btnYes{background:#4ade80;color:#05230f}
+#btnNo{background:#ef4444;color:#450a0a}
+.btns button:active{transform:scale(.96)}
+.keytip{text-align:center;color:#5b6285;font-size:12px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>口算闪电战</h1>
+  <p class="hint">30 秒内判断尽可能多的加减算式 · 答错扣 3 秒</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>答对 <b id="ok">0</b></span>
+    <span>时间 <b id="time">30.0s</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div id="eq">7 + 5 = 12 ?</div>
+    <div class="btns">
+      <button id="btnYes">对(Y)</button>
+      <button id="btnNo">错(N)</button>
+    </div>
+    <p class="keytip">键盘:Y 或 ← = 对,N 或 → = 错</p>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">口算闪电战</h2>
+      <p id="ovDesc">算式会不断刷出,判断它的结果是对是错!答对 +10 分,连对越多单次加分越高;答错扣 3 秒。数字会越出越大,30 秒倒计时结束即结算。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var eq=$("eq"),btnYes=$("btnYes"),btnNo=$("btnNo"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elOk=$("ok"),elTime=$("time"),elBest=$("best");
+var DURATION=30000,KEY="mg_s234";
+var state="menu",score=0,okCount=0,streak=0,timeLeft=0,q=null,lastT=0,eqTimer=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(n){return (Math.random()*n)|0;}
+function gen(){
+  var level=Math.min(5,Math.floor(okCount/6));
+  var maxN=[9,15,25,40,60,99][level];
+  var a=1+rnd(maxN),b=1+rnd(maxN),op,res,delta,shown;
+  if(Math.random()<0.5){op="+";res=a+b;}
+  else{
+    op="-";
+    if(a<b){var t=a;a=b;b=t;}
+    res=a-b;
+  }
+  if(Math.random()<0.5){shown=res;}
+  else{
+    delta=1+rnd(9);
+    shown=res+(Math.random()<0.5?delta:-delta);
+    if(shown<0)shown=res+delta;
+  }
+  q={a:a,b:b,op:op,shown:shown,valid:shown===res};
+  eq.textContent=a+" "+op+" "+b+" = "+shown+" ?";
+}
+function flashEq(cls){
+  eq.classList.add(cls);
+  clearTimeout(eqTimer);
+  eqTimer=setTimeout(function(){eq.classList.remove("good");eq.classList.remove("bad");},180);
+}
+function updateHud(){
+  elScore.textContent=score;
+  elOk.textContent=okCount;
+  elBest.textContent=best;
+  elTime.textContent=(Math.max(0,timeLeft)/1000).toFixed(1)+"s";
+}
+function answer(val){
+  if(state!=="playing")return;
+  if(val===q.valid){
+    okCount++;
+    streak++;
+    score+=10+Math.min(10,streak);
+    flashEq("good");
+  }else{
+    timeLeft-=3000;
+    streak=0;
+    flashEq("bad");
+  }
+  gen();
+  updateHud();
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="时间到!";
+  ovDesc.textContent="答对 "+okCount+" 题 · 最终连击已清零";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state!=="playing")return;
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;updateHud();endGame();return;}
+  elTime.textContent=(timeLeft/1000).toFixed(1)+"s";
+}
+function startGame(){
+  score=0;okCount=0;streak=0;timeLeft=DURATION;
+  state="playing";
+  eq.classList.remove("good");eq.classList.remove("bad");
+  gen();
+  ov.classList.add("hide");
+  updateHud();
+}
+btnYes.addEventListener("click",function(){answer(true);});
+btnNo.addEventListener("click",function(){answer(false);});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="y"||e.key==="Y"||e.key==="ArrowLeft"){e.preventDefault();answer(true);}
+  else if(e.key==="n"||e.key==="N"||e.key==="ArrowRight"){e.preventDefault();answer(false);}
+});
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

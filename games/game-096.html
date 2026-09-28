@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>侧翼突袭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:700px}
+h1{font-size:22px;text-align:center;color:#ffa657;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#ffa657;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#ffa657;color:#38200a;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#ffa657;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>侧翼突袭</h1>
+<p class="tip">横版侧视突防:↑↓/WS 或按住拖动升降(可小幅前后),空格 / 按住屏幕向右开火。地形会向左推进,小心地面炮塔与迎面战机,拿到 700 分获胜。</p>
+<div class="stage">
+<canvas id="cv" width="640" height="440"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">侧翼突袭</h2>
+<p id="ovX">贴地飞行,侧向突击:迎着敌方空防向右推进,打掉碍事的战机与山头炮塔。</p>
+<button id="btn">开始突防</button>
+</div></div>
+</div>
+<div class="hud"><span>得分<b id="hS">0</b></span><span>航程<b id="hD">0m</b></span><span>生命<b id="hH">3</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hS=document.getElementById("hS"),hD=document.getElementById("hD"),hH=document.getElementById("hH");
+var GOAL=700;
+var state="ready",score=0,hp=3,inv=0,cool=0,t=0;
+var scroll=0,speed=100,flyT=1.2,turT=2.5;
+var ship={x:110,y:H/2};
+var bullets=[],ebullets=[],flyers=[],turrets=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<70;i++){stars.push({x:Math.random()*W,y:Math.random()*(H-70),s:Math.random()*1.5+0.4,v:Math.random()*40+10});}
+function groundY(wx){
+  return H-46+Math.sin(wx*0.012)*16+Math.sin(wx*0.033+2)*9;
+}
+function reset(){
+  score=0;hp=3;inv=0;cool=0;t=0;scroll=0;speed=100;flyT=1.2;turT=2.8;
+  ship.x=110;ship.y=H/2;
+  bullets=[];ebullets=[];flyers=[];turrets=[];parts=[];
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"突防成功":"战机坠毁";
+  ovX.textContent="最终得分:"+score+(win?" · 你从侧翼撕开了整条防线!":" · 低空有炮塔,高空有战机,选好你的高度。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;inv-=dt;cool-=dt;
+  scroll+=speed*dt;
+  speed=Math.min(220,100+score*0.12);
+  var sp=240;
+  if(keys.ArrowUp||keys.w)ship.y-=sp*dt;
+  if(keys.ArrowDown||keys.s)ship.y+=sp*dt;
+  if(keys.ArrowLeft||keys.a)ship.x-=sp*0.7*dt;
+  if(keys.ArrowRight||keys.d)ship.x+=sp*0.7*dt;
+  if(pressed){
+    ship.y+=(py-ship.y)*Math.min(1,dt*9);
+    ship.x+=(px-ship.x)*Math.min(1,dt*9);
+    ship.x=Math.max(40,Math.min(260,ship.x));
+  }
+  ship.x=Math.max(36,Math.min(300,ship.x));
+  ship.y=Math.max(24,Math.min(groundY(ship.x)-16,ship.y));
+  if((keys[" "]||keys.z||pressed)&&cool<=0){
+    cool=0.17;
+    bullets.push({x:ship.x+22,y:ship.y-4,vx:560,vy:0});
+  }
+  flyT-=dt;turT-=dt;
+  if(flyT<=0){
+    flyT=Math.max(0.8,2-score*0.0012);
+    flyers.push({x:W+30,y:40+Math.random()*(H-160),vx:-(110+score*0.06),hp:1,ph:Math.random()*6.283,ft:1.4});
+  }
+  if(turT<=0){
+    turT=Math.max(2,4.5-score*0.002);
+    turrets.push({wx:scroll+W+40,hp:2,ft:1.8});
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var b=bullets[bi];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x>W+20)bullets.splice(bi,1);
+  }
+  for(i=flyers.length-1;i>=0;i--){
+    var e=flyers[i];
+    e.x+=e.vx*dt;
+    e.y+=Math.sin(t*3+e.ph)*40*dt;
+    e.ft-=dt;
+    if(e.ft<=0){
+      e.ft=1.6+Math.random();
+      var dx=ship.x-e.x,dy=ship.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+      ebullets.push({x:e.x-14,y:e.y,vx:dx/d*200,vy:dy/d*200});
+    }
+    if(e.x<-30){flyers.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(e.x-ship.x)<24&&Math.abs(e.y-ship.y)<20){
+      flyers.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+  }
+  for(i=turrets.length-1;i>=0;i--){
+    var tu=turrets[i];
+    var tx=tu.wx-scroll;
+    if(tx<-30){turrets.splice(i,1);continue;}
+    tu.ft-=dt;
+    var ty=groundY(tu.wx)-8;
+    if(tu.ft<=0&&tx<W-20){
+      tu.ft=Math.max(1.2,2.4-score*0.002);
+      var dx2=ship.x-tx,dy2=ship.y-ty,d2=Math.sqrt(dx2*dx2+dy2*dy2)||1;
+      ebullets.push({x:tx,y:ty-10,vx:dx2/d2*190,vy:dy2/d2*190});
+    }
+    if(inv<=0&&Math.abs(tx-ship.x)<24&&Math.abs(ty-ship.y)<22){
+      hp--;inv=1.3;boom(tx,ty,12,"#ff6b6b");
+      turrets.splice(i,1);
+    }
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var eb=ebullets[i];
+    eb.x+=eb.vx*dt;eb.y+=eb.vy*dt;
+    if(eb.x<-10||eb.y>H+10||eb.y<-10){ebullets.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(eb.x-ship.x)<11&&Math.abs(eb.y-ship.y)<11){
+      ebullets.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,12,"#ff6b6b");
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    var used=false;
+    for(j=flyers.length-1;j>=0;j--){
+      var e2=flyers[j];
+      if(Math.abs(bl.x-e2.x)<18&&Math.abs(bl.y-e2.y)<16){
+        bullets.splice(bi,1);used=true;
+        e2.hp--;
+        if(e2.hp<=0){boom(e2.x,e2.y,12,"#ffd166");score+=15;flyers.splice(j,1);}
+        break;
+      }
+    }
+    if(used)continue;
+    for(j=turrets.length-1;j>=0;j--){
+      var tu2=turrets[j];
+      var tx2=tu2.wx-scroll,ty2=groundY(tu2.wx)-8;
+      if(Math.abs(bl.x-tx2)<16&&Math.abs(bl.y-ty2)<16){
+        bullets.splice(bi,1);
+        tu2.hp--;
+        if(tu2.hp<=0){boom(tx2,ty2,14,"#ffd166");score+=30;turrets.splice(j,1);}
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(inv<=0&&hp<=0){gameOver(false);return;}
+  if(score>=GOAL)gameOver(true);
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    var sx=s.x-scroll*s.v*0.14;
+    sx=((sx%W)+W)%W;
+    ctx.fillRect(sx,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#141a30";
+  ctx.beginPath();
+  ctx.moveTo(0,H);
+  for(var wx=0;wx<=W;wx+=8)ctx.lineTo(wx,groundY(wx+scroll));
+  ctx.lineTo(W,H);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle="#ffa657";
+  ctx.lineWidth=2.5;
+  ctx.beginPath();
+  for(wx=0;wx<=W;wx+=8){
+    if(wx===0)ctx.moveTo(wx,groundY(wx+scroll));
+    else ctx.lineTo(wx,groundY(wx+scroll));
+  }
+  ctx.stroke();
+  for(i=0;i<turrets.length;i++){
+    var tu=turrets[i];
+    var tx=tu.wx-scroll,ty=groundY(tu.wx);
+    if(tx<-20||tx>W+20)continue;
+    ctx.fillStyle="#7d6b58";
+    ctx.fillRect(tx-12,ty-16,24,16);
+    ctx.fillStyle="#ff6b6b";
+    ctx.fillRect(tx-6,ty-26,12,10);
+  }
+  for(i=0;i<flyers.length;i++){
+    var e=flyers[i];
+    ctx.save();ctx.translate(e.x,e.y);
+    ctx.fillStyle="#ff6b6b";
+    ctx.beginPath();ctx.moveTo(-16,0);ctx.lineTo(10,-9);ctx.lineTo(16,0);ctx.lineTo(10,9);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle="#ffd166";ctx.fillRect(-4,-2,8,4);
+    ctx.restore();
+  }
+  ctx.fillStyle="#ffa657";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-8,bullets[i].y-2,14,4);
+  ctx.fillStyle="#ff9f43";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4,0,6.283);ctx.fill();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"&&!(inv>0&&Math.floor(inv*12)%2===0)){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle="#ffa657";
+    ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-12,-10);ctx.lineTo(-6,0);ctx.lineTo(-12,10);
+    ctx.closePath();ctx.fill();
+    if(Math.floor(t*16)%2===0){
+      ctx.fillStyle="#ffd166";
+      ctx.beginPath();ctx.moveTo(-12,-3);ctx.lineTo(-22-Math.random()*6,0);ctx.lineTo(-12,3);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.fillStyle="rgba(255,166,87,0.8)";
+  ctx.font="12px system-ui";ctx.textAlign="right";
+  ctx.fillText("航程 "+Math.floor(scroll/10)+"00 m",W-12,20);
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  if(state==="play")update(dt);
+  draw();
+  hS.textContent=score;
+  hD.textContent=Math.floor(scroll/10)+"00m";
+  hH.textContent=hp;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

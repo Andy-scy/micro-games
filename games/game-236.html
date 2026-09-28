@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>疯狂连点</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+#area{position:relative;height:270px;background:#0b0e1a;border:2px solid #232849;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;user-select:none;overflow:hidden;touch-action:manipulation}
+#area:active{border-color:#4ade80}
+#bigNum{font-size:56px;font-weight:800;color:#4ade80;line-height:1}
+#areaLabel{color:#5b6285;font-size:13px;margin-top:8px}
+.rip{position:absolute;width:16px;height:16px;border:3px solid #4ade80;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;animation:rip .45s ease-out forwards}
+@keyframes rip{to{width:86px;height:86px;opacity:0}}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>疯狂连点</h1>
+  <p class="hint">10 秒内疯狂点击区域(或狂按空格)· 测测你的手速 CPS</p>
+  <div class="hud">
+    <span>点击 <b id="clicks">0</b></span>
+    <span>CPS <b id="cps">0.0</b></span>
+    <span>时间 <b id="time">10.0s</b></span>
+    <span>最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <div id="area">
+      <div id="bigNum">0</div>
+      <div id="areaLabel">点这里!点这里!</div>
+      <div class="overlay" id="ov">
+        <h2 id="ovTitle">疯狂连点</h2>
+        <p id="ovDesc">规则简单粗暴:10 秒内用手指或鼠标疯狂点击区域,也可以狂按空格键!结束后按每秒点击数 CPS 评定手速段位,看看你是「人形缝纫机」还是「慢郎中」。</p>
+        <p class="big" id="ovScore" style="display:none"></p>
+        <button id="btnGo">开始挑战</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var area=$("area"),bigNum=$("bigNum"),areaLabel=$("areaLabel"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elClicks=$("clicks"),elCps=$("cps"),elTime=$("time"),elBest=$("best");
+var DURATION=10000,KEY="mg_s236";
+var state="menu",clicks=0,startAt=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseFloat(localStorage.getItem(k));return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elClicks.textContent=clicks;
+  elCps.textContent=(clicks/10).toFixed(1);
+  elBest.textContent=best>0?best.toFixed(1):"--";
+}
+function endGame(){
+  state="over";
+  var cps=clicks/10;
+  if(cps>best){best=cps;saveBest(KEY,best);}
+  var grade=cps>=8?"S · 人形缝纫机":cps>=6.5?"A · 手速惊人":cps>=5?"B · 状态在线":cps>=3.5?"C · 略显微慢":"D · 慢郎中";
+  ovTitle.textContent="手速结算";
+  ovDesc.textContent="10 秒共点击 "+clicks+" 次\n段位 "+grade;
+  ovScore.style.display="block";
+  ovScore.textContent="手速 "+cps.toFixed(1)+" CPS";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  lastT=t;
+  if(state!=="playing")return;
+  var left=DURATION-(t-startAt);
+  if(left<=0){left=0;elTime.textContent="0.0s";endGame();return;}
+  elTime.textContent=(left/1000).toFixed(1)+"s";
+  var gone=(DURATION-left)/1000;
+  elCps.textContent=gone>0?(clicks/gone).toFixed(1):"0.0";
+}
+function register(e){
+  if(state!=="playing")return;
+  clicks++;
+  bigNum.textContent=clicks;
+  updateHud();
+  if(e){
+    var r=area.getBoundingClientRect();
+    var x=e.clientX-r.left,y=e.clientY-r.top;
+    var rip=document.createElement("div");
+    rip.className="rip";
+    rip.style.left=x+"px";
+    rip.style.top=y+"px";
+    area.appendChild(rip);
+    setTimeout(function(){if(rip.parentNode)rip.parentNode.removeChild(rip);},480);
+  }
+}
+area.addEventListener("pointerdown",function(e){
+  if(state!=="playing")return;
+  e.preventDefault();
+  register(e);
+});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing"){startGame();return;}
+    if(!e.repeat)register(null);
+  }
+});
+function startGame(){
+  clicks=0;
+  bigNum.textContent="0";
+  areaLabel.textContent="点这里!点这里!";
+  state="playing";
+  startAt=performance.now();
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

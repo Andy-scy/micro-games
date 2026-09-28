@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六十秒速测</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:10px}
+#stage{position:relative;width:100%;max-width:760px;background:#151a30;border-radius:14px;padding:8px 0}
+#stream{position:relative;height:168px;overflow-y:hidden;padding:16px 20px;font-family:ui-monospace,Consolas,monospace;font-size:22px;line-height:1.9}
+.w{margin-right:16px;display:inline-block}
+.c{color:#5a6284}
+.w.act .c{color:#7c9cff}
+.w.act .c.cur{color:#e8eaf6;background:#2a3564;border-radius:3px}
+.w.act .c.ok{color:#6ee7a0}
+.w.act .c.bad{color:#ff6b6b}
+.w.fin .c.ok{color:#3f5c50}
+.w.fin .c.bad{color:#7c4a55}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;z-index:2}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#ffd76a}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>六十秒速测</h1>
+<div id="tip">60 秒打字测速：空格换词，打错的字母会标红；退格可以纠错但每次扣 3 分</div>
+<div id="hud"></div>
+<div id="stage">
+<div id="stream"></div>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始测试</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var BANK=["time","year","people","way","day","man","thing","world","life","hand","part","child","eye","woman","place","week","case","point","group","number","fact","right","study","book","eye","job","word","business","issue","side","kind","head","house","service","friend","father","power","hour","game","line","end","member","law","car","city","name","team","minute","idea","body","back","parent","face","level","door","art","war","story","result","change","morning","reason","research","girl","guy","moment","air","teacher","force","education","foot","boy","age","policy","music","market","sense","nation","plan","college","death","experience","effect","class","control","care","field","development","role","effort","rate","heart","drug","show","leader","light","voice","wife","police","mind","price","report","decision","son","view","town","road","arm","difference","value","building","action","model","season","society","tax","director","position","player","record","paper","space","ground","form","event","official","matter","center","couple","site","project","activity","star","table","court","oil","cost","figure","street","image","phone","data","picture","practice","piece","land","product","doctor","wall","patient","worker","news","test","movie","north","love","support","technology","step","baby","computer","type","attention","film","tree","source","truth","performance"];
+var TOTAL_TIME=60,NWORDS=70;
+var stream=document.getElementById('stream'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var seq,typed,wIdx,cIdx,timeLeft,elapsed,okChars,badChars,backs,running,raf,tPrev,over;
+function hudUpd(){
+  var min=Math.max(elapsed,1)/60;
+  var wpm=Math.round((okChars/5)/min);
+  hud.textContent='剩余 '+Math.ceil(timeLeft)+' 秒　实时速度 '+wpm+' WPM　正确 '+okChars+'　错误 '+badChars+'　退格 '+backs;
+}
+function reset(){
+  seq=[];var last='';
+  for(var i=0;i<NWORDS;i++){
+    var w=BANK[Math.floor(Math.random()*BANK.length)];
+    if(w===last)w=BANK[(BANK.indexOf(w)+17)%BANK.length];
+    seq.push(w);last=w;
+  }
+  typed=seq.map(function(){return [];});
+  wIdx=0;cIdx=0;timeLeft=TOTAL_TIME;elapsed=0;okChars=0;badChars=0;backs=0;over=false;
+  stream.innerHTML='';
+  for(var j=0;j<seq.length;j++){
+    var ws=document.createElement('span');ws.className='w'+(j===0?' act':'');
+    var inner='';
+    for(var k=0;k<seq[j].length;k++)inner+='<span class="c">'+seq[j].charAt(k)+'</span>';
+    ws.innerHTML=inner;
+    stream.appendChild(ws);
+  }
+  markCur();hudUpd();
+}
+function markCur(){
+  var ws=stream.children[wIdx];
+  if(!ws)return;
+  var kids=ws.children;
+  for(var i=0;i<kids.length;i++){
+    var cl='c';
+    if(i<cIdx)cl+=typed[wIdx][i]?' ok':' bad';
+    if(i===cIdx)cl+=' cur';
+    kids[i].className=cl;
+  }
+  stream.scrollTop=ws.offsetTop-52;
+}
+function finishWord(){
+  var w=seq[wIdx];
+  for(var i=cIdx;i<w.length;i++){typed[wIdx].push(false);badChars++;}
+  var ws=stream.children[wIdx];
+  ws.className='w fin';
+  var kids=ws.children;
+  for(var j=0;j<kids.length;j++)kids[j].className=typed[wIdx][j]?'c ok':'c bad';
+  wIdx++;cIdx=0;
+  if(wIdx>=seq.length){win();return;}
+  stream.children[wIdx].className='w act';
+  markCur();
+}
+function handleChar(ch){
+  if(!running||over)return;
+  if(ch==='\b'){
+    if(cIdx>0){
+      cIdx--;typed[wIdx].pop();backs++;
+      if(okChars+badChars>0)badChars=Math.max(0,badChars-1);
+      markCur();hudUpd();
+    }
+    return;
+  }
+  if(!/^[a-z]$/i.test(ch))return;
+  if(ch===' '){
+    if(cIdx>0)finishWord();
+    return;
+  }
+  ch=ch.toLowerCase();
+  var w=seq[wIdx];
+  if(cIdx>=w.length)return;
+  var ok=(ch===w.charAt(cIdx));
+  typed[wIdx].push(ok);
+  if(ok)okChars++;else badChars++;
+  cIdx++;
+  if(cIdx>=w.length){finishWord();}
+  else markCur();
+  hudUpd();
+}
+function win(){
+  if(over)return;over=true;running=false;
+  var min=Math.max(elapsed,1)/60;
+  var wpm=Math.round((okChars/5)/min);
+  var tot=okChars+badChars;
+  var acc=tot>0?Math.round(okChars/tot*100):0;
+  var score=Math.max(0,Math.round(wpm*12+acc*0.6-backs*3));
+  ovT.textContent='测试结束';
+  ovX.textContent='速度 '+wpm+' WPM　准确率 '+acc+'%\n正确 '+okChars+' 字　错误 '+badChars+' 字　退格 '+backs+' 次\n最终得分 '+score+'（退格每次 -3 分）';
+  btn.textContent='再测一次';
+  ov.classList.remove('hide');
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  elapsed+=dt;timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;hudUpd();win();return;}
+  hudUpd();
+  raf=requestAnimationFrame(loop);
+}
+function start(){
+  reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  document.getElementById('stage').addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+reset();
+ovT.textContent='六十秒速测';
+ovX.textContent='60 秒内连续打完尽量多的单词。\n打完一个词按空格进入下一个，打错的字母标红。\n允许退格纠错，但每次退格扣 3 分。';
+btn.textContent='开始测试';
+})();
+</script>
+</body>
+</html>

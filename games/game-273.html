@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深渊下潜</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#a78bfa;font-size:16px}
+.bar{flex:1;min-width:90px;height:10px;background:#0b0e1a;border-radius:5px;overflow:hidden}
+.bar i{display:block;height:100%;background:#a78bfa;width:20%}
+.msg{color:#a78bfa;font-size:13px;min-height:18px;text-align:center;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#241547;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>深渊下潜</h1>
+  <p class="hint">方向键 / WASD 移动 · 触屏滑动 · 找到每层的下行旋梯,直抵第五层宝珠</p>
+  <div class="hud">
+    <span>深度</span>
+    <div class="bar"><i id="depth"></i></div>
+    <span>第 <b id="lv">1</b>/5 层</span>
+    <span>用时 <b id="time">0.0s</b></span>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="450" height="450"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">深渊下潜</h2>
+      <p id="ovDesc">深渊共五层,每层都是一座重新生成的迷宫。找到发着绿光的下行旋梯即可下潜一层;第五层的尽头沉睡着紫色深渊宝珠,摸到它就赢了。越往下,墙壁的颜色越幽深。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始下潜</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=15,ROWS=15,CELL=30,W=450,H=450;
+function $(id){return document.getElementById(id);}
+var elDepth=$("depth"),elLv=$("lv"),elTime=$("time"),elMsg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s273");
+var state="menu";
+var LEVELS=5;
+var LCOL=["#4ade80","#22d3ee","#818cf8","#f472b6","#c084fc"];
+var LWALL=["#232a4d","#20304d","#242a55","#2b2447","#2a2150"];
+var LWALLT=["#2c3560","#2a4166","#333a70","#3b305e","#3a2f68"];
+var grid,player,exitCell,level,elapsed,pulse,msgT,msgText;
+
+function loadBest(k){try{return parseFloat(localStorage.getItem(k)||"0")||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function bfs(sx,sy){
+  var dist=[],i,j,q=[],head=0,dirs=[[1,0],[-1,0],[0,1],[0,-1]],k;
+  for(j=0;j<ROWS;j++){dist.push(new Array(COLS));for(i=0;i<COLS;i++)dist[j][i]=-1;}
+  dist[sy][sx]=0;q.push([sx,sy]);
+  while(head<q.length){
+    var c=q[head];head++;
+    for(k=0;k<4;k++){
+      var nx=c[0]+dirs[k][0],ny=c[1]+dirs[k][1];
+      if(nx<0||ny<0||nx>=COLS||ny>=ROWS)continue;
+      if(grid[ny][nx]===1||dist[ny][nx]!==-1)continue;
+      dist[ny][nx]=dist[c[1]][c[0]]+1;
+      q.push([nx,ny]);
+    }
+  }
+  return dist;
+}
+function genLevel(){
+  grid=genMaze(7,7);
+  var sx=1+2*((Math.random()*7)|0),sy=1+2*((Math.random()*7)|0);
+  player={x:sx,y:sy};
+  var dist=bfs(sx,sy),x,y,far={x:sx,y:sy,d:0};
+  for(y=1;y<ROWS-1;y++)for(x=1;x<COLS-1;x++){
+    if(grid[y][x]===0&&dist[y][x]>far.d)far={x:x,y:y,d:dist[y][x]};
+  }
+  exitCell={x:far.x,y:far.y};
+  updateHud();
+}
+function reset(){
+  level=1;elapsed=0;pulse=0;msgT=0;
+  genLevel();
+  setMsg("第 1 层:找到绿色旋梯下潜!");
+}
+function setMsg(s){msgText=s;msgT=2.4;}
+function updateHud(){
+  elDepth.style.width=(level/LEVELS*100)+"%";
+  elLv.textContent=level;
+}
+function tryMove(dx,dy){
+  if(state!=="playing")return;
+  var nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return;
+  if(grid[ny][nx]===1)return;
+  player.x=nx;player.y=ny;
+  if(nx===exitCell.x&&ny===exitCell.y)descend();
+}
+function descend(){
+  if(level>=LEVELS){win();return;}
+  level++;
+  genLevel();
+  setMsg(level<LEVELS?"下潜到第 "+level+" 层!":"最后一层!宝珠就在前方!");
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||elapsed<best){best=elapsed;saveBest("mg_s273",best);isNew=true;}
+  ovTitle.textContent="深渊宝珠到手!";
+  ovDesc.textContent=isNew?"新纪录!五层深渊没能困住你片刻。":"紫色宝珠在你掌心苏醒,深渊结束了。";
+  ovScore.style.display="block";
+  ovScore.textContent="用时 "+elapsed.toFixed(1)+"s · 最快纪录 "+(best>0?best.toFixed(1)+"s":"--");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle=LWALL[level-1];
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle=LWALLT[level-1];
+  ctx.fillRect(x*CELL,y*CELL,CELL,4);
+}
+function draw(){
+  var x,y;
+  ctx.clearRect(0,0,W,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1)drawWall(x,y);
+  }
+  var ex=exitCell.x*CELL+CELL/2,ey=exitCell.y*CELL+CELL/2;
+  if(level<LEVELS){
+    ctx.strokeStyle=LCOL[level-1];
+    ctx.lineWidth=2.5;
+    ctx.shadowColor=LCOL[level-1];ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(ex,ey,10,0,Math.PI*2);ctx.stroke();
+    var a0=pulse*2;
+    ctx.beginPath();
+    ctx.arc(ex,ey,6,a0,a0+Math.PI*1.4);ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ex,ey,2.5,0,Math.PI*2);
+    ctx.fillStyle=LCOL[level-1];ctx.fill();
+    ctx.lineWidth=1;ctx.shadowBlur=0;
+  }else{
+    var pr=8+Math.sin(pulse*2)*2;
+    ctx.fillStyle="#c084fc";
+    ctx.shadowColor="#a855f7";ctx.shadowBlur=22;
+    ctx.beginPath();
+    ctx.moveTo(ex,ey-pr);
+    ctx.lineTo(ex+pr*0.8,ey);
+    ctx.lineTo(ex,ey+pr);
+    ctx.lineTo(ex-pr*0.8,ey);
+    ctx.closePath();ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  var px=player.x*CELL+CELL/2,py=player.y*CELL+CELL/2;
+  ctx.fillStyle="#e9d5ff";
+  ctx.shadowColor=LCOL[level-1];ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(px,py,9,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(px,py,3.2,0,Math.PI*2);ctx.fill();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.004;
+  if(msgT>0){msgT-=dt/1000;elMsg.textContent=msgText;}
+  else elMsg.textContent="";
+  if(state==="playing"){
+    elapsed+=dt/1000;
+    elTime.textContent=elapsed.toFixed(1)+"s";
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))tryMove(dx>0?1:-1,0);
+  else tryMove(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

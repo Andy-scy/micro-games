@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星空学堂</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#8ecaff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#8ecaff}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#8ecaff;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:10px;min-height:52px}
+#hint{width:100%;border:2px solid #b07cff;background:#241a38;color:#d3b8ff;border-radius:10px;padding:9px 0;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:10px;font-family:inherit}
+#hint:disabled{opacity:.35;cursor:default}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#8ecaff}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+.opt.gone{opacity:.25;pointer-events:none}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#8ecaff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#8ecaff;color:#0a1c2a;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>星空学堂</h1>
+  <p class="tips">天文基础课堂:12 道日月星辰的选择题,每题 20 秒,3 条命。遇到难题可点「排除两个」消耗 1 次提示,划掉两个错误选项;剩余的提示每枚额外 +20 分!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/12</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">提示</div><div class="big" id="hn">✦✦✦</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <button id="hintbtn">排除两个错误(剩 3 次)</button>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">星空学堂</h2><p id="ovp">· 12 道天文基础题,每题限时 20 秒<br>· 答对 +100,答错或超时 -1 条命<br>· 「排除两个」:划掉 2 个错误选项,<br>　全局共 3 次,每剩 1 次通关时 +20<br>· 3 命用完提前放学,通关获毕业证书!</p><button class="btn" id="obtn">进入学堂</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'太阳系中体积最大的行星是?',o:['木星','土星','地球','海王星']},
+{q:'离地球最近的天然天体是?',o:['月球','火星','金星','太阳']},
+{q:'太阳在天文学上属于哪一类天体?',o:['恒星','行星','卫星','彗星']},
+{q:'地球自转一圈大约需要多长时间?',o:['24 小时','12 小时','48 小时','365 天']},
+{q:'月球上昼夜温差极大,主要原因是?',o:['没有大气层调节','离太阳太近','自转太快','引力太小']},
+{q:'北半球的夏至一般出现在几月?',o:['6 月','3 月','9 月','12 月']},
+{q:'夜晚看到的"银河"其实是?',o:['银河系的一部分恒星','一条真正的河','地球大气发光','云层反光']},
+{q:'被称为"红色星球"的行星是?',o:['火星','金星','木星','水星']},
+{q:'地球的天然卫星有几颗?',o:['1 颗','0 颗','2 颗','8 颗']},
+{q:'流星现象是怎么产生的?',o:['流星体闯入大气层燃烧发光','星星从天上掉下来','飞机划过夜空','卫星解体坠落']},
+{q:'中国探月工程的名称是?',o:['嫦娥工程','天问工程','北斗工程','祝融工程']},
+{q:'下列行星中,有明显光环的是?',o:['土星','水星','金星','火星']},
+{q:'空间站里的宇航员处于什么状态?',o:['失重状态','超重状态','真空环境','深度休眠']},
+{q:'发生月食时,月亮通常呈现什么颜色?',o:['暗红色','亮白色','亮蓝色','纯黑色']}
+];
+var N=12,QLEN=20;
+var quiz=[],idx=0,score=0,lives=3,hints=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function paintHints(){
+  var s='';
+  for(var i=0;i<3;i++)s+=i<hints?'✦':'·';
+  $('hn').textContent=s;
+}
+function startGame(){
+  S++;idx=0;score=0;lives=3;hints=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  paintHints();
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('q').textContent=it.q;
+  var hb=$('hintbtn');
+  hb.disabled=hints<=0;
+  hb.textContent='排除两个错误(剩 '+hints+' 次)';
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function useHint(){
+  if(!playing||over||locked||hints<=0)return;
+  var btns=$('opts').children,i,gone=0;
+  for(i=0;i<btns.length&&gone<2;i++){
+    if(btns[i].dataset.ok==='0'&&!btns[i].classList.contains('gone')){
+      btns[i].classList.add('gone');
+      gone++;
+    }
+  }
+  if(gone>0){
+    hints--;paintHints();
+    var hb=$('hintbtn');
+    hb.disabled=hints<=0;
+    hb.textContent='排除两个错误(剩 '+hints+' 次)';
+  }
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  resolve(btn.dataset.ok==='1',btn);
+}
+function resolve(good,btn){
+  locked=true;
+  $('hintbtn').disabled=true;
+  var btns=$('opts').children,i;
+  if(good){
+    score+=100;
+    if(btn)btn.classList.add('ok');
+    $('msg').textContent='答对了!+100';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=(qLeft<=0?'超时!':'答错了!')+'正确答案已标出';
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1400);
+}
+function finish(win){
+  playing=false;over=true;
+  var hb= hints*20;
+  score+=win?hb:0;
+  $('sc').textContent=score;
+  if(win){
+    $('ovt').textContent='毕业啦 · 星空优等生';
+    $('ovp').innerHTML='12 道天文题全部修完<br>提示奖励 +'+hb+' 分<br>最终得分 <b>'+score+'</b> 分<br>仰望星空,脚踏实地!';
+  }else{
+    $('ovt').textContent='学堂留级…';
+    $('ovp').innerHTML='修完 '+Math.min(idx+1,N)+'/12 题<br>最终得分 <b>'+score+'</b> 分<br>把错题记在小本本上,再来一局!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('hintbtn').addEventListener('click',useHint);
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)resolve(false,null);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

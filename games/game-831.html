@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>几何拼合</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #1e3a8a;background:#0d1326;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:grab}
+.tools{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.tools button{background:#1e2a4a;color:#e8eaf6;border:1px solid #3350a0;border-radius:9px;padding:8px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.msg{text-align:center;color:#4ade80;font-size:13px;height:18px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(8,11,24,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0b1c3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>几何拼合</h1>
+  <p class="hint">把下方零件<b style="color:#60a5fa">拖到虚线影子</b>的位置,方向不对就点「旋转45°」(或按 R、双击零件);<br>位置和角度都对上会自动吸附。越快完成分越高!</p>
+  <div class="hud"><span>关卡 <b id="lv">1/3</b></span><span>就位 <b id="fit">0/0</b></span><span>用时 <b id="sec">0</b>秒</span><span>得分 <b id="score">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">几何拼合</h2>
+      <p id="ovP">三幅积木画:火箭、小屋、风车。每个零件都拖回自己的虚线影子,角度差一点都吸不住——转一转再试!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始拼装</button>
+    </div>
+  </div>
+  <div class="tools"><button id="btnRot">旋转45°(R)</button></div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo"),btnRot=$("btnRot");
+var elLv=$("lv"),elFit=$("fit"),elSec=$("sec"),elScore=$("score"),elMsg=$("msg");
+function rectPts(w,h){return [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]];}
+var LV=[
+ {name:"火箭",shapes:[
+  {t:"p",pts:[[-42,34],[0,-44],[42,34]],col:"#ef4444",tx:240,ty:104,tr:0},
+  {t:"p",pts:rectPts(84,92),col:"#e2e8f0",tx:240,ty:180,tr:0},
+  {t:"c",r:17,col:"#38bdf8",tx:240,ty:178,tr:0},
+  {t:"p",pts:[[-13,-30],[13,-30],[13,30]],col:"#f59e0b",tx:181,ty:252,tr:-Math.PI/4},
+  {t:"p",pts:[[-13,-30],[13,-30],[13,30]],col:"#f59e0b",tx:299,ty:252,tr:Math.PI/4},
+  {t:"p",pts:[[-16,-34],[16,-34],[0,34]],col:"#fb923c",tx:240,ty:292,tr:Math.PI}]},
+ {name:"小屋",shapes:[
+  {t:"p",pts:rectPts(150,112),col:"#fcd34d",tx:240,ty:300,tr:0},
+  {t:"p",pts:[[-118,0],[118,0],[0,-92]],col:"#ef4444",tx:240,ty:240,tr:0},
+  {t:"p",pts:rectPts(40,64),col:"#b45309",tx:240,ty:324,tr:0},
+  {t:"c",r:18,col:"#38bdf8",tx:183,ty:282,tr:0}]},
+ {name:"风车",shapes:[
+  {t:"p",pts:rectPts(20,120),col:"#b45309",tx:240,ty:330,tr:0},
+  {t:"c",r:16,col:"#facc15",tx:240,ty:220,tr:0},
+  {t:"p",pts:[[-13,-16],[13,-16],[0,-76]],col:"#e2e8f0",tx:240,ty:220,tr:0},
+  {t:"p",pts:[[-13,-16],[13,-16],[0,-76]],col:"#e2e8f0",tx:240,ty:220,tr:Math.PI/2},
+  {t:"p",pts:[[-13,-16],[13,-16],[0,-76]],col:"#e2e8f0",tx:240,ty:220,tr:Math.PI},
+  {t:"p",pts:[[-13,-16],[13,-16],[0,-76]],col:"#e2e8f0",tx:240,ty:220,tr:Math.PI*1.5}]}
+];
+var state="menu",lv=0,shapes=[],score=0,sec=0,dragIdx=-1,selIdx=-1,lastTapT=0,lastTapIdx=-1,lastT=0;
+function inPoly(x,y,pts){
+  var ins=false,i,j,n=pts.length;
+  for(i=0,j=n-1;i<n;j=i++){
+    if(((pts[i][1]>y)!==(pts[j][1]>y))&&(x<(pts[j][0]-pts[i][0])*(y-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0]))ins=!ins;
+  }
+  return ins;
+}
+function norm(a){a=a%(Math.PI*2);if(a<0)a+=Math.PI*2;return a;}
+function angDiff(a,b){
+  var d=norm(a)-norm(b);
+  if(d>Math.PI)d-=Math.PI*2;
+  if(d<-Math.PI)d+=Math.PI*2;
+  return Math.abs(d);
+}
+function loadLevel(){
+  shapes=[];sec=0;
+  var src=LV[lv].shapes,i;
+  for(i=0;i<src.length;i++){
+    var s=src[i];
+    shapes.push({t:s.t,pts:s.pts,r:s.r,col:s.col,tx:s.tx,ty:s.ty,tr:s.tr,
+      x:45+i*((480-90)/Math.max(1,src.length-1)),y:446,rot:0,placed:false});
+  }
+  elLv.textContent=(lv+1)+"/3";elMsg.textContent="";
+  hud();
+}
+function hud(){
+  var f=0,i;
+  for(i=0;i<shapes.length;i++)if(shapes[i].placed)f++;
+  elFit.textContent=f+"/"+shapes.length;
+  elSec.textContent=Math.floor(sec);
+  elScore.textContent=score;
+}
+function drawShape(s,ghost){
+  ctx.save();
+  ctx.translate(ghost?s.tx:s.x,ghost?s.ty:s.y);
+  ctx.rotate(ghost?s.tr:s.rot);
+  ctx.beginPath();
+  if(s.t==="c")ctx.arc(0,0,s.r,0,Math.PI*2);
+  else{
+    var k;
+    for(k=0;k<s.pts.length;k++){
+      if(k===0)ctx.moveTo(s.pts[k][0],s.pts[k][1]);else ctx.lineTo(s.pts[k][0],s.pts[k][1]);
+    }
+    ctx.closePath();
+  }
+  if(ghost){
+    ctx.setLineDash([5,5]);
+    ctx.strokeStyle="rgba(139,144,176,0.5)";ctx.lineWidth=1.5;ctx.stroke();
+    ctx.setLineDash([]);
+  }else{
+    ctx.fillStyle=s.col;ctx.fill();
+    ctx.strokeStyle="rgba(8,11,24,0.5)";ctx.lineWidth=2;ctx.stroke();
+  }
+  ctx.restore();
+}
+function draw(){
+  var i;
+  ctx.fillStyle="#0d1326";ctx.fillRect(0,0,480,480);
+  ctx.strokeStyle="rgba(139,144,176,0.25)";ctx.lineWidth=1;ctx.setLineDash([4,6]);
+  ctx.beginPath();ctx.moveTo(0,405);ctx.lineTo(480,405);ctx.stroke();
+  ctx.setLineDash([]);
+  for(i=0;i<shapes.length;i++)drawShape(shapes[i],true);
+  for(i=0;i<shapes.length;i++)if(!shapes[i].placed)drawShape(shapes[i],false);
+  for(i=0;i<shapes.length;i++)if(shapes[i].placed)drawShape(shapes[i],false);
+}
+function hitShape(x,y){
+  var i;
+  for(i=shapes.length-1;i>=0;i--){
+    var s=shapes[i];
+    if(s.placed)continue;
+    var dx=x-s.x,dy=y-s.y;
+    var lx=dx*Math.cos(s.rot)+dy*Math.sin(s.rot);
+    var ly=-dx*Math.sin(s.rot)+dy*Math.cos(s.rot);
+    if(s.t==="c"){if(lx*lx+ly*ly<=s.r*s.r)return i;}
+    else if(inPoly(lx,ly,s.pts))return i;
+  }
+  return -1;
+}
+function rotateSel(){
+  if(state!=="playing"||selIdx<0)return;
+  var s=shapes[selIdx];
+  if(s.placed)return;
+  s.rot=norm(s.rot+Math.PI/4);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){
+  if(state!=="playing")return;
+  var p=pos(e),idx=hitShape(p.x,p.y);
+  if(idx<0)return;
+  var now=Date.now();
+  if(idx===lastTapIdx&&now-lastTapT<300)selIdx=idx;
+  lastTapIdx=idx;lastTapT=now;
+  if(idx===selIdx)selIdx=idx;else selIdx=idx;
+  dragIdx=idx;
+  shapes[idx].x=p.x;shapes[idx].y=p.y;
+}
+function moveP(e){
+  if(dragIdx<0||state!=="playing")return;
+  var p=pos(e),s=shapes[dragIdx];
+  s.x=Math.max(20,Math.min(460,p.x));
+  s.y=Math.max(20,Math.min(470,p.y));
+}
+function endP(){
+  if(dragIdx<0){return;}
+  var s=shapes[dragIdx];
+  dragIdx=-1;
+  if(Math.hypot(s.x-s.tx,s.y-s.ty)<24&&angDiff(s.rot,s.tr)<0.27){
+    s.placed=true;s.x=s.tx;s.y=s.ty;s.rot=s.tr;
+    elMsg.textContent="咔哒!零件就位";
+    hud();
+    var all=true,i;
+    for(i=0;i<shapes.length;i++)if(!shapes[i].placed){all=false;break;}
+    if(all)levelClear();
+  }
+}
+function levelClear(){
+  var gain=Math.max(0,200-Math.floor(sec)*2);
+  score+=gain;hud();
+  lv++;
+  if(lv>=3){finish();return;}
+  elMsg.textContent="《"+LV[lv-1].name+"》完成!+"+gain+"分";
+  loadLevel();
+}
+function finish(){
+  state="over";
+  ovT.textContent="拼装大师!";
+  ovP.textContent="火箭、小屋、风车全部组装完毕,手稳眼准。";
+  ovS.style.display="block";ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+cv.addEventListener("dblclick",function(e){e.preventDefault();rotateSel();});
+document.addEventListener("keydown",function(e){
+  if(e.key==="r"||e.key==="R")rotateSel();
+});
+btnRot.addEventListener("click",rotateSel);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT)/1000;lastT=t;
+  if(state!=="playing")return;
+  sec+=dt;hud();
+  draw();
+}
+btnGo.addEventListener("click",function(){
+  lv=0;score=0;state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  loadLevel();
+});
+loadLevel();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

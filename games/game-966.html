@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>落宝争锋</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;touch-action:none;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>落宝争锋</h1>
+<div id="tip">接住同一批掉落的宝物,比谁接得多!玩家1:A / D 左右移动 · 玩家2:← / → 左右移动 · 宝石 +1,星星 +3,炸弹 -2 并短暂眩晕 · 60 秒后分高者胜(触屏:按住己方半屏引导篮筐)</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">落宝争锋</div><div id="ovS">两侧掉落完全相同的宝物,拼手速与走位<br>玩家1:A / D 移动 · 玩家2:← / → 移动<br>宝石 +1 · 星星 +3 · 炸弹 -2 并眩晕片刻<br>60 秒倒计时结束后得分高者获胜</div><button id="ovB">开始比赛</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var keys={},st,touchX=[null,null];
+function reset(){
+ st={ph:"count",cd:60,t:3600,score:[0,0],bx:[180,540],stun:[0,0],items:[],pops:[],spawnT:20};
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function spawn(){
+ var ox=46+Math.random()*268,r=Math.random(),type,vy=2+Math.random()*1.6;
+ if(r<0.62)type=0;else if(r<0.82)type=1;else type=2;
+ st.items.push({x:ox,y:36,vy:vy,type:type});
+ st.items.push({x:720-ox,y:36,vy:vy,type:type});
+}
+function addPop(x,y,txt,col){st.pops.push({x:x,y:y,txt:txt,col:col,t:50});}
+function step(dt){
+ var i,j;
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){
+  st.t-=dt;
+  if(st.t<=0){
+   st.ph="over";
+   var s0=st.score[0],s1=st.score[1];
+   show(s0===s1?"势均力敌,平局!":(s0>s1?"玩家1 获胜!":"玩家2 获胜!"),"最终得分 "+s0+" : "+s1);
+   return;
+  }
+  st.spawnT-=dt;
+  if(st.spawnT<=0&&st.items.length<18){st.spawnT=34;spawn();}
+  for(i=0;i<2;i++){
+   var dir=0;
+   if(st.stun[i]<=0){
+    if(i===0){if(keys["a"])dir--;if(keys["d"])dir++;}
+    else{if(keys["arrowleft"])dir--;if(keys["arrowright"])dir++;}
+    if(touchX[i]!==null){
+     var d2=touchX[i]-st.bx[i];
+     if(Math.abs(d2)>4)dir=d2>0?1:-1;
+    }
+   }
+   var lo=i===0?46:406,hi=i===0?314:674;
+   st.bx[i]=Math.max(lo,Math.min(hi,st.bx[i]+dir*4.4*dt));
+   if(st.stun[i]>0)st.stun[i]-=dt;
+  }
+  for(j=st.items.length-1;j>=0;j--){
+   var it=st.items[j];
+   it.y+=it.vy*dt;
+   var side=it.x<360?0:1;
+   if(it.y>406&&it.y<448&&Math.abs(it.x-st.bx[side])<40&&st.stun[side]<=0){
+    if(it.type===0){st.score[side]++;addPop(it.x,400,"+1","#4fd1c5");}
+    else if(it.type===1){st.score[side]+=3;addPop(it.x,400,"+3","#f6c945");}
+    else{st.score[side]=Math.max(0,st.score[side]-2);st.stun[side]=50;addPop(it.x,400,"-2","#ff5c7a");}
+    st.items.splice(j,1);
+   }else if(it.y>470)st.items.splice(j,1);
+  }
+ }
+ for(j=st.pops.length-1;j>=0;j--){
+  var p=st.pops[j];p.y-=0.7*dt;p.t-=dt;
+  if(p.t<=0)st.pops.splice(j,1);
+ }
+}
+function drawItem(it){
+ if(it.type===0){
+  ctx.fillStyle="#4fd1c5";
+  ctx.beginPath();ctx.moveTo(it.x,it.y-10);ctx.lineTo(it.x+8,it.y);ctx.lineTo(it.x,it.y+10);ctx.lineTo(it.x-8,it.y);ctx.closePath();ctx.fill();
+ }else if(it.type===1){
+  ctx.fillStyle="#f6c945";ctx.beginPath();
+  var k;
+  for(k=0;k<5;k++){
+   var a=-1.5708+k*1.2566;
+   ctx.lineTo(it.x+Math.cos(a)*11,it.y+Math.sin(a)*11);
+   ctx.lineTo(it.x+Math.cos(a+0.628)*5,it.y+Math.sin(a+0.628)*5);
+  }
+  ctx.closePath();ctx.fill();
+ }else{
+  ctx.fillStyle="#39406b";ctx.beginPath();ctx.arc(it.x,it.y,10,0,6.2832);ctx.fill();
+  ctx.strokeStyle="#ff5c7a";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(it.x+4,it.y-9);ctx.lineTo(it.x+9,it.y-15);ctx.stroke();
+ }
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ ctx.fillStyle="#131a33";ctx.fillRect(0,0,360,480);
+ ctx.fillStyle="#1a1530";ctx.fillRect(360,0,360,480);
+ ctx.strokeStyle="rgba(255,255,255,.2)";ctx.setLineDash([8,8]);ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(360,0);ctx.lineTo(360,480);ctx.stroke();
+ ctx.setLineDash([]);
+ var i;
+ for(i=0;i<2;i++){
+  var bx=st.bx[i];
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";
+  if(st.stun[i]>0)ctx.globalAlpha=0.45;
+  ctx.beginPath();ctx.moveTo(bx-40,420);ctx.lineTo(bx+40,420);ctx.lineTo(bx+28,450);ctx.lineTo(bx-28,450);ctx.closePath();ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.font="bold 13px system-ui";ctx.textAlign="center";ctx.textBaseline="top";
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";
+  ctx.fillText(i===0?"玩家1":"玩家2",bx,456);
+ }
+ for(i=0;i<st.items.length;i++)drawItem(st.items[i]);
+ ctx.font="bold 15px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";ctx.fillText("玩家1:"+st.score[0]+" 分",14,10);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";ctx.fillText(st.score[1]+" 分:玩家2",706,10);
+ ctx.textAlign="center";ctx.fillStyle="#e9edf8";
+ var sec=Math.max(0,Math.ceil(st.t/60));
+ ctx.fillText("剩余 "+sec+" 秒",360,10);
+ ctx.font="bold 13px system-ui";ctx.fillStyle="#8b93b0";
+ ctx.fillText("宝石+1 · 星星+3 · 炸弹-2",360,30);
+ for(i=0;i<st.pops.length;i++){
+  var p=st.pops[i];
+  ctx.globalAlpha=Math.min(1,p.t/25);
+  ctx.fillStyle=p.col;ctx.font="bold 18px system-ui";
+  ctx.fillText(p.txt,p.x,p.y);
+  ctx.globalAlpha=1;
+ }
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 44px system-ui";
+  ctx.fillText("准备接宝!",360,180);
+  ctx.font="bold 28px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/20)),360,236);
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop);
+}
+function updTouch(e){
+ e.preventDefault();
+ var r=cv.getBoundingClientRect(),i;
+ touchX=[null,null];
+ for(i=0;i<e.touches.length;i++){
+  var t2=e.touches[i];
+  var x=(t2.clientX-r.left)/r.width*720;
+  var y=(t2.clientY-r.top)/r.height*480;
+  if(y>120){
+   if(x<360)touchX[0]=Math.max(46,Math.min(314,x));
+   else touchX[1]=Math.max(406,Math.min(674,x));
+  }
+ }
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ keys[k]=true;
+});
+window.addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+cv.addEventListener("touchstart",updTouch,{passive:false});
+cv.addEventListener("touchmove",updTouch,{passive:false});
+cv.addEventListener("touchend",updTouch,{passive:false});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

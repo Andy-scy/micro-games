@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意流转</title>
+<style>
+:root{--bg:#0f1220;--card:#1a1f36;--ink:#eef1ff;--dim:#9aa3c7;--acc:#68d391;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px;}
+.wrap{width:100%;max-width:400px;text-align:center;position:relative;}
+h1{font-size:22px;letter-spacing:3px;margin-bottom:6px;}
+.tip{color:var(--dim);font-size:13px;line-height:1.7;margin-bottom:10px;}
+.bar{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;font-size:14px;margin-bottom:10px;color:var(--dim);}
+.bar b{color:var(--acc);font-size:15px;}
+.btn{background:var(--acc);border:none;border-radius:8px;color:#0a2416;font-family:inherit;font-size:14px;font-weight:700;padding:7px 14px;cursor:pointer;}
+.btn.ghost{background:#2a3154;color:var(--ink);}
+.frame{position:relative;width:100%;padding-top:100%;}
+.board{position:absolute;left:0;top:0;width:100%;height:100%;background:var(--card);border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.4),inset 0 0 0 1px #2c3560;touch-action:none;}
+.board.ready .tile{transition:left .13s ease,top .13s ease;}
+.tile{position:absolute;display:flex;align-items:center;justify-content:center;border-radius:9px;background:linear-gradient(145deg,#25331f,#1d2a1a);color:var(--ink);font-weight:700;cursor:pointer;user-select:none;-webkit-user-select:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 3px 8px rgba(0,0,0,.28);}
+#flash{position:absolute;left:0;right:0;top:44%;text-align:center;font-size:26px;font-weight:800;color:var(--acc);opacity:0;pointer-events:none;transition:opacity .3s;text-shadow:0 2px 14px rgba(0,0,0,.65);z-index:5;}
+#flash.on{opacity:1;}
+.foot{color:var(--dim);font-size:12px;line-height:1.7;margin-top:10px;}
+.overlay{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(7,9,20,.8);display:none;align-items:center;justify-content:center;z-index:20;}
+.overlay.show{display:flex;}
+.panel{background:var(--card);border:1px solid #2c3560;border-radius:16px;padding:28px 32px;text-align:center;max-width:86vw;box-shadow:0 16px 50px rgba(0,0,0,.55);}
+.panel h2{color:var(--acc);font-size:24px;letter-spacing:2px;margin-bottom:10px;}
+.panel p{color:var(--dim);font-size:14px;line-height:1.9;margin-bottom:18px;white-space:pre-line;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>禅意流转</h1>
+  <p class="tip">无尽禅模式:没有失败、没有倒计时;每复原一局,棋盘会轻轻再乱一分,连击越深,打乱越重。想停时随时「结束禅修」。</p>
+  <div class="bar">
+    <span>连击 <b id="stStreak">0</b></span>
+    <span>完成 <b id="stRounds">0</b></span>
+    <span>步数 <b id="stMoves">0</b></span>
+    <span>时长 <b id="stTime">0:00</b></span>
+  </div>
+  <div class="frame"><div class="board" id="board"></div></div>
+  <div class="bar" style="margin-top:10px;">
+    <button class="btn ghost" id="endBtn">结束禅修</button>
+    <button class="btn ghost" id="resetBtn">从头开始</button>
+  </div>
+  <p class="foot">点击空格旁的方块、方向键或触屏滑动;历史最深连击:<b id="stBest">0</b></p>
+  <div id="flash"></div>
+</div>
+<div class="overlay" id="overlay"><div class="panel">
+  <h2 id="ovTitle"></h2>
+  <p id="ovInfo"></p>
+  <button class="btn" id="againBtn">再来一局</button>
+</div></div>
+<script>
+(function(){
+'use strict';
+const N=3,TOTAL=N*N;
+const goal=[];for(let i=0;i<TOTAL;i++)goal.push((i+1)%TOTAL);
+let tiles=goal.slice(),els=[],totalMoves=0,streak=0,rounds=0,playing=false,running=false,startAt=0,zenTimer=0,flashTimer=0,rafId=0,bestStreak=0;
+try{bestStreak=parseInt(localStorage.getItem('mg319streak')||'0',10)||0;}catch(e){}
+const boardEl=document.getElementById('board');
+const streakEl=document.getElementById('stStreak'),roundsEl=document.getElementById('stRounds'),movesEl=document.getElementById('stMoves'),timeEl=document.getElementById('stTime'),bestEl=document.getElementById('stBest');
+const flashEl=document.getElementById('flash');
+const overlay=document.getElementById('overlay'),ovTitle=document.getElementById('ovTitle'),ovInfo=document.getElementById('ovInfo');
+function fmt(sec){const m=Math.floor(sec/60),s=Math.floor(sec%60);return m+':'+(s<10?'0':'')+s;}
+function buildTiles(){boardEl.innerHTML='';boardEl.classList.remove('ready');els=[];for(let v=1;v<TOTAL;v++){const el=document.createElement('div');el.className='tile';el.textContent=v;el.dataset.v=v;el.style.width=(100/N)+'%';el.style.height=(100/N)+'%';boardEl.appendChild(el);els[v]=el;}}
+function setPos(v,idx){const r=(idx/N)|0,c=idx%N;els[v].style.left=(c*100/N)+'%';els[v].style.top=(r*100/N)+'%';}
+function placeAll(){for(let i=0;i<TOTAL;i++)if(tiles[i])setPos(tiles[i],i);}
+function blankIdx(){return tiles.indexOf(0);}
+function slide(idx){const b=blankIdx(),br=(b/N)|0,bc=b%N,r=(idx/N)|0,c=idx%N;if(Math.abs(br-r)+Math.abs(bc-c)!==1)return false;tiles[b]=tiles[idx];tiles[idx]=0;setPos(tiles[b],b);return true;}
+function moveDir(dx,dy){const b=blankIdx(),br=(b/N)|0,bc=b%N,tr=br-dy,tc=bc-dx;if(tr<0||tr>=N||tc<0||tc>=N)return false;return slide(tr*N+tc);}
+function isSolved(){for(let i=0;i<TOTAL;i++)if(tiles[i]!==goal[i])return false;return true;}
+function scramble(k){do{let last=-1;for(let s=0;s<k;s++){const b=blankIdx(),br=(b/N)|0,bc=b%N;const opts=[];if(br>0)opts.push(b-N);if(br<N-1)opts.push(b+N);if(bc>0)opts.push(b-1);if(bc<N-1)opts.push(b+1);const cands=opts.filter(function(x){return x!==last;});const pick=cands[(Math.random()*cands.length)|0];tiles[b]=tiles[pick];tiles[pick]=0;last=pick;}}while(isSolved());}
+function hud(){streakEl.textContent=streak;roundsEl.textContent=rounds;movesEl.textContent=totalMoves;bestEl.textContent=bestStreak;}
+function flash(msg){
+  flashEl.textContent=msg;flashEl.classList.add('on');
+  clearTimeout(flashTimer);
+  flashTimer=setTimeout(function(){flashEl.classList.remove('on');},1200);
+}
+function loop(){
+  if(!running)return;
+  timeEl.textContent=fmt((Date.now()-startAt)/1000);
+  rafId=requestAnimationFrame(loop);
+}
+function afterMove(){
+  totalMoves++;hud();
+  if(isSolved())onSolved();
+}
+function onSolved(){
+  rounds++;streak++;
+  if(streak>bestStreak){bestStreak=streak;try{localStorage.setItem('mg319streak',String(bestStreak));}catch(e){}}
+  hud();
+  flash('顺其自然 · 连击 '+streak);
+  clearTimeout(zenTimer);
+  zenTimer=setTimeout(function(){
+    if(!running)return;
+    scramble(Math.min(4+streak*2,18));
+  },900);
+}
+function playerMove(idx){if(!playing)return;if(slide(idx))afterMove();}
+boardEl.addEventListener('click',function(ev){const t=ev.target.closest('.tile');if(!t)return;const v=parseInt(t.dataset.v,10);playerMove(tiles.indexOf(v));});
+document.addEventListener('keydown',function(ev){const map={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const d=map[ev.key];if(!d)return;ev.preventDefault();if(!playing)return;if(moveDir(d[0],d[1]))afterMove();});
+let tX=0,tY=0;
+boardEl.addEventListener('touchstart',function(ev){const t=ev.changedTouches[0];tX=t.clientX;tY=t.clientY;},{passive:true});
+boardEl.addEventListener('touchend',function(ev){if(!playing)return;const t=ev.changedTouches[0];const dx=t.clientX-tX,dy=t.clientY-tY;if(Math.abs(dx)<24&&Math.abs(dy)<24)return;ev.preventDefault();if(Math.abs(dx)>Math.abs(dy)){if(moveDir(dx>0?1:-1,0))afterMove();}else{if(moveDir(0,dy>0?1:-1))afterMove();}},{passive:false});
+function fit(){const w=boardEl.clientWidth;if(w)boardEl.style.fontSize=Math.max(14,Math.min(46,w/N*0.42))+'px';}
+function newGame(){
+  overlay.classList.remove('show');
+  clearTimeout(zenTimer);clearTimeout(flashTimer);cancelAnimationFrame(rafId);
+  flashEl.classList.remove('on');
+  tiles=goal.slice();buildTiles();scramble(6);placeAll();
+  totalMoves=0;streak=0;rounds=0;startAt=Date.now();playing=true;running=true;
+  hud();timeEl.textContent='0:00';
+  requestAnimationFrame(function(){fit();boardEl.classList.add('ready');});
+  rafId=requestAnimationFrame(loop);
+}
+function endSession(){
+  if(!running)return;
+  running=false;playing=false;
+  clearTimeout(zenTimer);cancelAnimationFrame(rafId);
+  const sec=(Date.now()-startAt)/1000;
+  ovTitle.textContent='禅修结束';
+  ovInfo.textContent='时长 '+fmt(sec)+' · 完成 '+rounds+' 局\n最深连击 '+streak+' · 总步数 '+totalMoves+'\n历史最佳连击 '+bestStreak;
+  overlay.classList.add('show');
+}
+document.getElementById('endBtn').addEventListener('click',endSession);
+document.getElementById('resetBtn').addEventListener('click',newGame);
+document.getElementById('againBtn').addEventListener('click',newGame);
+window.addEventListener('resize',fit);
+newGame();
+})();
+</script>
+</body>
+</html>

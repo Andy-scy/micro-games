@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>城市电力局</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#f87171;font-size:13px;margin-bottom:6px}
+#panel{background:#131728;border:1px solid #2e3554;border-radius:12px;padding:12px;margin-bottom:8px}
+.row{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
+#dmd{color:#f87171;font-weight:700}#sup{color:#4ade80;font-weight:700}
+.bar{height:14px;background:#0b0e1a;border-radius:7px;overflow:hidden;margin-top:6px;border:1px solid #2e3554}
+#blackFill{height:100%;width:0;background:linear-gradient(90deg,#b91c1c,#f87171)}
+#timeBar{height:10px;background:#0b0e1a;border-radius:5px;overflow:hidden;margin-top:8px}
+#tFill{height:100%;width:0;background:linear-gradient(90deg,#0ea5e9,#67e8f9)}
+.blb{font-size:11px;color:#8b90b0;margin-top:4px}
+#buys{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.buy{background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:7px 10px;cursor:pointer;text-align:left}
+.buy.off{opacity:.45}
+.buy .nm{font-size:13px;font-weight:600}
+.buy .ds{font-size:11px;color:#8b90b0}
+.buy .pr{font-size:12px;color:#ffd76a;font-weight:700}
+.buy .own{font-size:11px;color:#7dd3fc;float:right}
+.acts{display:flex;justify-content:center}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.red{background:#7f1d1d;color:#fecaca;border-color:#b91c1c;font-weight:700}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay h2.bad{color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>城市电力局</h1>
+  <p class="hint">需求不断上涨:白天靠光伏,夜里靠蓄电与火电,风电看天 · 不满度爆表就停电下台 · 撑过 <b>3 天</b> 获胜</p>
+  <div class="hud">
+    <span>第 <b id="hDay">1</b>/3 天 <b id="hSun">☀️</b></span>
+    <span>资金 <b id="hMoney">300</b></span>
+    <span>风速 <b id="hWf">1.0</b></span>
+    <span>蓄电 <b id="hStore">0</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="panel">
+    <div class="row"><span>城市需求 <b id="dmd">40 MW</b></span><span>实际供电 <b id="sup">0 MW</b></span></div>
+    <div class="blb">市民不满度(满格停电下台)</div>
+    <div class="bar"><div id="blackFill"></div></div>
+    <div class="blb">任期进度</div>
+    <div id="timeBar"><div id="tFill"></div></div>
+  </div>
+  <div id="buys"></div>
+  <div class="acts">
+    <button class="btn red" id="btnBoost">应急调度 +6MW (5秒)</button>
+  </div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">城市电力局</h2>
+    <p id="ovDesc">你当了电力局长,任期三天(自带一台老火电机组)。需求一路上涨:光伏只在白天发电,风电忽大忽小,火电稳定但贵,蓄电站白天存电夜里放。供不上电不满度就飙升,满格即停电暴动。危机时刻点「应急调度」强行顶上!</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">宣誓就职</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elDay=$("hDay"),elSun=$("hSun"),elMoney=$("hMoney"),elWf=$("hWf"),elStore=$("hStore"),elMsg=$("msg");
+var dmd=$("dmd"),sup=$("sup"),blackFill=$("blackFill"),tFill=$("tFill"),buysEl=$("buys"),btnBoost=$("btnBoost");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var plants=[
+ {nm:"光伏板",ds:"白天每块 +15MW,夜里归零",cost:90,key:"solar"},
+ {nm:"风力机组",ds:"每台 12MW x 风速(0.2~1.2)",cost:130,key:"wind"},
+ {nm:"火电机组",ds:"每台稳定 +25MW",cost:240,key:"coal"},
+ {nm:"蓄电站",ds:"白天存电,缺口时每站最多放 15MW",cost:200,key:"batt"}
+];
+var DUR=180;
+var t,money,counts,store,wf,wfT,black,boostT,boostCd,eventModT2,state,msgT,buyEls=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function say(t2){elMsg.textContent=t2;msgT=2.6;}
+function elapsed(){return DUR-t;}
+function isDay(){return (elapsed()%60)<30;}
+function demand(){return 25+elapsed()*0.42+6*Math.sin(elapsed()/7);}
+function supplyNoBat(){
+  var s=0;
+  if(isDay())s+=15*counts.solar;
+  s+=12*counts.wind*wf;
+  s+=25*counts.coal;
+  if(boostT>0)s+=6;
+  return s;
+}
+function buildBuys(){
+  buysEl.innerHTML="";buyEls=[];
+  var i;
+  for(i=0;i<plants.length;i++){
+    var d=document.createElement("div");
+    d.className="buy";
+    d.innerHTML='<div class="nm">'+plants[i].nm+' <span class="own"></span></div><div class="ds">'+plants[i].ds+'</div><div class="pr">'+plants[i].cost+' 金</div>';
+    (function(idx){d.addEventListener("click",function(){buy(idx);});})(i);
+    buysEl.appendChild(d);buyEls.push(d);
+  }
+}
+function buy(i){
+  if(state!=="play")return;
+  if(money<plants[i].cost){say("资金不足!");return;}
+  money-=plants[i].cost;
+  counts[plants[i].key]++;
+  say(plants[i].nm+" 并网成功!");
+}
+btnBoost.addEventListener("click",function(){
+  if(state!=="play")return;
+  if(boostCd>0)return;
+  boostT=5;boostCd=12;
+  say("应急调度启动!顶住这道缺口!");
+});
+function startGame(){
+  t=DUR;money=300;counts={solar:0,wind:0,coal:1,batt:0};store=0;
+  wf=1;wfT=3;black=0;boostT=0;boostCd=0;msgT=0;
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var d=demand(),s=supplyNoBat();
+  var dis=0;
+  if(s<d&&store>0){dis=Math.min(d-s,15*counts.batt,store*2);}
+  var supV=s+dis;
+  dmd.textContent=d.toFixed(0)+" MW";
+  sup.textContent=supV.toFixed(1)+" MW"+(dis>0?"(蓄电)":"");
+  elDay.textContent=Math.min(3,1+Math.floor(elapsed()/60));
+  elSun.textContent=isDay()?"☀️白天":"🌙夜晚";
+  elMoney.textContent=fmt(money);elWf.textContent=wf.toFixed(1);
+  elStore.textContent=fmt(store)+"/"+fmt(150*counts.batt);
+  blackFill.style.width=Math.min(100,black)+"%";
+  tFill.style.width=(elapsed()/DUR*100)+"%";
+  var i;
+  for(i=0;i<plants.length;i++){
+    var c=counts[plants[i].key];
+    buyEls[i].classList.toggle("off",money<plants[i].cost);
+    buyEls[i].querySelector(".own").textContent="x"+c;
+  }
+  btnBoost.disabled=boostCd>0;
+  btnBoost.textContent=boostCd>0?("调度冷却 "+boostCd.toFixed(0)+"s"):"应急调度 +6MW (5秒)";
+}
+var last=0;
+function loop(ts){
+  requestAnimationFrame(loop);
+  if(!last)last=ts;
+  var dt=Math.min(50,ts-last);last=ts;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  t-=ds;
+  wfT-=ds;
+  if(wfT<=0){wfT=3;wf=Math.max(0.2,Math.min(1.2,wf+(Math.random()-0.5)*0.5));}
+  if(boostT>0)boostT-=ds;
+  if(boostCd>0)boostCd-=ds;
+  var d=demand(),s=supplyNoBat(),dis=0,supV=s;
+  if(s>d){
+    if(counts.batt>0)store=Math.min(150*counts.batt,store+Math.min(s-d,25)*ds);
+    supV=d;
+    black=Math.max(0,black-7*ds);
+  }else{
+    if(store>0){dis=Math.min(d-s,15*counts.batt,store*2);store-=dis*ds;supV=s+dis;}
+    if(supV<d){
+      black+=9*ds;
+      if(black>=100){
+        state="over";
+        showOv("全城大停电!","不满度爆表,市民围了电力局,你连夜引咎辞职…","坚持了 "+elapsed().toFixed(0)+" 秒(第 "+Math.min(3,1+Math.floor(elapsed()/60))+" 天)",true);
+        return;
+      }
+    }else black=Math.max(0,black-7*ds);
+  }
+  money+=supV*0.12*ds;
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(t<=0){
+    state="over";
+    showOv("任期圆满!","三天供电零事故,城市灯火通明为你鼓掌!","剩余不满度 "+Math.max(0,black).toFixed(0)+"% · 资金 "+fmt(money),false);
+  }
+}
+function showOv(t2,d,s,bad){
+  ovT.textContent=t2;ovT.classList.toggle("bad",!!bad);
+  ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+t=DUR;money=300;counts={solar:0,wind:0,coal:1,batt:0};store=0;wf=1;wfT=3;black=0;boostT=0;boostCd=0;state="menu";msgT=0;
+buildBuys();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

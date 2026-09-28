@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>时间凝滞</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#64b5f6;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#64b5f6;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.bth{display:flex;justify-content:center;margin:2px 0 8px}
+.bth button{background:#26314f;color:#90caf9;border:1px solid #3a4a75;border-radius:10px;padding:9px 26px;font-size:14px;font-family:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
+.bth button:active{background:#33426b}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#64b5f6}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#64b5f6;color:#0b2740;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>时间凝滞</h1>
+  <p class="hint">飞靶快如流星 · 按住空格或「凝滞」键让时间变慢 · 55 秒冲 240 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">55</b>秒</span>
+    <span>目标 <b>240</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="bth"><button id="bh">按住凝滞</button></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">时间凝滞</h2>
+      <p id="ovD">飞靶的速度快得离谱,普通人根本瞄不住。但你有一件秘密武器:按住空格(或下方按钮),世界会进入凝滞状态,万物慢到四分之一速——代价是能量快速流失,耗尽后必须等它重新充到四分之一才能再次凝滞。慢动时命中还有额外 6 分。55 秒冲 240 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">启动凝滞</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn"),bh=$("bh");
+const elSc=$("sc"),elTm=$("tm"),elMsg=$("msg");
+const GOAL=240,DUR=55;
+let state="menu",score=0,timeLeft=DUR,tp=0,elapsed=0;
+let slow=false,slowLock=false,energy=100,spawnT=0.4;
+let mouse={x:240,y:280},targets=[],pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function spawn(){
+  const side=Math.floor(Math.random()*4);
+  let x,y;
+  if(side===0){x=Math.random()*480;y=-25;}
+  else if(side===1){x=-25;y=Math.random()*560;}
+  else if(side===2){x=505;y=Math.random()*560;}
+  else{x=Math.random()*480;y=585;}
+  const tx=120+Math.random()*240,ty=140+Math.random()*280;
+  const d=Math.max(1,Math.hypot(tx-x,ty-y));
+  const sp=300+Math.random()*150+elapsed*3;
+  targets.push({x:x,y:y,vx:(tx-x)/d*sp,vy:(ty-y)/d*sp,r:18,
+    hue:["#4dd0e1","#ba68c8","#ffb74d"][Math.floor(Math.random()*3)]});
+}
+function hold(v){
+  if(v){
+    if(state==="play"&&!slowLock&&energy>0)slow=true;
+  }else slow=false;
+}
+function shoot(){
+  if(state!=="play")return;
+  let hit=null;
+  for(let i=0;i<targets.length;i++){
+    if(Math.hypot(mouse.x-targets[i].x,mouse.y-targets[i].y)<targets[i].r+6){hit=targets[i];break;}
+  }
+  if(hit){
+    const gain=14+(slow?6:0);
+    score+=gain;
+    elMsg.textContent="命中 +"+gain+(slow?"(凝滞加成)":"");
+    for(let i=0;i<10;i++){
+      const a=Math.random()*6.28,s=70+Math.random()*150;
+      pops.push({x:hit.x,y:hit.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:hit.hue});
+    }
+    targets.splice(targets.indexOf(hit),1);
+    elSc.textContent=score;
+  }else{
+    elMsg.textContent="扑空";
+  }
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;elapsed=0;
+  slow=false;slowLock=false;energy=100;spawnT=0.3;
+  targets=[];pops=[];
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";slow=false;
+  const win=score>=GOAL;
+  ovT.textContent=win?"执时间之弓者":"时流如梭";
+  ovT.style.color=win?"#64b5f6":"#ef9a9a";
+  ovD.textContent=win?"在凝滞的世界里,你把每一发都送进了靶心。":"凝滞是救命稻草,不是摇篮:能量见底前,先把箭送出去。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+bh.addEventListener("mousedown",function(e){e.preventDefault();hold(true);});
+bh.addEventListener("mouseup",function(){hold(false);});
+bh.addEventListener("mouseleave",function(){hold(false);});
+bh.addEventListener("touchstart",function(e){e.preventDefault();hold(true);},{passive:false});
+bh.addEventListener("touchend",function(){hold(false);});
+bh.addEventListener("touchcancel",function(){hold(false);});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "){e.preventDefault();if(!e.repeat)hold(true);return;}
+  if(e.key==="Enter"&&state!=="play"){startGame();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" ")hold(false);
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(slow){
+      energy-=38*dt;
+      if(energy<=0){energy=0;slow=false;slowLock=true;elMsg.textContent="能量耗尽!";}
+    }else{
+      energy=Math.min(100,energy+16*dt);
+      if(slowLock&&energy>=25){slowLock=false;elMsg.textContent="凝滞已就绪";}
+    }
+    const wdt=dt*(slow?0.28:1);
+    elapsed+=wdt;
+    spawnT-=wdt;
+    if(spawnT<=0){spawn();spawnT=Math.max(0.5,0.95-elapsed*0.004);}
+    for(let i=targets.length-1;i>=0;i--){
+      const tr=targets[i];
+      tr.x+=tr.vx*wdt;tr.y+=tr.vy*wdt;
+      if(tr.x<-40||tr.x>520||tr.y<-40||tr.y>600)targets.splice(i,1);
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=wdt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*wdt;p.y+=p.vy*wdt;p.vy+=240*wdt;
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function drawEnergy(){
+  const bx=70,bw=340,by=520,bh2=12;
+  ctx.fillStyle="rgba(0,0,0,0.4)";
+  ctx.fillRect(bx-4,by-4,bw+8,bh2+8);
+  ctx.fillStyle="#1c2740";
+  ctx.fillRect(bx,by,bw,bh2);
+  ctx.fillStyle=slowLock?"#ef5350":"#64b5f6";
+  ctx.fillRect(bx,by,bw*(energy/100),bh2);
+  ctx.strokeStyle="rgba(255,255,255,0.35)";ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(bx+bw*0.25,by);ctx.lineTo(bx+bw*0.25,by+bh2);ctx.stroke();
+  ctx.fillStyle="#90caf9";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("凝滞能量",bx,by-7);
+  ctx.textAlign="right";
+  ctx.fillText(slowLock?"充能中…":"就绪",bx+bw,by-7);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,slow?"#12294d":"#101a33");g.addColorStop(1,slow?"#0a1526":"#0b0e1e");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle=slow?"rgba(100,181,246,0.2)":"rgba(255,255,255,0.05)";ctx.lineWidth=1;
+  for(let i=0;i<6;i++){
+    ctx.beginPath();ctx.moveTo(0,80+i*80);ctx.lineTo(W,80+i*80);ctx.stroke();
+  }
+  for(let i=0;i<targets.length;i++){
+    const tr=targets[i];
+    ctx.strokeStyle="rgba(255,255,255,0.35)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(tr.x-tr.vx*0.055,tr.y-tr.vy*0.055);ctx.lineTo(tr.x,tr.y);ctx.stroke();
+    ctx.fillStyle=tr.hue;
+    ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(0,0,0,0.4)";
+    ctx.beginPath();ctx.arc(tr.x,tr.y,tr.r*0.45,0,Math.PI*2);ctx.fill();
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  if(state==="play"){
+    ctx.strokeStyle=slow?"#bbdefb":"#64b5f6";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+  drawEnergy();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

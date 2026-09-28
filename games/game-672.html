@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接雨满桶</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>接雨满桶</h1>
+  <p class="tips">暴雨、小雨、干旱轮番登场!← → 或 A/D 移动水桶接雨,触屏拖动。装满一桶换下一桶,三桶全满即通关;90 秒倒计时,干旱天桶里的水还会蒸发!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">桶次</div><div class="big" id="rd">1/3</div></div>
+    <div class="stat"><div class="mut">水量</div><div class="big" id="wt">0%</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tm">90s</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">接雨满桶</h2><p id="ovp">玩法:回合制接雨,装满即胜。<br>· 三轮目标水量:50% → 75% → 100%<br>· 天气循环:暴雨(密)→ 小雨(疏)→ 干旱(无雨且蒸发)<br>· 接住雨滴水量上升,干旱时缓慢蒸发<br>· 装满一桶 +200 分换下一桶,三桶全满通关<br>· 90 秒倒计时耗尽判负;触屏/键盘均可移桶</p><button class="btn" id="obtn">开始接雨</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var RT=[50,75,100];
+var WTHR=[
+  {n:'暴雨',rate:0.035,last:5},
+  {n:'小雨',rate:0.13,last:3},
+  {n:'干旱',rate:0,last:2.6}
+];
+var S=null;
+function reset(){S={on:false,score:0,round:0,meter:0,t:90,wi:0,wT:WTHR[0].last,st:0,drops:[],pops:[],bx:W/2,bw:96,keys:{}}}
+reset();
+function target(){return RT[S.round]}
+function startGame(){reset();S.on=true;$('rd').textContent='1/3';$('wt').textContent='0%';$('tm').textContent='90s';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:1})}
+function update(dt){
+  S.t-=dt;
+  if(S.t<=0){S.t=0;$('tm').textContent='0s';gameOver(false);return}
+  $('tm').textContent=Math.ceil(S.t)+'s';
+  S.wT-=dt;
+  if(S.wT<=0){
+    S.wi=(S.wi+1)%3;
+    S.wT=WTHR[S.wi].last;
+  }
+  var w=WTHR[S.wi];
+  if(w.rate>0){
+    S.st-=dt;
+    while(S.st<=0){
+      S.st+=w.rate*(0.7+Math.random()*0.6);
+      S.drops.push({x:Math.random()*W,y:-10,v:330+Math.random()*130});
+    }
+  }else{
+    S.meter=Math.max(0,S.meter-2.3*dt);
+  }
+  var sp=380,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  var by=H-46;
+  for(var i=S.drops.length-1;i>=0;i--){
+    var d=S.drops[i];
+    d.y+=d.v*dt;
+    if(d.y>=by-20&&d.y<=by+12&&Math.abs(d.x-S.bx)<S.bw/2){
+      S.meter+=1.1;S.score+=1;
+      S.drops.splice(i,1);continue;
+    }
+    if(d.y>H-6)S.drops.splice(i,1);
+  }
+  if(S.meter>=target()){
+    S.score+=200;S.round++;
+    if(S.round>=3){gameOver(true);return}
+    pop(W/2,H-140,'第'+S.round+'桶装满!+200','#51d88a');
+    S.meter=0;
+    $('rd').textContent=(S.round+1)+'/3';
+  }
+  $('wt').textContent=Math.min(100,Math.round(S.meter/target()*100))+'%';
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(win){
+  S.on=false;
+  if(win){
+    $('ovt').textContent='三桶全满,通关!';
+    $('ovp').innerHTML='剩余时间 <b>'+Math.ceil(S.t)+'</b> 秒<br>总得分 <b>'+S.score+'</b><br>旱季存水,雨季狂接,你就是接雨大师!';
+  }else{
+    $('ovt').textContent='时间到…';
+    $('ovp').innerHTML='完成到第 <b>'+S.round+'</b> 桶,总得分 <b>'+S.score+'</b><br>暴雨时抓紧攒水,干旱时稳住别慌!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  var w=WTHR[S.wi];
+  ctx.fillStyle='rgba(255,255,255,.07)';rr(150,12,180,34,10);ctx.fill();
+  ctx.fillStyle=w.n==='干旱'?'#ffb84d':'#4cc9f0';
+  ctx.font='bold 16px system-ui';ctx.textAlign='center';
+  ctx.fillText('当前天气:'+w.n,W/2,34);
+  for(var i=0;i<S.drops.length;i++){
+    var d=S.drops[i];
+    ctx.strokeStyle='rgba(76,201,240,.8)';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(d.x,d.y-8);ctx.lineTo(d.x,d.y);ctx.stroke();
+  }
+  var by=H-46,bh=42;
+  ctx.fillStyle='#5a4bb8';rr(S.bx-S.bw/2,by,S.bw,bh,6);ctx.fill();
+  ctx.strokeStyle='#b3a6ff';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,bh,6);ctx.stroke();
+  var fh=(bh-10)*Math.min(1,S.meter/target());
+  if(fh>1){
+    ctx.fillStyle='#4cc9f0';rr(S.bx-S.bw/2+5,by+bh-5-fh,S.bw-10,fh,3);ctx.fill();
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='bold 12px system-ui';
+  ctx.fillText('水桶 '+(S.round+1),S.bx,by-6);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

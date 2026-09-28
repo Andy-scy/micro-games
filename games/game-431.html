@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日一跑</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a3e635;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a3e635;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#a3e635}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a3e635;color:#1c2604;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>每日一跑</h1>
+  <p class="hint">每天赛道固定!空格/↑ 跳 · 按住 ↓/S 滑铲 · 触屏:点右半跳,按住左半滑铲 · 冲过终点线即通关</p>
+  <div class="hud">
+    <span>今日赛道 <b id="day">--</b></span>
+    <span>里程 <b id="score">0</b> 米</span>
+    <span>进度 <b id="prog">0</b>%</span>
+    <span>用时 <b id="time">0.0</b>s</span>
+    <span>今日最佳 <b id="best">0</b> 米</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">每日一跑</h2>
+      <p id="ovDesc">由日期生成的固定赛道:今天全世界跑的都是同一条路!全程 1800 米,两处检查点,撞上障碍就出局,冲过终点即通关。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elDay=$("day"),elProg=$("prog"),elTime=$("time"),elBest=$("best"),elScore=$("score");
+function mulberry32(a){
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    var t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+var d0=new Date(),ymd=d0.getFullYear()*10000+(d0.getMonth()+1)*100+d0.getDate();
+var bestKey="mg_s431_"+ymd;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest(bestKey);
+var TOTAL=18000;
+var state="menu",dist,score,speed,obs,px,py,vy,grounded,jumpHeld,slideHeld,sliding,runT,bannerT,bannerMsg,done;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function buildCourse(){
+  var rng=mulberry32(ymd),x=900,type;
+  obs=[];
+  while(x<TOTAL-300){
+    type=rng();
+    if(type<0.3)obs.push({x:x,w:24,h:32,type:"crate"});
+    else if(type<0.48)obs.push({x:x,w:50,h:34,type:"crate"});
+    else if(type<0.74)obs.push({x:x,w:22,type:"gate"});
+    else{
+      obs.push({x:x,w:24,h:30,type:"crate"});
+      obs.push({x:x+130,w:22,type:"gate"});
+      x+=130;
+    }
+    x+=270+rng()*300;
+  }
+}
+function reset(){
+  dist=0;score=0;speed=300;px=90;py=GY-42;vy=0;grounded=true;
+  jumpHeld=false;slideHeld=false;sliding=false;runT=0;bannerT=0;bannerMsg="";done=false;
+  buildCourse();
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=Math.floor(dist/10);
+  elProg.textContent=Math.min(100,Math.floor(dist/TOTAL*100));
+  elTime.textContent=runT.toFixed(1);
+}
+function finish(over,win,msg){
+  state="over";
+  done=win;
+  var m=Math.floor(dist/10);
+  if(m>best){best=m;saveBest(bestKey,best);elBest.textContent=best;}
+  ovTitle.textContent=win?"通关成功!":"比赛终止";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent=(win?"用时 "+runT.toFixed(1)+" 秒 · ":"跑了 "+m+" 米 · ")+"今日最佳 "+best+" 米";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;sliding=false;}
+}
+function pbox(){
+  if(sliding)return{x:px-8,y:GY-20,w:44,h:20};
+  return{x:px+2,y:py+2,w:22,h:38};
+}
+function update(dt){
+  var s=dt/1000,i,o,b;
+  speed=Math.min(520,300+dist*0.012);
+  dist+=speed*s;score=Math.floor(dist/10);
+  runT+=s;
+  if(bannerT>0)bannerT-=s;
+  sliding=grounded&&slideHeld;
+  if(!grounded){
+    var g=2200;
+    if(vy<0&&jumpHeld)g=1150;
+    vy+=g*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  if(dist>=TOTAL){finish(false,true,"你跑完了今天专属的 1800 米!");return;}
+  if(dist>3000&&bannerT<=0&&Math.abs(dist-3000)<40){bannerT=1.6;bannerMsg="检查点 1/2 通过!";}
+  if(dist>12000&&bannerT<=0&&Math.abs(dist-12000)<40){bannerT=1.6;bannerMsg="检查点 2/2 通过!";}
+  b=pbox();
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    var sx=o.x-dist;
+    if(sx>W+60)break;
+    if(sx<-80)continue;
+    var oy,oh,ow;
+    if(o.type==="gate"){oy=136;oh=90;ow=o.w;}
+    else{oy=GY-o.h;oh=o.h;ow=o.w;}
+    if(b.x+b.w>sx+3&&b.x<sx+ow-3&&b.y+b.h>oy+3&&b.y<oy+oh-3){
+      finish(false,false,o.type==="gate"?"撞上了闸门——低头滑铲!":"绊在箱子上,今天的纪录到此为止!");
+      return;
+    }
+  }
+  updateHud();
+}
+function draw(){
+  var i,o,grd,sx;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#15202e");grd.addColorStop(1,"#1f2f1e");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#a3e635";ctx.globalAlpha=0.5;
+  ctx.beginPath();ctx.arc(560,50,16,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle="#20301f";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#a3e635";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%80;
+  ctx.fillStyle="rgba(255,255,255,.08)";
+  for(i=0;i<10;i++)ctx.fillRect(i*80-dsh,GY+14,36,3);
+  for(i=-1;i<7;i++){
+    var mx=(i*3000-dist%3000);
+    ctx.fillStyle="rgba(163,230,53,.5)";
+    ctx.fillRect(mx,GY-64,3,64);
+    ctx.fillStyle="rgba(163,230,53,.18)";
+    ctx.fillRect(mx,GY-64,46,20);
+  }
+  for(i=0;i<obs.length;i++){
+    o=obs[i];sx=o.x-dist;
+    if(sx>W+60||sx<-80)continue;
+    if(o.type==="gate"){
+      ctx.fillStyle="#3d4a3a";
+      ctx.fillRect(sx-3,0,o.w+6,136);
+      ctx.fillStyle="#a3e635";
+      ctx.fillRect(sx,136,o.w,6);
+    }else{
+      ctx.fillStyle="#5d6b48";
+      rr(sx,GY-o.h,o.w,o.h,4);ctx.fill();
+      ctx.fillStyle="#414d33";
+      ctx.fillRect(sx+3,GY-o.h+4,o.w-6,3);
+    }
+  }
+  var fx=TOTAL-dist;
+  if(fx<W+40){
+    for(i=0;i<10;i++){
+      ctx.fillStyle=(i%2===0)?"#e8eaf6":"#161a2b";
+      ctx.fillRect(fx,GY-90+i*9,26,9);
+      ctx.fillStyle=(i%2===0)?"#161a2b":"#e8eaf6";
+      ctx.fillRect(fx+26,GY-90+i*9,26,9);
+    }
+    ctx.fillStyle="#3d4a3a";
+    ctx.fillRect(fx-4,GY-90,4,90);
+    ctx.fillRect(fx+56,GY-90,4,90);
+  }
+  if(bannerT>0){
+    ctx.fillStyle="rgba(10,14,26,.75)";
+    rr(W/2-120,40,240,36,9);ctx.fill();
+    ctx.fillStyle="#a3e635";
+    ctx.font="bold 17px system-ui";ctx.textAlign="center";
+    ctx.fillText(bannerMsg,W/2,64);
+    ctx.textAlign="left";ctx.font="14px system-ui";
+  }
+  if(sliding){
+    ctx.fillStyle="#a3e635";
+    rr(px-8,GY-18,42,16,7);ctx.fill();
+    ctx.fillStyle="#1c2604";
+    ctx.fillRect(px+22,GY-15,6,3);
+  }else{
+    ctx.fillStyle="#a3e635";
+    rr(px,py+12,26,28,6);ctx.fill();
+    rr(px+7,py,19,17,5);ctx.fill();
+    ctx.fillStyle="#1c2604";
+    ctx.fillRect(px+16,py+5,3,4);
+    ctx.fillStyle="#7ca622";
+    ctx.fillRect(px+4,py+38,8,5);ctx.fillRect(px+15,py+38,8,5);
+  }
+  elDay.textContent=(d0.getMonth()+1)+"月"+d0.getDate()+"日";
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function jumpKey(k){return k===" "||k==="ArrowUp"||k==="w"||k==="W";}
+function slideKey(k){return k==="ArrowDown"||k==="s"||k==="S";}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(jumpKey(k)){jumpHeld=true;if(!e.repeat)doJump();}
+  if(slideKey(k))slideHeld=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(jumpKey(k))jumpHeld=false;
+  if(slideKey(k))slideHeld=false;
+});
+function zoneJump(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientX-rect.left)>rect.width*0.45;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  if(zoneJump(t)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();jumpHeld=false;slideHeld=false;},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  if(zoneJump(e)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+});
+document.addEventListener("mouseup",function(){jumpHeld=false;slideHeld=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

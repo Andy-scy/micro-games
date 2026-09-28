@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深层探钓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>深层探钓</h1>
+<p class="tip">看声呐:不同水层的鱼群随时迁移。点击某个水层(或按 1-4 键)把鱼钩下到那一层,钩到鱼群才有收获!鱼饵只有 15 份。</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>鱼饵 <b id="s2">15</b></span><span>目标 <b>260</b> 分</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">深层探钓</h2><p id="op">水越深鱼越值钱,但鱼群每隔几秒就换层。<br>盯紧各层的鱼影,把钩下到鱼最多的那一层!<br>15 份鱼饵内拿到 260 分。</p><button id="ob">开始探钓</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eB=document.getElementById('s2');
+var W=cv.width,H=cv.height,WT=70,WB=470,LH=100;
+var layers=[
+ {name:'浅水层',v:30,n:0},
+ {name:'中层',v:60,n:0},
+ {name:'深水层',v:95,n:0},
+ {name:'湖底层',v:140,n:0}];
+var state='ready',score=0,bait=15,msg='',notice='',nt=0;
+var sel=0,phase='idle',pt=0,tSoak=0,hookY=WT,jump=null,jv=0,st=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function shuffle(){
+  var i,tot=6+Math.floor(Math.random()*4);
+  for(i=0;i<4;i++)layers[i].n=0;
+  for(i=0;i<tot;i++)layers[Math.floor(Math.random()*4)].n++;
+}
+function layerY(i){return WT+i*LH+LH/2}
+function cast(i){
+  if(state!=='play')return;
+  if(phase!=='idle'||bait<=0)return;
+  sel=i;bait--;phase='sink';pt=0;msg='';jump=null;
+}
+function finish(win){
+  state='over';ob.textContent='再来一局';
+  ot.textContent=win?'钓层高手!':'鱼饵用完了…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 260 分<br>'+(win?'深浅皆宜,鱼群逃不过你的眼睛!':'下次记得盯紧声呐,跟着鱼群换层下钩。');
+  ov.classList.remove('hide');
+}
+function start(){
+  score=0;bait=15;sel=0;phase='idle';pt=0;msg='';notice='';nt=0;st=0;hookY=WT;jump=null;
+  shuffle();state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(jump){jump.t+=dt;if(jump.t>0.9)jump=null}
+  if(nt>0){nt-=dt;if(nt<=0)notice=''}
+  if(state!=='play')return;
+  st+=dt;if(st>2.8){st=0;shuffle();notice='鱼群换层了!';nt=1.4}
+  pt+=dt;
+  if(phase==='sink'){
+    hookY+=(layerY(sel)-hookY)*Math.min(1,dt*6);
+    if(pt>=0.5){phase='soak';pt=0;tSoak=rnd(0.8,1.6)}
+  }else if(phase==='soak'){
+    if(pt>=tSoak){
+      if(layers[sel].n>0){
+        layers[sel].n--;
+        var v;
+        if(sel===3&&Math.random()<0.06)v=260;
+        else v=layers[sel].v+Math.floor(rnd(-10,22));
+        score+=v;jump={t:0};jv=v;
+        msg=(v===260?'湖底巨物!+':'钓到'+layers[sel].name+'的鱼!+')+v+' 分';
+      }else{msg='这一层没有鱼,空军了…'}
+      phase='up';pt=0;
+    }
+  }else if(phase==='up'){
+    hookY+=(WT-40-hookY)*Math.min(1,dt*6);
+    if(pt>=0.45){
+      phase='idle';
+      if(bait<=0){finish(score>=260);return}
+    }
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WT);g.addColorStop(0,'#151c36');g.addColorStop(1,'#232a4d');
+  X.fillStyle=g;X.fillRect(0,0,W,WT);
+  X.fillStyle='#9aa3b5';X.font='13px system-ui';X.textAlign='left';
+  X.fillText('声呐显示各层鱼群,点击水层或按 1-4 下钩',12,44);
+  var g2=X.createLinearGradient(0,WT,0,WB);g2.addColorStop(0,'#1a4472');g2.addColorStop(1,'#081428');
+  X.fillStyle=g2;X.fillRect(0,WT,W,WB-WT);
+  var i,k,t=Date.now()*0.001;
+  for(i=0;i<4;i++){
+    var y0=WT+i*LH;
+    if(i===sel){
+      X.fillStyle='rgba(127,212,255,.08)';X.fillRect(0,y0,W,LH);
+      X.strokeStyle='rgba(127,212,255,.55)';X.lineWidth=2;X.strokeRect(4,y0+4,W-8,LH-8);
+    }
+    X.fillStyle='rgba(200,215,235,.75)';X.font='13px system-ui';X.textAlign='left';
+    X.fillText((i+1)+'. '+layers[i].name+' · 约'+layers[i].v+'分',12,y0+22);
+    for(k=0;k<layers[i].n;k++){
+      var fx=90+((i*47+k*83)%300)+Math.sin(t*2+k)*6,fy=y0+40+((k*37+i*13)%45);
+      X.fillStyle='rgba(140,190,240,.8)';
+      X.beginPath();X.ellipse(fx,fy,12,5,0,0,7);X.fill();
+      X.beginPath();X.moveTo(fx+10,fy);X.lineTo(fx+19,fy-5);X.lineTo(fx+19,fy+5);X.closePath();X.fill();
+    }
+    if(i<3){
+      X.strokeStyle='rgba(127,212,255,.15)';X.setLineDash([6,8]);
+      X.beginPath();X.moveTo(0,y0+LH);X.lineTo(W,y0+LH);X.stroke();X.setLineDash([]);
+    }
+  }
+  var hx=W/2;
+  X.strokeStyle='rgba(230,238,246,.7)';X.lineWidth=1.5;
+  if(phase!=='idle'){
+    X.beginPath();X.moveTo(hx,WT);X.lineTo(hx,hookY);X.stroke();
+    X.beginPath();X.arc(hx,hookY+8,6,Math.PI*1.1,Math.PI*1.9);X.stroke();
+  }else{
+    X.setLineDash([4,6]);X.beginPath();X.moveTo(hx,WT);X.lineTo(hx,layerY(sel));X.stroke();X.setLineDash([]);
+    X.fillStyle='rgba(255,215,94,.9)';X.font='12px system-ui';X.textAlign='center';
+    X.fillText('当前挂钩层',hx,layerY(sel)-10);
+  }
+  if(jump){
+    var kk=jump.t/0.9,fy2=WT-30-Math.sin(kk*Math.PI)*70;
+    X.fillStyle='#ffd75e';X.beginPath();X.ellipse(hx,fy2,20,8,-0.4,0,7);X.fill();
+    X.fillStyle='#ffffff';X.font='bold 15px system-ui';X.textAlign='center';X.fillText('+'+jv,hx+40,fy2);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,H-64);
+  if(notice){X.fillStyle='#ffd75e';X.fillText(notice,W/2,H-40)}
+  X.fillStyle='rgba(154,163,181,.9)';X.font='13px system-ui';X.fillText('空格:在当前选中层下钩',W/2,H-14);
+}
+cv.addEventListener('pointerdown',function(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width),my=(e.clientY-r.top)*(H/r.height);
+  if(state!=='play')return;
+  if(my>=WT&&my<WB)cast(Math.min(3,Math.floor((my-WT)/LH)));
+});
+document.addEventListener('keydown',function(e){
+  if(state!=='play'){
+    if(e.key===' '||e.key==='Enter'){e.preventDefault();start()}
+    return;
+  }
+  if(e.key>='1'&&e.key<='4'){cast(parseInt(e.key,10)-1)}
+  else if(e.key===' '){e.preventDefault();cast(sel)}
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eB.textContent=bait;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>汉堡堆塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffd23f;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#ffd23f;font-size:16px}
+.recipe{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chip{display:flex;align-items:center;gap:4px;font-size:12px;color:#8b90b0;background:#10142a;border:1px solid #2a3158;border-radius:20px;padding:3px 9px}
+.chip .dot{width:10px;height:10px;border-radius:3px}
+.chip.cur{border-color:#ffd23f;color:#e8eaf6;box-shadow:0 0 8px rgba(255,210,63,.4)}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#141026;border-radius:10px;touch-action:none}
+.acts{text-align:center;margin-top:10px}
+.acts button{background:#ffd23f;color:#3a2a05;border:none;border-radius:10px;padding:11px 30px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.acts button:active{transform:scale(.96)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ffd23f}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#ffd23f;color:#3a2a05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>汉堡堆塔</h1>
+  <p class="hint">食材吊在横梁上左右摆动,按 空格 / 点击画面<b style="color:#ffd23f">松手落层</b><br>照底部小票顺序从下往上堆,落得越正分越高,甩飞食材扣命!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>汉堡 <b id="burgers">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="recipe" id="recipe"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="400"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">汉堡堆塔</h2>
+      <p id="ovDesc">吊臂上的食材来回摆动,时机一到就松手!偏差 10 像素内算完美并叠连击,偏差超过 90 直接甩飞扣一条命,糊了 3 次就打烊。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div class="acts"><button id="btnDrop">落 层(空格)</button></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elBurgers=$("burgers"),elLife=$("life"),elBest=$("best");
+var recipeEl=$("recipe"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo"),btnDrop=$("btnDrop");
+var best=loadBest("mg_s803");
+var LAY=[
+ {n:"面包底",c:"#d9903f",w:120,h:26},
+ {n:"生菜",c:"#7ed957",w:132,h:14},
+ {n:"番茄",c:"#ff5f4d",w:118,h:14},
+ {n:"芝士",c:"#ffd23f",w:126,h:10},
+ {n:"肉饼",c:"#8b4a2b",w:124,h:22},
+ {n:"面包顶",c:"#e8a34f",w:120,h:30}
+];
+var state="menu",stack,curTop,falling,ph,wspeed,rIdx,recipe,score,combo,lives,burgers,lastT,msgT;
+var msgEl=null;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function shuffleMid(){
+  var m=[1,2,3,4],i,j,t;
+  for(i=m.length-1;i>0;i--){j=(Math.random()*(i+1))|0;t=m[i];m[i]=m[j];m[j]=t;}
+  return [0,m[0],m[1],m[2],m[3],5];
+}
+function newBurger(){
+  recipe=shuffleMid();rIdx=0;
+  stack=[];curTop=352;falling=null;
+  wspeed=Math.min(3.6,1.9+burgers*0.2);
+  renderRecipe();
+}
+function reset(){
+  score=0;combo=0;lives=3;burgers=0;ph=0;
+  newBurger();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBurgers.textContent=burgers;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function renderRecipe(){
+  recipeEl.innerHTML="";
+  for(var i=0;i<recipe.length;i++){
+    var d=document.createElement("div");
+    d.className="chip"+(i===rIdx?" cur":"");
+    d.innerHTML='<span class="dot" style="background:'+LAY[recipe[i]].c+'"></span>'+LAY[recipe[i]].n;
+    recipeEl.appendChild(d);
+  }
+}
+function markCur(){
+  var ch=recipeEl.children;
+  for(var i=0;i<ch.length;i++)ch[i].className="chip"+(i===rIdx?" cur":"");
+}
+function showMsg(t){
+  if(!msgEl){
+    msgEl=document.createElement("div");
+    msgEl.style.cssText="height:22px;text-align:center;font-size:15px;font-weight:700;color:#fbbf24;margin-top:6px";
+    btnDrop.parentNode.appendChild(msgEl);
+  }
+  msgEl.textContent=t;
+  msgT=1.4;
+}
+function drop(){
+  if(state!=="playing"||falling)return;
+  var off=carrierX()-240;
+  if(Math.abs(off)>90){
+    lives--;combo=0;updateHud();
+    showMsg("食材甩飞了!","#f87171");
+    if(lives<=0){gameOver("食材甩飞三次,经理气得关店了!");}
+    return;
+  }
+  var t=recipe[rIdx],L=LAY[t];
+  falling={t:t,x:240+off,y:70,targetY:curTop-L.h/2,off:off};
+}
+function land(){
+  var L=LAY[falling.t],a=Math.abs(falling.off);
+  stack.push({t:falling.t,off:falling.off,y:falling.targetY});
+  curTop-=L.h;
+  var pts;
+  if(a<=10){combo++;pts=25+10*combo;showMsg("完美落层 +"+pts,"#4ade80");}
+  else if(a<=32){pts=12;showMsg("落层 +12","#e8eaf6");}
+  else{combo=0;pts=4;showMsg("歪歪扭扭 +4","#e8b06a");}
+  score+=pts;falling=null;rIdx++;
+  updateHud();markCur();
+  if(rIdx>=6){
+    var bonus=80+combo*10;
+    score+=bonus;burgers++;
+    showMsg("汉堡完成!+"+bonus,"#ffd23f");
+    updateHud();
+    setTimeout(function(){if(state==="playing")newBurger();},600);
+    falling=null;
+  }
+}
+function carrierX(){return 240+Math.sin(ph)*175;}
+function gameOver(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s803",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=reason;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function drawLayer(cx,cy,t,alpha){
+  var L=LAY[t];
+  ctx.globalAlpha=alpha||1;
+  ctx.fillStyle=L.c;
+  rr(cx-L.w/2,cy-L.h/2,L.w,L.h,Math.min(9,L.h/2));ctx.fill();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  ctx.clearRect(0,0,480,400);
+  ctx.strokeStyle="#2a3158";ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(30,40);ctx.lineTo(450,40);ctx.stroke();
+  var i;
+  ctx.fillStyle="#cfd4ea";
+  ctx.beginPath();ctx.ellipse(240,360,92,13,0,0,Math.PI*2);ctx.fill();
+  for(i=0;i<stack.length;i++)drawLayer(240+stack[i].off,stack[i].y,stack[i].t,1);
+  var cx=carrierX();
+  if(falling){
+    drawLayer(falling.x,falling.y,falling.t,1);
+  }else{
+    ctx.strokeStyle="#8b90b0";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(cx,40);ctx.lineTo(cx,52);ctx.stroke();
+    ctx.fillStyle="#8b90b0";
+    ctx.fillRect(cx-10,38,20,7);
+    drawLayer(cx,70,recipe[rIdx],1);
+  }
+  ctx.fillStyle="rgba(255,255,255,.05)";
+  ctx.fillRect(0,0,480,20);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(msgT>0){msgT-=dt/1000;if(msgT<=0&&msgEl)msgEl.textContent="";}
+  if(state==="playing"){
+    ph+=wspeed*dt/1000;
+    if(falling){
+      falling.y+=520*dt/1000;
+      if(falling.y>=falling.targetY){falling.y=falling.targetY;land();}
+    }
+  }
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else drop();
+  }
+});
+cv.addEventListener("click",drop);
+cv.addEventListener("touchstart",function(e){e.preventDefault();drop();},{passive:false});
+btnDrop.addEventListener("click",drop);
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

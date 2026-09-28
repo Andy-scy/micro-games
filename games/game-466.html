@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一石多鸟</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>一石多鸟</h1>
+  <p class="hint">↑↓ 调角度 · 空格蓄力发射 · 拖拽瞄准 · 炮弹穿过果实不停,一弧多收</p>
+  <div class="hud">
+    <span>第 <b id="lv">1</b>/5 关</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>炮弹 <b id="ammo">1</b></span>
+    <span>果实 <b id="left">2</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">一石多鸟</h2>
+      <p id="ovDesc">限弹解谜:炮弹击中果实后不会停下,会继续飞行!
+观察果实的排布,用一条弧线一次串起多颗果实。
+每关炮弹数量有限,全部收进嘴里才能过关,共 5 关。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,GY=322,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elScore=$("score"),elAmmo=$("ammo"),elLeft=$("left");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var CX=42,PIV=GY-12;
+var state="menu",ang=45,pow=55,charging=false,cd=1;
+var ball=null,trail=[],level=0,score=0,levelScore=0,balls=0,fruits=[],parts=[];
+var LEVELS=[
+  {balls:1,ts:[[216,98],[300,75]]},
+  {balls:1,ts:[[133,119],[219,155],[296,126]]},
+  {balls:2,ts:[[177,48],[240,41],[119,185]]},
+  {balls:2,ts:[[133,119],[219,155],[296,126],[177,48],[240,41]]},
+  {balls:2,ts:[[216,98],[300,75],[119,185],[153,151]]}
+];
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:CX+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function fy(h){return GY-h;}
+function loadLevel(n){
+  var L=LEVELS[n];
+  balls=L.balls;fruits=[];
+  for(var i=0;i<L.ts.length;i++)fruits.push({x:L.ts[i][0],h:L.ts[i][1],hit:false});
+  levelScore=0;ball=null;trail=[];ang=45;pow=55;charging=false;
+  hud();
+}
+function reset(){
+  level=0;score=0;parts=[];
+  loadLevel(0);
+}
+function hud(){
+  elLv.textContent=level+1;
+  elScore.textContent=score;
+  elAmmo.textContent=balls;
+  var n=0;for(var i=0;i<fruits.length;i++)if(!fruits[i].hit)n++;
+  elLeft.textContent=n;
+}
+function canFire(){return state==="playing"&&!ball&&balls>0;}
+function fire(){
+  if(!canFire())return;
+  balls--;charging=false;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2.2,2.2),vy:rnd(-2.8,0.5),l:rnd(16,36),c:col});
+}
+function allHit(){
+  for(var i=0;i<fruits.length;i++)if(!fruits[i].hit)return false;
+  return true;
+}
+function tick(){
+  var i;
+  if(charging&&canFire()){pow+=cd*1.9;if(pow>=100){pow=100;cd=-1;}if(pow<=18){pow=18;cd=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.l--;if(p.l<=0)parts.splice(i,1);}
+  if(ball){
+    for(var s=0;s<2;s++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      for(i=0;i<fruits.length;i++){
+        var f=fruits[i];
+        if(f.hit)continue;
+        if(Math.hypot(ball.x-f.x,ball.y-fy(f.h))<17){
+          f.hit=true;levelScore+=100;
+          boom(f.x,fy(f.h),"#fb923c",12);
+          hud();
+        }
+      }
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+      if(ball.y>=GY-3){boom(ball.x,GY-4,"#8b93c8",8);ball=null;break;}
+      if(ball.x>W+40||ball.x<-40||ball.t>700){ball=null;break;}
+    }
+    if(!ball){
+      if(allHit()){
+        score+=levelScore+200;
+        state="clear";
+        ovTitle.textContent="第 "+(level+1)+" 关完成!";
+        ovDesc.textContent="本关收获 "+levelScore+" 分,通关奖励 200 分。\n当前总分 "+score+"。";
+        btnGo.textContent=level<LEVELS.length-1?"下一关":"查看战果";
+        ov.classList.remove("hide");
+        hud();
+      }else if(balls<=0){
+        levelScore=0;
+        state="fail";
+        ovTitle.textContent="炮弹用尽";
+        ovDesc.textContent="还有果实挂在枝头,重试本关吧。\n提示:先开启预览虚线,让弧线尽量穿过所有果实。";
+        btnGo.textContent="重试本关";
+        ov.classList.remove("hide");
+        hud();
+      }
+    }
+  }
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function next(){
+  if(state==="clear"){
+    if(level<LEVELS.length-1){
+      level++;loadLevel(level);
+      state="playing";ov.classList.add("hide");
+    }else{
+      state="final";
+      ovTitle.textContent="全部通关!";
+      ovDesc.textContent="5 关果实一网打尽,总分 "+score+" 分。\n你就是果园里最准的炮手!";
+      btnGo.textContent="再来一轮";
+    }
+  }else if(state==="fail"){
+    loadLevel(level);
+    state="playing";ov.classList.add("hide");
+  }else if(state==="final"){
+    startGame();
+  }
+}
+function ring(x,y,r,col){ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCannon(){
+  ctx.fillStyle="#39406b";ctx.fillRect(CX-16,GY-6,32,6);
+  ctx.save();ctx.translate(CX,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(CX,PIV,11,Math.PI,0);ctx.fill();
+  if(charging){
+    ctx.fillStyle="#20263f";rr(CX-40,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#4ade80";
+    var bh=80*(pow-18)/82;
+    rr(CX-40,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.4)";
+  for(var i=0;i<90;i++){
+    vy+=G;x+=vx;y+=vy;
+    if(y>GY)break;
+    if(i%3===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  ctx.font="12px system-ui";ctx.textAlign="center";
+  for(i=0;i<fruits.length;i++){
+    var f=fruits[i],y=fy(f.h);
+    ctx.strokeStyle="#3a4270";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(f.x,y-14);ctx.lineTo(f.x,y-3);ctx.stroke();
+    if(f.hit){
+      ctx.globalAlpha=0.22;
+      ctx.fillStyle="#fb923c";ctx.beginPath();ctx.arc(f.x,y,13,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle="rgba(251,146,60,0.7)";ctx.fillText("已收",f.x,y+4);
+    }else{
+      ctx.fillStyle="#fb923c";ctx.beginPath();ctx.arc(f.x,y,13,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#4ade80";ctx.beginPath();ctx.ellipse(f.x+5,y-12,5,2.6,-0.6,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.5)";ctx.beginPath();ctx.arc(f.x-4,y-4,3,0,Math.PI*2);ctx.fill();
+    }
+  }
+  if(canFire())preview();
+  drawCannon();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();next();if(state==="menu")startGame();}return;}
+  if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=18;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-CX,dy=PIV-p.y;
+  if(dy<6||dx<2)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,dx)*180/Math.PI));
+  pow=Math.max(18,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",function(){if(state==="menu")startGame();else next();});
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

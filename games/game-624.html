@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渐变拼序</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+#chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+.chip{width:54px;height:70px;border-radius:10px;border:3px solid rgba(255,255,255,.12);cursor:pointer;transition:transform .08s}
+.chip:active{transform:scale(.93)}
+.chip.on{border-color:#ffd166;box-shadow:0 0 12px rgba(255,209,102,.5)}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:22px;margin-top:10px;line-height:1.6}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>渐变拼序</h1>
+  <p class="tips">一排同色系色块被打乱了深浅顺序!点击两个色块交换位置,把它们从「最浅」到「最深」排好。每次交换 -10 分,拼对一关 +150 关卡加成,共 3 关,分数耗尽即失败。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/3</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">800</div></div>
+      <div class="stat"><div class="mut">交换次数</div><div class="big" id="mv">0</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="chips"></div>
+    <div id="msg">目标:左浅右深,排出平滑渐变!</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">渐变拼序</h2><p id="ovp">玩法:一排同一色相、不同深浅的色块被随机打乱。<br>· 先点一个色块选中,再点另一个与之交换<br>· 目标顺序:从最浅到最深(左浅右深)<br>· 排列正确自动过关,共 3 关,色块逐关变多<br>· 每次交换 -10 分,分数耗尽判负;拼对 +150+关卡×120 分</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var level=1,score=800,moves=0,vals=[],sel=-1,hue=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function chipN(){return 4+level}
+function isSorted(){
+  for(var i=0;i<vals.length-1;i++)if(vals[i]<vals[i+1])return false;
+  return true;
+}
+function newRound(){
+  hue=Math.floor(Math.random()*360);
+  var n=chipN(),step=56/(n-1);
+  vals=[];
+  for(var i=0;i<n;i++)vals.push(78-i*step);
+  for(i=n-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=vals[i];vals[i]=vals[j];vals[j]=t;
+  }
+  if(isSorted()){
+    var t2=vals[0];vals[0]=vals[n-1];vals[n-1]=t2;
+  }
+  sel=-1;render();
+}
+function render(){
+  var box=$('chips');box.innerHTML='';
+  for(var i=0;i<vals.length;i++){
+    var b=document.createElement('button');
+    b.className='chip'+(sel===i?' on':'');
+    b.style.background='hsl('+hue+',62%,'+Math.round(vals[i])+'%)';
+    (function(idx){b.addEventListener('click',function(){pick(idx)})})(i);
+    box.appendChild(b);
+  }
+  $('lv').textContent=level+'/3';
+  $('sc').textContent=score;
+  $('mv').textContent=moves;
+}
+function pick(i){
+  if(!playing||over)return;
+  if(sel<0){sel=i;render();return;}
+  if(sel===i){sel=-1;render();return;}
+  var t=vals[sel];vals[sel]=vals[i];vals[i]=t;
+  sel=-1;moves++;score-=10;
+  render();check();
+}
+function check(){
+  if(isSorted()){
+    score+=150+level*120;
+    level++;
+    if(level>3){finish(true);return;}
+    $('msg').textContent='拼序成功!+'+(150+(level-1)*120)+' 分,进入第 '+level+' 关!';
+    newRound();
+  }else if(score<=0){
+    finish(false);
+  }else{
+    $('msg').textContent='还没排对,继续交换……(每次 -10 分)';
+  }
+  $('sc').textContent=score;
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'渐变大师!':'分数耗尽…';
+  $('ovp').innerHTML=(win?'三关全部拼序成功!':'色块还没归位,分就被扣光了。')+'<br>总分 <b>'+Math.max(0,score)+'</b> · 总交换 <b>'+moves+'</b> 次<br>眯起眼睛找相邻深浅,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  level=1;score=800;moves=0;sel=-1;playing=true;over=false;
+  $('msg').textContent='目标:左浅右深,排出平滑渐变!';
+  newRound();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+newRound();
+</script>
+</body>
+</html>

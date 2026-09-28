@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字泡泡 顺序戳</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:8px}
+#tbar{height:100%;width:100%;background:#51d88a;border-radius:6px}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>数字泡泡 顺序戳</h1>
+  <p class="tips">场上漂浮着带数字的泡泡,必须从 1 开始按顺序戳破!戳错扣 3 秒,每完成一轮奖励 4 秒并增加一个数字。</p>
+  <div class="card">
+    <div class="bar"><div id="tbar"></div></div>
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">下一个</div><div class="big" id="nx">1</div></div>
+      <div class="stat"><div class="mut">轮数</div><div class="big" id="wv">1</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">数字泡泡 顺序戳</h2><p id="ovp">玩法说明:<br>· 每轮场上出现 5 个以上的数字泡泡,四处缓慢漂浮<br>· 必须按 1→2→3… 的顺序戳破,戳对得分<br>· 戳错数字 -3 秒,点空处 -1 秒<br>· 一轮全部戳完 +50 分并奖励 4 秒,下一轮数字更多<br>· 倒计时归零即结算,看你能闯到第几轮</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff','#b07cff'];
+var bubbles=[],parts=[],floats=[];
+var score=0,expect=1,wave=1,timeLeft=45,running=false,lastT=0,shakeT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('sc').textContent=score;
+  $i('nx').textContent=expect;
+  $i('wv').textContent=wave;
+}
+function reset(){
+  bubbles=[];parts=[];floats=[];
+  score=0;expect=1;wave=1;timeLeft=45;shakeT=0;
+  newWave();upd();
+  $i('tbar').style.width='100%';
+}
+function newWave(){
+  bubbles=[];
+  var n=Math.min(12,4+wave);
+  var placed=[];
+  for(var i=1;i<=n;i++){
+    var x=0,y=0,ok=false,tries=0;
+    while(!ok&&tries<80){
+      x=rnd(46,W-46);y=rnd(46,H-46);ok=true;tries++;
+      for(var j=0;j<placed.length;j++){
+        var dx=x-placed[j][0],dy=y-placed[j][1];
+        if(dx*dx+dy*dy<80*80){ok=false;break;}
+      }
+    }
+    placed.push([x,y]);
+    bubbles.push({x:x,y:y,r:26,n:i,vx:rnd(-34,34),vy:rnd(-28,28),
+      c:COLORS[i%COLORS.length],born:0.4});
+  }
+  expect=1;upd();
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c){
+  for(var k=0;k<10;k++){var a=rnd(0,6.28),s=rnd(50,160);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+function update(dt){
+  if(!running)return;
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;running=false;endGame();return;}
+  $i('tbar').style.width=Math.min(100,timeLeft/45*100)+'%';
+  if(shakeT>0)shakeT-=dt;
+  var i,b;
+  for(i=0;i<bubbles.length;i++){
+    b=bubbles[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<b.r+6){b.x=b.r+6;b.vx=Math.abs(b.vx);}
+    if(b.x>W-b.r-6){b.x=W-b.r-6;b.vx=-Math.abs(b.vx);}
+    if(b.y<b.r+6){b.y=b.r+6;b.vy=Math.abs(b.vy);}
+    if(b.y>H-b.r-6){b.y=H-b.r-6;b.vy=-Math.abs(b.vy);}
+    if(b.born>0)b.born-=dt;
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=42*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function drawBubble(x,y,r,c,alpha){
+  ctx.globalAlpha=alpha;
+  ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fillStyle=c;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.4)';ctx.stroke();
+  ctx.beginPath();ctx.arc(x-r*0.32,y-r*0.32,r*0.26,0,6.2832);ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  if(shakeT>0){
+    ctx.save();ctx.translate(rnd(-4,4),rnd(-4,4));
+  }
+  var i;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    drawBubble(b.x,b.y,b.r,b.c,b.born>0?1-b.born*2:1);
+    ctx.font='bold 22px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle='#fff';
+    ctx.fillText(''+b.n,b.x,b.y+1);
+    ctx.textBaseline='alphabetic';
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 16px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  if(shakeT>0)ctx.restore();
+  ctx.font='bold 15px system-ui';ctx.textAlign='left';ctx.fillStyle='#9aa3c0';
+  ctx.fillText('按顺序戳:1 → '+bubbles.length+' 中的 '+expect,12,24);
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),hit=-1;
+  for(var i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y;
+    if(dx*dx+dy*dy<=(b.r+6)*(b.r+6)){hit=i;break;}
+  }
+  if(hit<0){timeLeft-=1;addFloat(p.x,p.y,'-1 秒','#ff5c5c');return;}
+  var b=bubbles[hit];
+  if(b.n===expect){
+    bubbles.splice(hit,1);
+    var gain=10+wave*2;
+    score+=gain;
+    addFloat(b.x,b.y,'+'+gain,'#51d88a');
+    burst(b.x,b.y,b.c);
+    expect++;
+    var left=0;
+    for(var q=0;q<bubbles.length;q++)if(bubbles[q].n>=expect)left++;
+    if(left===0){
+      score+=50;timeLeft+=4;wave++;
+      addFloat(W/2,H/2,'完成!+50 时间+4','#ffd166');
+      newWave();
+    }
+    upd();
+  }else{
+    timeLeft-=3;shakeT=0.3;
+    addFloat(b.x,b.y,'顺序错误 -3 秒','#ff5c5c');
+  }
+});
+function endGame(){
+  $i('ovt').textContent='时间到!';
+  $i('ovp').innerHTML='本局得分:<b>'+score+'</b><br>完成轮数:第 '+wave+' 轮进行中<br>最高纪录就看这一局!';
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

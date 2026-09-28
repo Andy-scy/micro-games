@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>坡道疾滚</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#34d399;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#34d399;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#34d399}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#34d399;color:#05301f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>坡道疾滚</h1>
+  <p class="hint">小球沿山坡自动加速 · 空格 / 点击 跳跃 · 越滚越快,看你能滚多远</p>
+  <div class="hud">
+    <span>距离 <b id="dist">0m</b></span>
+    <span>速度 <b id="spd">0</b></span>
+    <span>最佳 <b id="best">0m</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">坡道疾滚</h2>
+      <p id="ovDesc">小球沿无尽山坡越滚越快!按空格或点击屏幕起跳,跃过红色尖刺和断崖。掉下悬崖或撞上尖刺即结束,距离越远得分越高!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,SEG=40,BR=9,GRAV=0.0012;
+function $(id){return document.getElementById(id);}
+var elDist=$("dist"),elSpd=$("spd"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s385");
+var state,pts,gapAt,spikeAt,ball,camX,meters,rot;
+function clampY(y){return Math.max(150,Math.min(466,y));}
+function appendSeg(){
+  var n=pts.length;
+  var base=pts[n-1],dy=10+Math.random()*26;
+  if(Math.random()<0.18)dy=-(6+Math.random()*12);
+  pts.push(clampY(base+dy));
+  var i=n-1;
+  gapAt[i]=false;spikeAt[i]=false;
+  if(i>6&&!gapAt[i-1]){
+    if(Math.random()<0.13)gapAt[i]=true;
+    else if(Math.random()<0.16)spikeAt[i]=true;
+  }
+}
+function ground(x){
+  var i=Math.floor(x/SEG);
+  if(i<0)return 200;
+  if(i>=pts.length-1)return pts[pts.length-1];
+  if(gapAt[i])return null;
+  var t=(x-i*SEG)/SEG;
+  return pts[i]+(pts[i+1]-pts[i])*t;
+}
+function reset(){
+  pts=[200];gapAt=[];spikeAt=[];
+  var i;
+  for(i=0;i<40;i++)appendSeg();
+  ball={x:60,y:ground(60)-BR,vx:0.12,vy:0,ground:true};
+  camX=0;meters=0;rot=0;
+  updateHud();
+}
+function updateHud(){
+  elDist.textContent=meters+"m";
+  elSpd.textContent=(ball.vx*100).toFixed(0);
+  elBest.textContent=best+"m";
+}
+function circleRect(cx,cy,r,rc){
+  var nx=Math.max(rc.x,Math.min(cx,rc.x+rc.w)),ny=Math.max(rc.y,Math.min(cy,rc.y+rc.h));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function jump(){
+  if(state!=="playing")return;
+  if(ball.ground){ball.vy=-0.44;ball.ground=false;}
+}
+function death(){
+  state="over";
+  if(meters>best){best=meters;saveBest("mg_s385",best);}
+  ovT.textContent="游戏结束";
+  ovD.textContent="小球终止于山坡之上,下一次滚得更远!";
+  ovS.style.display="block";ovS.textContent="距离 "+meters+"m · 最佳 "+best+"m";
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+cv.addEventListener("mousedown",function(e){jump();e.preventDefault();});
+cv.addEventListener("touchstart",function(e){jump();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else jump();
+  }
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    while((pts.length-1)*SEG<ball.x+900)appendSeg();
+    if(ball.ground){
+      var gy=ground(ball.x),ga=ground(ball.x+10);
+      if(gy===null||ga===null){ball.ground=false;ball.vy=0;}
+      else{
+        var slope=(ga-gy)/10;
+        ball.vx+=0.00022*slope*dt;
+        if(ball.vx>0.5)ball.vx=0.5;
+        if(ball.vx<0.07)ball.vx=0.07;
+        ball.x+=ball.vx*dt;
+        ball.y=ground(ball.x)-BR;
+      }
+    }
+    if(!ball.ground){
+      ball.vy+=GRAV*dt;ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+      var g2=ground(ball.x);
+      if(ball.vy>0&&g2!==null&&ball.y>=g2-BR){ball.y=g2-BR;ball.ground=true;ball.vy=0;}
+    }
+    rot+=ball.vx*dt/BR;
+    var si=Math.floor(ball.x/SEG);
+    if(spikeAt[si]){
+      var sg=ground(si*SEG+20);
+      if(sg!==null&&circleRect(ball.x,ball.y,BR,{x:si*SEG+8,y:sg-14,w:24,h:14}))death();
+    }
+    meters=Math.floor(ball.x/10);
+    if(ball.y>H+30)death();
+    updateHud();
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  for(i=0;i<30;i++){
+    var sxx=((i*163-0)%W+W)%W,syy=(i*97)%260;
+    ctx.fillStyle="rgba(255,255,255,0.05)";ctx.fillRect(sxx,syy,2,2);
+  }
+  camX=ball.x-150;
+  var i0=Math.max(0,Math.floor(camX/SEG)-1),i1=Math.min(pts.length-2,i0+15);
+  for(i=i0;i<=i1;i++){
+    var x0=i*SEG-camX,x1=x0+SEG,y0=pts[i],y1=pts[i+1];
+    if(gapAt[i]){
+      ctx.fillStyle="rgba(0,0,0,0.5)";
+      ctx.fillRect(x0,y0-60,SEG,H);
+      continue;
+    }
+    ctx.fillStyle="#1c2547";
+    ctx.beginPath();
+    ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.lineTo(x1,H);ctx.lineTo(x0,H);
+    ctx.closePath();ctx.fill();
+    ctx.strokeStyle="#34d399";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();
+    if(spikeAt[i]){
+      var mid=ground(i*SEG+20),j;
+      ctx.fillStyle="#f87171";
+      for(j=0;j<3;j++){
+        var bx=x0+6+j*10;
+        ctx.beginPath();
+        ctx.moveTo(bx,mid);ctx.lineTo(bx+5,mid-14);ctx.lineTo(bx+10,mid);
+        ctx.closePath();ctx.fill();
+      }
+    }
+  }
+  ctx.save();
+  ctx.translate(ball.x-camX,ball.y);
+  ctx.rotate(rot);
+  ctx.fillStyle="#34d399";
+  ctx.shadowColor="#34d399";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(0,0,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#05301f";
+  ctx.beginPath();ctx.arc(4,0,2.6,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

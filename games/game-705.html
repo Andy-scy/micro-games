@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>浮空石阶</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>浮空石阶</h1>
+  <p class="tips">←→ 移动,空格跳跃。青色石台左右巡航,粉色石台上下浮沉,站上去会被一起带走,踩空坠云即失利。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/3</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">脚下石台</div><div class="big" id="fd">—</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">跳</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">浮空石阶</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃<br>· 青色石台水平往返,粉色石台垂直浮沉<br>· 站在石台上会被平台带着一起移动<br>· 看准节奏再起跳,脚下就是万丈云海<br>· 坠云 -1 生命,共 3 条;到达旗帜过关<br>· 过关 +300,通关时每条剩余生命 +100</p><button class="btn" id="obtn">出发</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var LEVELS=[
+{w:960,plats:[
+  ['s',0,300,90],
+  ['h',180,300,80,50,1.2,0],
+  ['v',330,250,80,60,1.5,1],
+  ['h',500,300,80,70,1.8,2],
+  ['v',660,250,80,60,1.2,0.5],
+  ['s',870,300,90]
+]},
+{w:960,plats:[
+  ['s',0,300,80],
+  ['h',150,300,70,45,1.6,0],
+  ['v',290,240,70,55,1.1,2],
+  ['h',400,280,70,60,2.0,1],
+  ['v',600,230,70,65,1.4,0],
+  ['h',730,290,70,40,2.2,3],
+  ['s',860,300,100]
+]},
+{w:960,plats:[
+  ['s',0,300,70],
+  ['h',130,295,60,55,2.0,0],
+  ['v',270,235,60,60,1.6,1],
+  ['h',380,280,60,55,2.4,2],
+  ['v',530,225,60,70,1.3,0.5],
+  ['h',630,290,60,55,2.6,1],
+  ['v',750,240,60,60,1.7,2],
+  ['s',880,300,80]
+]}
+];
+var lv=0,plats=[],worldW=960;
+var px=16,py=270,vx=0,vy=0,pw=22,ph=26,onG=false,gPlat=null;
+var camX=0,score=0,lives=3,t=0,bannerT=0;
+var running=false,lastT=0,parts=[],won=false,winT=0;
+var keys={L:false,R:false,J:false},jHeld=false;
+function loadLv(n){
+  var L=LEVELS[n],i;
+  plats=[];
+  for(i=0;i<L.plats.length;i++){
+    var d=L.plats[i];
+    plats.push({kind:d[0],ox:d[1],oy:d[2],w:d[3],range:d[4]||0,spd:d[5]||0,ph:d[6]||0,
+      x:d[1],y:d[2],h:16,dx:0,dy:0});
+  }
+  worldW=L.w;px=16;py=270;vx=0;vy=0;gPlat=null;camX=0;bannerT=1.6;t=0;
+}
+function reset(){score=0;lives=3;lv=0;parts=[];won=false;winT=0;loadLv(0);hud()}
+function hud(){
+  $i('lv').textContent=(lv+1)+'/3';
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+  $i('fd').textContent=gPlat===null?'—':(gPlat.kind==='h'?'巡航':(gPlat.kind==='v'?'浮沉':'静止'));
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function endGame(){
+  running=false;
+  if(won){$i('ovt').textContent='踏遍浮空!';$i('ovp').innerHTML='三段云路全部走完!<br>最终得分:<b>'+score+'</b>';}
+  else{$i('ovt').textContent='坠入云海…';$i('ovp').innerHTML='石台还会再来,人也一样。<br>最终得分:<b>'+score+'</b>';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(bannerT>0)bannerT-=dt;
+  if(!running)return;
+  if(won){winT+=dt;if(winT>1.2){score+=lives*100;hud();endGame();}return;}
+  t+=dt;
+  for(i=0;i<plats.length;i++){var s=plats[i];
+    if(s.kind==='s'){s.dx=0;s.dy=0;continue;}
+    var off=Math.sin(t*s.spd+s.ph)*s.range;
+    if(s.kind==='h'){var nx=s.ox+off;s.dx=nx-s.x;s.dy=0;s.x=nx;}
+    else{var ny=s.oy+off;s.dy=ny-s.y;s.dx=0;s.y=ny;}
+  }
+  if(gPlat!==null){
+    px+=gPlat.dx;
+    py=gPlat.y-ph;
+  }
+  var acc=1500,mx=205;
+  if(keys.L)vx-=acc*dt;
+  if(keys.R)vx+=acc*dt;
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,11*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  if(keys.J&&!jHeld&&onG){vy=-560;onG=false;gPlat=null;}
+  vy+=1500*dt;if(vy>900)vy=900;
+  px+=vx*dt;
+  for(i=0;i<plats.length;i++){var s2=plats[i];
+    if(hitRect(s2)){
+      if(vx>0)px=s2.x-pw;else if(vx<0)px=s2.x+s2.w;
+      vx=0;
+    }}
+  if(px<0)px=0;if(px+pw>worldW)px=worldW-pw;
+  py+=vy*dt;onG=false;gPlat=null;
+  for(i=0;i<plats.length;i++){var s3=plats[i];
+    if(hitRect(s3)){
+      if(vy>0){py=s3.y-ph;vy=0;onG=true;gPlat=s3;}
+      else if(vy<0){py=s3.y+s3.h;vy=0;}
+    }}
+  var target=px-W/2;
+  if(target<0)target=0;if(target>worldW-W)target=worldW-W;
+  camX+=(target-camX)*Math.min(1,7*dt);
+  var last=plats[plats.length-1];
+  if(onG&&gPlat===last&&px+pw>last.x+20){
+    score+=300;hud();
+    if(lv>=LEVELS.length-1){won=true;burst(px+pw/2,py,'#ffe9a3',20);}
+    else{lv++;loadLv(lv);hud();}
+  }
+  if(py>H+60){
+    lives--;hud();burst(px+pw/2,H-10,'#ff5c5c',12);
+    if(lives<=0){lives=0;hud();endGame();return;}
+    px=16;py=270;vx=0;vy=0;gPlat=null;
+  }
+  hud();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#151b3a');g.addColorStop(1,'#0c1026');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<7;i++){
+    var cx=(i*160+30-camX*0.4)%(W+180),cy=(i*83+50)%(H-80);
+    if(cx<-90)cx+=W+180;
+    ctx.fillStyle='rgba(122,140,200,.1)';
+    ctx.beginPath();ctx.arc(cx,cy,34,0,6.28);ctx.arc(cx+30,cy+6,26,0,6.28);ctx.arc(cx-28,cy+8,24,0,6.28);ctx.fill();
+  }
+  ctx.save();ctx.translate(-Math.round(camX),0);
+  for(i=0;i<plats.length;i++){var s=plats[i];
+    var col=s.kind==='s'?'#39406b':(s.kind==='h'?'#2e6f75':'#6f3d6b');
+    var edge=s.kind==='s'?'#5d6ba8':(s.kind==='h'?'#4cc9f0':'#e07ad0');
+    ctx.fillStyle=col;
+    ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(s.x,s.y,s.w,s.h,6);else ctx.rect(s.x,s.y,s.w,s.h);
+    ctx.fill();
+    ctx.fillStyle=edge;ctx.fillRect(s.x+3,s.y,s.w-6,4);
+    if(s.kind!=='s'){
+      ctx.globalAlpha=0.25;
+      ctx.strokeStyle=edge;ctx.lineWidth=2;
+      if(s.kind==='h'){
+        ctx.beginPath();ctx.moveTo(s.ox-s.range,s.y+8);ctx.lineTo(s.ox+s.range+s.w,s.y+8);ctx.stroke();
+      }else{
+        ctx.beginPath();ctx.moveTo(s.x+s.w/2,s.oy-s.range);ctx.lineTo(s.x+s.w/2,s.oy+s.range);ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    }
+  }
+  var last=plats[plats.length-1];
+  var fx=last.x+last.w-34,fy=last.y-52;
+  ctx.fillStyle='#c9d2f0';
+  ctx.fillRect(fx+12,fy,4,52);
+  ctx.fillStyle='#ffd166';
+  ctx.beginPath();
+  ctx.moveTo(fx+16,fy+2);
+  ctx.lineTo(fx+40,fy+10);ctx.lineTo(fx+16,fy+20);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle='#8fd3ff';
+  ctx.fillRect(px,py,pw,ph);
+  ctx.fillStyle='#081226';
+  ctx.fillRect(px+pw*0.28,py+7,4,5);
+  ctx.fillRect(px+pw*0.62,py+7,4,5);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  if(bannerT>0){
+    ctx.globalAlpha=Math.min(1,bannerT);
+    ctx.fillStyle='rgba(15,18,32,.55)';ctx.fillRect(0,H/2-30,W,60);
+    ctx.fillStyle='#ffd166';ctx.font='bold 24px system-ui';ctx.textAlign='center';
+    ctx.fillText('第 '+(lv+1)+' 段云路',W/2,H/2+8);
+    ctx.globalAlpha=1;
+  }
+  ctx.font='12px system-ui';ctx.fillStyle='#7f8ab0';ctx.textAlign='left';
+  ctx.fillText('青=左右巡航 粉=上下浮沉 · 终点在旗帜处',10,H-10);
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){keys.J=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t2){
+  var dt=(t2-lastT)/1000;lastT=t2;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

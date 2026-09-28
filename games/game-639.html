@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>霓虹快闪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:440px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+#tgtchip{display:inline-block;min-width:42px;height:24px;border-radius:7px;vertical-align:-6px}
+#lamps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:330px;margin:10px auto 0}
+.lamp{aspect-ratio:1/1;border-radius:18px;border:3px solid #232a48;background:#161b34;cursor:pointer;transition:background .08s,box-shadow .08s}
+.lamp.lit{box-shadow:0 0 18px rgba(255,255,255,.25)}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>霓虹快闪</h1>
+  <p class="tips">3×3 灯墙不断亮起五颜六色的灯泡,只点「目标色」的亮灯!点对 +1 分,点错颜色累计失误(满 3 次失败)并 -2 秒,点空白 -1 秒。目标色每 6 秒变换;45 秒结束时得分 ≥25 即胜利。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">失误</div><div class="big" id="mi">0/3</div></div>
+      <div class="stat" style="flex:2"><div class="mut">剩余时间 <span id="tleft">45.0s</span></div><div class="tbarWrap"><div id="tbar"></div></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:4px"><span class="mut">目标色</span><span id="tgtchip"></span><b id="tgtn" style="font-size:16px"></b></div>
+    <div id="lamps"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">霓虹快闪</h2><p id="ovp">玩法:色彩打地鼠。<br>· 灯墙随机亮起彩色灯泡,片刻后自动熄灭<br>· 只点击「目标色」的亮灯:+1 分<br>· 点错颜色的亮灯:失误 +1(满 3 次失败)并 -2 秒<br>· 点没亮的灯:-1 秒<br>· 目标色每 6 秒变换;45 秒内拿到 25 分即胜利!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PAL=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff'],['紫','#b07cff']];
+var lamps=[],target=0,score=0,mistakes=0,timeLeft=45;
+var spawnAcc=0,tgtAcc=0,playing=false,over=false,S=0,TO=[];
+function $(id){return document.getElementById(id)}
+function setTarget(){
+  var n=Math.floor(Math.random()*PAL.length);
+  if(n===target)n=(n+1+Math.floor(Math.random()*4))%5;
+  target=n;
+  $('tgtchip').style.background=PAL[target][1];
+  $('tgtn').textContent=PAL[target][0];
+  $('tgtn').style.color=PAL[target][1];
+}
+function renderLamp(i){
+  var el=$('lamp'+i),L=lamps[i];
+  if(L.lit){
+    el.style.background=PAL[L.c][1];
+    el.classList.add('lit');
+  }else{
+    el.style.background='#161b34';
+    el.classList.remove('lit');
+  }
+}
+function lightLamp(){
+  var free=[];
+  for(var i=0;i<9;i++)if(!lamps[i].lit)free.push(i);
+  if(!free.length)return;
+  var idx=free[Math.floor(Math.random()*free.length)];
+  var c=Math.floor(Math.random()*PAL.length);
+  lamps[idx].lit=true;
+  lamps[idx].c=c;
+  renderLamp(idx);
+  var tk=S,d=700+Math.random()*700;
+  TO.push(setTimeout(function(){
+    if(tk!==S)return;
+    lamps[idx].lit=false;
+    renderLamp(idx);
+  },d));
+}
+function drawTop(){
+  $('sc').textContent=score;
+  $('mi').textContent=mistakes+'/3';
+  $('tbar').style.width=(Math.max(0,timeLeft)/45*100)+'%';
+  $('tleft').textContent=Math.max(0,timeLeft).toFixed(1)+'s';
+}
+function hitLamp(i){
+  if(!playing||over)return;
+  var L=lamps[i];
+  if(L.lit&&L.c===target){
+    score++;
+    L.lit=false;
+    renderLamp(i);
+  }else if(L.lit){
+    mistakes++;
+    timeLeft=Math.max(0,timeLeft-2);
+    L.lit=false;
+    renderLamp(i);
+    if(mistakes>=3){drawTop();finish(false);return;}
+  }else{
+    timeLeft=Math.max(0,timeLeft-1);
+  }
+  drawTop();
+  if(timeLeft<=0)finish(score>=25);
+}
+function buildLamps(){
+  var box=$('lamps');box.innerHTML='';
+  for(var i=0;i<9;i++){
+    var b=document.createElement('button');
+    b.className='lamp';
+    b.id='lamp'+i;
+    (function(idx){b.addEventListener('click',function(){hitLamp(idx)})})(i);
+    box.appendChild(b);
+  }
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'霓虹之夜大获全胜!':'手滑点错太多…';
+  $('ovp').innerHTML=(win?'45 秒拿下目标分数!':'最终得分 ')+ '<b>'+score+'</b> 分(胜利线 25)<br>只盯目标色,无视其他颜色,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  S++;
+  for(var i=0;i<TO.length;i++)clearTimeout(TO[i]);
+  TO=[];
+  lamps=[];
+  for(i=0;i<9;i++)lamps.push({lit:false,c:0});
+  score=0;mistakes=0;timeLeft=45;spawnAcc=0;tgtAcc=0;
+  playing=true;over=false;
+  target=-1;setTarget();
+  for(i=0;i<9;i++)renderLamp(i);
+  drawTop();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+buildLamps();
+for(var qi=0;qi<9;qi++)lamps.push({lit:false,c:0});
+setTarget();drawTop();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    spawnAcc+=dt;
+    var gap=Math.max(0.28,0.55-score*0.006);
+    if(spawnAcc>=gap){spawnAcc=0;lightLamp();}
+    tgtAcc+=dt;
+    if(tgtAcc>=6){tgtAcc=0;setTarget();}
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;drawTop();finish(score>=25);requestAnimationFrame(loop);return;}
+    drawTop();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

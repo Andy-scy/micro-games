@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节拍消消</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#34d399;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#34d399;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#34d399}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#34d399;color:#03251a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>节拍消消</h1>
+  <p class="hint">只有在节拍窗口内点击才有效 · 点掉两颗相邻同色宝石 · 鼠标 / 触屏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连锁 <b id="chain">0</b></span>
+    <span>剩余 <b id="time">60s</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="540"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">节拍消消</h2>
+      <p id="ovDesc">消除也要踩在拍子上!
+四周的脉冲环每拍亮起一次,环亮的瞬间才是出手窗口。
+窗口内点中两颗相邻同色宝石即可消除,连锁越高分越高;
+抢拍与空拍无效,一拍没消连锁清零。
+60 秒内挑战消除大师!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elChain=$("chain"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=540,COLS=6,ROWS=4,CELL=62,GBW=COLS*CELL,GX=(W-GBW)/2,GY=110;
+var BEAT=900,WINDOW=300,DUR=60;
+var COLC=["#f87171","#4ade80","#60a5fa","#fbbf24"];
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g378");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sClear(chain){tone("triangle",520+chain*60,780+chain*60,0.14,0.22);noiseHit(0.05,0.08,5000);}
+function sPick(){tone("sine",420,420,0.06,0.12);}
+function sBeat(){noiseHit(0.04,0.09,5000);}
+function sBad(){tone("sawtooth",220,140,0.12,0.14);}
+
+var state="menu",grid,sel,score,chain,maxChain,cleared,startT,lastClear,nextBeat,shakeT;
+function reset(){
+  grid=[];sel=-1;
+  score=0;chain=0;maxChain=0;cleared=0;
+  startT=performance.now();
+  lastClear=startT;
+  nextBeat=startT+700;
+  shakeT=0;
+  var r,c;
+  for(r=0;r<ROWS;r++){
+    grid.push([]);
+    for(c=0;c<COLS;c++)grid[r].push((Math.random()*4)|0);
+  }
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elChain.textContent=chain;
+  var remain=Math.max(0,Math.ceil(DUR-(performance.now()-startT)/1000));
+  elTime.textContent=remain+"s";
+  elBest.textContent=best;
+}
+function inWindow(now){
+  var nb=Math.round((now-nextBeat)/BEAT);
+  var bt=nextBeat+nb*BEAT;
+  return Math.abs(now-bt)<=WINDOW;
+}
+function collapse(){
+  var r,c,stack;
+  for(c=0;c<COLS;c++){
+    stack=[];
+    for(r=ROWS-1;r>=0;r--){if(grid[r][c]>=0)stack.push(grid[r][c]);}
+    for(r=ROWS-1;r>=0;r--){
+      if(stack.length)grid[r][c]=stack.shift();
+      else grid[r][c]=(Math.random()*4)|0;
+    }
+  }
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g378",best);}
+  upd();
+  ovTitle.textContent="拍尽曲终";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="消除 "+cleared+" 对宝石 · 最高连锁 "+maxChain+"\n跟着脉冲环,再来一局!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function finish(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g378",best);}
+  upd();
+  var rank;
+  if(score>=1600)rank="消除大师 · 稳准狠";
+  else if(score>=1000)rank="节拍快手 · 渐入佳境";
+  else if(score>=550)rank="消消学徒 · 小有所成";
+  else rank="热身完毕 · 再来一局";
+  ovTitle.textContent="时间到!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="消除 "+cleared+" 对 · 最高连锁 "+maxChain+"\n评价:"+rank;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function clickCell(x,y){
+  if(state!=="play")return;
+  var now=performance.now();
+  var c=Math.floor((x-GX)/CELL),r=Math.floor((y-GY)/CELL);
+  if(c<0||c>=COLS||r<0||r>=ROWS)return;
+  if(!inWindow(now)){
+    addPopMsg("抢拍!","#8b90b0");
+    sBad();return;
+  }
+  var idx=r*COLS+c,v=grid[r][c];
+  if(v<0)return;
+  if(sel<0){sel=idx;sPick();return;}
+  if(sel===idx){sel=-1;return;}
+  var sr=Math.floor(sel/COLS),sc=sel%COLS;
+  var adj=Math.abs(sr-r)+Math.abs(sc-c)===1;
+  if(adj&&grid[sr][sc]===v){
+    grid[sr][sc]=-1;grid[r][c]=-1;
+    cleared++;
+    chain++;
+    if(chain>maxChain)maxChain=chain;
+    var gain=(60+chain*30);
+    score+=gain;
+    lastClear=now;
+    addPop(x,y-20,"+"+gain+(chain>1?" 连锁x"+chain:""),"#fbbf24");
+    sClear(chain);
+    collapse();
+    sel=-1;
+    upd();
+  }else{
+    sel=idx;
+    chain=0;
+    shakeT=now;
+    sBad();
+    upd();
+  }
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+var pops=[];
+function update(now){
+  if(now-lastClear>BEAT+WINDOW&&chain>0){chain=0;upd();}
+  var i;
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>600)pops.splice(i,1);}
+  if(now-startT>=DUR*1000)finish();
+}
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(now){
+  var r,c;
+  var shake=shakeT&&now-shakeT<180?(1-(now-shakeT)/180)*6:0;
+  ctx.save();
+  if(shake)ctx.translate((Math.random()*2-1)*shake,(Math.random()*2-1)*shake);
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(-10,-10,W+20,H+20);
+  var nb=Math.round((now-nextBeat)/BEAT);
+  var bt=nextBeat+nb*BEAT;
+  var ph=Math.abs(now-bt);
+  var glow=Math.max(0,1-ph/WINDOW);
+  var beatPh=1-((nextBeat-now)%BEAT)/BEAT;
+  if(beatPh<0)beatPh=0;
+  ctx.strokeStyle="rgba(52,211,153,"+(0.12+glow*0.75)+")";
+  ctx.lineWidth=4+glow*4;
+  rrect(GX-14,GY-14,GBW+28,ROWS*CELL+28,16);ctx.stroke();
+  ctx.lineWidth=1;
+  if(beatPh<0.1&&state==="play")sBeat();
+  for(r=0;r<ROWS;r++){
+    for(c=0;c<COLS;c++){
+      var v=grid[r][c];
+      var x=GX+c*CELL+4,y=GY+r*CELL+4;
+      if(v<0){
+        ctx.fillStyle="rgba(255,255,255,0.03)";
+        rrect(x,y,CELL-8,CELL-8,10);ctx.fill();
+        continue;
+      }
+      ctx.fillStyle=COLC[v];
+      rrect(x,y,CELL-8,CELL-8,10);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.28)";
+      rrect(x+5,y+5,CELL-18,10,5);ctx.fill();
+      if(sel===r*COLS+c){
+        ctx.strokeStyle="#fff";ctx.lineWidth=3;
+        rrect(x-3,y-3,CELL-2,CELL-2,12);ctx.stroke();ctx.lineWidth=1;
+      }
+    }
+  }
+  ctx.fillStyle="rgba(52,211,153,0.8)";
+  ctx.font="bold 15px system-ui";ctx.textAlign="center";
+  ctx.fillText(glow>0?"出手窗口!":"等待节拍…",W/2,86);
+  var i;
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/600;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 16px system-ui";
+    ctx.fillText(p.txt,p.x,p.y-pr*24);
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+function onTap(cx,cy){
+  var p=toXY(cx,cy);
+  clickCell(p.x,p.y);
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap(e.clientX,e.clientY);});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap(e.clientX,e.clientY);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];onTap(t.clientX,t.clientY);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play")update(now);
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

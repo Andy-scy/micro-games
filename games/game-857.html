@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>引线通电</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:10px;margin-bottom:10px;display:flex;justify-content:center}
+#grid{display:grid;grid-template-columns:42px repeat(3,64px);grid-auto-rows:64px;gap:3px}
+.side{display:flex;align-items:center;justify-content:center;font-size:12px;color:#8f97c0}
+.side b{color:#ffd668}
+.tc{background:#1c2240;border-radius:6px;cursor:pointer;overflow:hidden}
+.tc:hover{background:#232b56}
+.tc.blank{background:#12162b;cursor:default}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin-bottom:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>引线通电</h1>
+<p class="tip">点击滑块旁的电线块,把它滑进空格(方向键也可)。<br>把「电源」的引线一路接到下方「灯泡」,点亮它!</p>
+<div class="hud"><span id="hM">滑动 0 次</span><span id="hT">用时 0 秒</span></div>
+<div class="panel"><div id="grid"></div></div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn pri" id="bNew">重新打乱</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const SH=[3,10,12,10,12,5,3,12];
+let pos=[],blank=0,moves=0,sec=0,timer=null,over=false;
+const gridEl=document.getElementById("grid");
+const cellEls=[];
+function buildGrid(){
+  gridEl.innerHTML="";
+  cellEls.length=0;
+  const sp=()=>{const d=document.createElement("div");gridEl.appendChild(d);};
+  const src=document.createElement("div");src.className="side";src.innerHTML="<b>电源</b>→";
+  sp();gridEl.appendChild(cellMake(0));gridEl.appendChild(cellMake(1));gridEl.appendChild(cellMake(2));
+  gridEl.appendChild(src);gridEl.appendChild(cellMake(3));gridEl.appendChild(cellMake(4));gridEl.appendChild(cellMake(5));
+  sp();gridEl.appendChild(cellMake(6));gridEl.appendChild(cellMake(7));gridEl.appendChild(cellMake(8));
+  sp();sp();sp();
+  const lamp=document.createElement("div");lamp.className="side";lamp.id="lamp";lamp.innerHTML="↑<br><b>灯泡</b>";
+  gridEl.appendChild(lamp);
+}
+function cellMake(i){
+  const d=document.createElement("div");
+  d.className="tc";d.dataset.i=String(i);
+  gridEl.appendChild(d);cellEls.push(d);
+  return d;
+}
+buildGrid();
+function isWin(){
+  const t=pos[8];
+  if(t<0||!(SH[t]&4))return false;
+  return computeLit()[8];
+}
+function computeLit(){
+  const lit=new Array(9).fill(false);
+  const t0=pos[3];
+  if(t0<0||!(SH[t0]&8))return lit;
+  lit[3]=true;
+  const st=[3];
+  while(st.length){
+    const cur=st.pop(),m=SH[pos[cur]];
+    const r=Math.floor(cur/3),c=cur%3;
+    const nb=[[-1,0,0,2],[0,1,1,3],[1,0,2,0],[0,-1,3,1]];
+    for(let d=0;d<4;d++){
+      if(!(m&(1<<d)))continue;
+      const nr=r+nb[d][0],nc=c+nb[d][1];
+      if(nr<0||nr>2||nc<0||nc>2)continue;
+      const ni=nr*3+nc;
+      if(lit[ni])continue;
+      const tn=pos[ni];
+      if(tn>=0&&(SH[tn]&(1<<nb[d][3]))){lit[ni]=true;st.push(ni);}
+    }
+  }
+  return lit;
+}
+function maskPath(m){
+  let d="";
+  if(m&1)d+="M32 32 L32 0 ";
+  if(m&2)d+="M32 32 L64 32 ";
+  if(m&4)d+="M32 32 L32 64 ";
+  if(m&8)d+="M32 32 L0 32 ";
+  return d;
+}
+function render(){
+  const lit=computeLit();
+  for(let i=0;i<9;i++){
+    const d=cellEls[i],t=pos[i];
+    d.classList.toggle("blank",t<0);
+    if(t<0){d.innerHTML="";continue;}
+    const color=lit[i]?"#ffd668":"#56608f";
+    d.innerHTML='<svg viewBox="0 0 64 64" width="100%" height="100%"><path d="'+maskPath(SH[t])+'" stroke="'+color+'" stroke-width="10" stroke-linecap="round" fill="none"/><circle cx="32" cy="32" r="6" fill="'+color+'"/></svg>';
+  }
+  document.getElementById("lamp").style.filter=lit[8]&&isWin()?"none":"grayscale(.6)";
+  document.getElementById("hM").textContent="滑动 "+moves+" 次";
+}
+function trySlide(i){
+  if(over)return;
+  const br=Math.floor(blank/3),bc=blank%3;
+  const r=Math.floor(i/3),c=i%3;
+  if(Math.abs(br-r)+Math.abs(bc-c)!==1)return;
+  pos[blank]=pos[i];pos[i]=-1;blank=i;
+  moves++;
+  document.getElementById("msg").textContent="";
+  render();
+  if(isWin()){
+    over=true;clearInterval(timer);
+    show("灯亮了!","电路接通 · 滑动 "+moves+" 次 · 用时 "+sec+" 秒");
+  }
+}
+gridEl.addEventListener("click",e=>{
+  const t=e.target.closest(".tc");
+  if(!t)return;
+  trySlide(parseInt(t.dataset.i,10));
+});
+document.addEventListener("keydown",e=>{
+  const map={ArrowLeft:1,ArrowRight:-1,ArrowUp:3,ArrowDown:-3};
+  if(map[e.key]===undefined)return;
+  e.preventDefault();
+  const br=Math.floor(blank/3),bc=blank%3;
+  let ni=-1;
+  if(e.key==="ArrowLeft"&&bc<2)ni=blank+1;
+  else if(e.key==="ArrowRight"&&bc>0)ni=blank-1;
+  else if(e.key==="ArrowUp"&&br<2)ni=blank+3;
+  else if(e.key==="ArrowDown"&&br>0)ni=blank-3;
+  if(ni>=0)trySlide(ni);
+});
+function scramble(){
+  pos=[0,1,2,3,4,-1,5,6,7];
+  blank=5;
+  let lastDir=-9;
+  const dirs=[[0,1],[0,-1],[1,0],[-1,0]];
+  for(let k=0;k<140;k++){
+    const opts=[];
+    for(let d=0;d<4;d++){
+      if(d===(lastDir^1)&&lastDir>=0)continue;
+      const nr=Math.floor(blank/3)+dirs[d][0],nc=blank%3+dirs[d][1];
+      if(nr<0||nr>2||nc<0||nc>2)continue;
+      opts.push([d,nr*3+nc]);
+    }
+    const pick=opts[Math.floor(Math.random()*opts.length)];
+    pos[blank]=pos[pick[1]];pos[pick[1]]=-1;blank=pick[1];lastDir=pick[0];
+  }
+  if(isWin())scramble();
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hT").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(){
+  over=false;moves=0;sec=0;
+  scramble();
+  document.getElementById("msg").textContent="";
+  document.getElementById("hT").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  render();startTimer();
+}
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

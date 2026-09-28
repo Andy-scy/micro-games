@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>满弓临界</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ce93d8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ce93d8;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ce93d8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ce93d8;color:#2d0a33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>满弓临界</h1>
+  <p class="hint">按住蓄力、松手放箭 · 力量够大箭才压得住下坠 · 满力会绷断弓弦!</p>
+  <div class="hud">
+    <span>箭 <b id="ar">0</b>/10</span>
+    <span>得分 <b id="sc">0</b></span>
+    <span>目标 <b>55</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">满弓临界</h2>
+      <p id="ovD">移动准星选好出箭的高度,按住蓄力,松手放箭。箭飞得越远坠得越狠:力量太小,箭会在半路栽进地里;恰到好处,才能笔直咬进靶心。但力度条冲进顶端红色临界区的瞬间,弓弦就会绷断、白白浪费一箭。十箭拿 55 分,在极限边缘起舞吧。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">开弓</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elAr=$("ar"),elSc=$("sc"),elMsg=$("msg");
+const BX=60,TX=420,TR=48,GRAV=520;
+let state="menu",score=0,used=0,tp=0;
+let charging=false,power=0,bowY=280;
+let targetY=280,arrows=[],marks=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function newTarget(){targetY=130+Math.random()*320;}
+function beginCharge(){
+  if(state!=="play"||used>=10||charging)return;
+  charging=true;power=0;
+}
+function release(){
+  if(!charging)return;
+  charging=false;
+  if(used>=10)return;
+  if(power>=100){
+    used++;
+    elMsg.textContent="弓弦断了!这一箭作废";
+    elAr.textContent=used;
+    if(used>=10)endCheck();
+    return;
+  }
+  const v=300+power*5;
+  arrows.push({x:BX,y:bowY,vx:v,vy:0});
+  used++;
+  elAr.textContent=used;
+}
+function endCheck(){
+  if(used>=10&&arrows.length===0)endT=0.6;
+}
+let endT=-1;
+function resolveArrow(a){
+  const k=(TX-a.px)/Math.max(0.0001,a.x-a.px);
+  const yc=a.py+(a.y-a.py)*k;
+  const d=Math.abs(yc-targetY);
+  let v=0;
+  if(d<=TR)v=Math.max(1,10-Math.floor(d/(TR/10)));
+  score+=v;
+  marks.push({x:TX,y:yc,v:v});
+  elMsg.textContent=v>0?(v+" 环"+(v>=9?"!":"")):"箭偏出了靶面";
+  elSc.textContent=score;
+  newTarget();
+  endCheck();
+}
+function startGame(){
+  score=0;used=0;tp=0;charging=false;power=0;
+  arrows=[];marks=[];endT=-1;
+  newTarget();
+  elMsg.textContent="";elAr.textContent="0";elSc.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";charging=false;
+  const win=score>=55;
+  ovT.textContent=win?"力量与柔韧兼备!":"弦有断时";
+  ovT.style.color=win?"#ce93d8":"#ef9a9a";
+  ovD.textContent=win?"你找到了力量的临界点,并稳稳站在那里。":"满弓虽快,断弦可惜。距离满格还差一点点时放手,箭最直。";
+  ovS.textContent="总分 "+score+" · 目标 55 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){const p=evPos(e);bowY=Math.max(80,Math.min(480,p.y));});
+cv.addEventListener("mousedown",function(e){const p=evPos(e);bowY=Math.max(80,Math.min(480,p.y));beginCharge();});
+window.addEventListener("mouseup",function(){release();});
+cv.addEventListener("touchstart",function(e){const p=evPos(e.touches[0]);bowY=Math.max(80,Math.min(480,p.y));beginCharge();e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){const p=evPos(e.touches[0]);bowY=Math.max(80,Math.min(480,p.y));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(){release();});
+cv.addEventListener("touchcancel",function(){release();});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    if(charging){
+      power+=66*dt;
+      if(power>=100){
+        power=100;
+        charging=false;
+        used++;
+        elMsg.textContent="满弓过载,弓弦绷断了!";
+        elAr.textContent=used;
+        endCheck();
+      }
+    }
+    for(let i=arrows.length-1;i>=0;i--){
+      const a=arrows[i];
+      a.px=a.x;a.py=a.y;
+      a.vy+=GRAV*dt;
+      a.x+=a.vx*dt;a.y+=a.vy*dt;
+      if(a.x>=TX){resolveArrow(a);arrows.splice(i,1);}
+      else if(a.y>545){elMsg.textContent="力量不足,箭半路落地";arrows.splice(i,1);newTarget();endCheck();}
+      else if(a.x>W+30){elMsg.textContent="箭力道过猛,飞出了靶场";arrows.splice(i,1);newTarget();endCheck();}
+    }
+    if(endT>0){endT-=dt;if(endT<=0)finish();}
+  }
+  draw();
+}
+function drawPower(){
+  const px=20,pw=16,ptop=120,pbot=460;
+  ctx.fillStyle="rgba(0,0,0,0.4)";
+  ctx.fillRect(px-3,ptop-3,pw+6,pbot-ptop+6);
+  ctx.fillStyle="#22304f";
+  ctx.fillRect(px,ptop,pw,pbot-ptop);
+  const k=power/100;
+  const fh=(pbot-ptop)*k;
+  ctx.fillStyle=power>=100?"#ef5350":(power>84?"#ff7043":"#ba68c8");
+  ctx.fillRect(px,pbot-fh,pw,fh);
+  ctx.strokeStyle="rgba(239,83,80,0.8)";ctx.lineWidth=1.5;
+  ctx.setLineDash([4,3]);
+  ctx.beginPath();ctx.moveTo(px,ptop+(pbot-ptop)*0.15);ctx.lineTo(px+pw,ptop+(pbot-ptop)*0.15);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle="#ce93d8";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("力度",px,pbot+14);
+  ctx.fillStyle="#ef9a9a";
+  ctx.fillText("临界",px,ptop+10);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#241d38");g.addColorStop(1,"#120f1e");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#2c3a22";ctx.fillRect(0,545,W,H-545);
+  ctx.strokeStyle="rgba(206,147,216,0.15)";ctx.lineWidth=1;
+  ctx.setLineDash([5,7]);
+  ctx.beginPath();ctx.moveTo(BX,bowY);ctx.lineTo(TX,bowY);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  for(let i=10;i>=1;i--){
+    ctx.fillStyle=i%2===0?"#eceff1":"#ce93d8";
+    ctx.beginPath();ctx.arc(TX,targetY,TR*i/10,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  ctx.strokeStyle="#4a3a58";ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(TX-28,targetY+TR+6);ctx.lineTo(TX-52,545);ctx.moveTo(TX+28,targetY+TR+6);ctx.lineTo(TX+52,545);ctx.stroke();
+  for(let i=0;i<marks.length;i++){
+    const m=marks[i];
+    ctx.strokeStyle=m.v>=9?"#00e676":"#ffffff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(m.x-4,m.y-4);ctx.lineTo(m.x+4,m.y+4);ctx.moveTo(m.x+4,m.y-4);ctx.lineTo(m.x-4,m.y+4);ctx.stroke();
+  }
+  const pull=charging?power/100:0;
+  const sx=BX-pull*26;
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(BX,bowY,26,-Math.PI*0.35,Math.PI*0.35);ctx.stroke();
+  ctx.strokeStyle="rgba(255,255,255,0.5)";ctx.lineWidth=1.5;
+  const ey=26*Math.sin(Math.PI*0.35);
+  ctx.beginPath();ctx.moveTo(BX+26*Math.cos(-Math.PI*0.35),bowY+ey);ctx.lineTo(sx,bowY);ctx.lineTo(BX+26*Math.cos(Math.PI*0.35),bowY-ey);ctx.stroke();
+  if(charging){
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(sx-14,bowY);ctx.lineTo(sx+12,bowY);ctx.stroke();
+    ctx.fillStyle="#fff59d";
+    ctx.beginPath();ctx.moveTo(sx+18,bowY);ctx.lineTo(sx+8,bowY-4);ctx.lineTo(sx+8,bowY+4);ctx.closePath();ctx.fill();
+  }
+  for(let i=0;i<arrows.length;i++){
+    const a=arrows[i];
+    const ang=Math.atan2(a.vy,a.vx);
+    ctx.save();ctx.translate(a.x,a.y);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.fillStyle="#f5f5f5";
+    ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-2,-4);ctx.lineTo(-2,4);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  drawPower();
+  if(state==="play"&&used<10&&!charging){
+    ctx.fillStyle="rgba(206,147,216,0.7)";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("按住蓄力 · 松手放箭",240,530);
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

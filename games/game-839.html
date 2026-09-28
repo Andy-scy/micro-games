@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四色窗花</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #4c3a8f;background:#0d1320;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:pointer}
+.tools{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.tools button{background:#1b2036;color:#e8eaf6;border:1px solid #3a3f66;border-radius:9px;padding:8px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.tools button.on{border-color:#a78bfa;box-shadow:0 0 0 2px rgba(167,139,250,.35)}
+.sw{display:inline-block;width:13px;height:13px;border-radius:4px;margin-right:5px;vertical-align:-2px}
+.msg{text-align:center;color:#fbbf24;font-size:13px;height:18px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(8,8,18,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#241a4d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>四色窗花</h1>
+  <p class="hint">彩窗玻璃拼色谜题:点选颜色再点区域,整块上色;<b style="color:#fb7185">相邻区域颜色不能相同</b>;<br>步数有限,把冲突降到 0 即过关(按 1-4 快速选色)。</p>
+  <div class="hud"><span>关卡 <b id="lv">1/3</b></span><span>步数 <b id="mv">0</b></span><span>冲突 <b id="cf">-</b></span><span>得分 <b id="sc">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">四色窗花</h2>
+      <p id="ovP">大教堂的彩窗等着上色!四个颜色,相邻区域不许撞色。<br>未上色的相邻区域也算撞色,涂满为止。<br>步数预算 = 区域数 + 2,越省步数分越高。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始拼色</button>
+    </div>
+  </div>
+  <div class="tools">
+    <button data-c="0"><span class="sw" style="background:#5eead4"></span>青</button>
+    <button data-c="1"><span class="sw" style="background:#fb7185"></span>玫</button>
+    <button data-c="2"><span class="sw" style="background:#fbbf24"></span>金</button>
+    <button data-c="3"><span class="sw" style="background:#a78bfa"></span>紫</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo"),elMsg=$("msg");
+var elLv=$("lv"),elMv=$("mv"),elCf=$("cf"),elSc=$("sc");
+var COLORS=["#5eead4","#fb7185","#fbbf24","#a78bfa"];
+var NAMES=["青","玫","金","紫"];
+var MAPS=[
+ ["AABBCC","AABBCC","ADDBCC","ADEEEC","ADEEEC","AAEECC"],
+ ["AABBBFF","ABBCCFF","ABCCCFF","ADDCEFF","ADEEEFF","ADDEEFF","AADEFFF"],
+ ["AAABBCCC","AABBBCCG","ABBDDCGG","ADDDEGGG","AADEEEGG","FFDEEGGG","FFEEEGGG","FFFFEGGG"]
+];
+var state="menu",lvIdx=0,cols=0,rows=0,grid=[],regs=[],adj=[[]],regCol=[],regCells=[];
+var sel=0,moves=0,budget=0,conflictPairs=0,score=0,lastReg=-1;
+function loadLevel(){
+  var m=MAPS[lvIdx],r,c,i,j;
+  rows=m.length;cols=m[0].length;grid=[];
+  for(r=0;r<rows;r++){
+    var line=[];
+    for(c=0;c<cols;c++)line.push(m[r].charAt(c));
+    grid.push(line);
+  }
+  var names=[];
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++)if(names.indexOf(grid[r][c])<0)names.push(grid[r][c]);
+  names.sort();
+  regs=names.length;
+  regCells=[];regCol=[];
+  for(i=0;i<regs;i++){regCells.push([]);regCol.push(-1);}
+
+  var idOf={};
+  for(i=0;i<regs;i++)idOf[names[i]]=i;
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++){
+    var id=idOf[grid[r][c]];
+    regCells[id].push([r,c]);
+    grid[r][c]=id;
+  }
+  adj=[];
+  for(i=0;i<regs;i++){adj.push([]);for(j=0;j<regs;j++)adj[i].push(false);}
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++){
+    if(c+1<cols&&grid[r][c]!==grid[r][c+1]){adj[grid[r][c]][grid[r][c+1]]=true;adj[grid[r][c+1]][grid[r][c]]=true;}
+    if(r+1<rows&&grid[r][c]!==grid[r+1][c]){adj[grid[r][c]][grid[r+1][c]]=true;adj[grid[r+1][c]][grid[r][c]]=true;}
+  }
+  moves=0;budget=regs+2;lastReg=-1;
+  elLv.textContent=(lvIdx+1)+"/3";
+  elMsg.textContent="已选「"+NAMES[sel]+"」色,点击区域上色";
+  updHud();
+}
+function countConflicts(){
+  var n=0,i,j;
+  for(i=0;i<regs;i++)for(j=i+1;j<regs;j++)if(adj[i][j]&&regCol[i]===regCol[j])n++;
+  return n;
+}
+function updHud(){
+  conflictPairs=countConflicts();
+  elMv.textContent=moves+"/"+budget;
+  elCf.textContent=conflictPairs===0?"0":"+"+conflictPairs;
+  elCf.style.color=conflictPairs===0?"#5eead4":"#fb7185";
+  elSc.textContent=score;
+}
+function paintRegion(rid){
+  if(state!=="play"||rid<0)return;
+  if(regCol[rid]===sel){elMsg.textContent="该区域已是「"+NAMES[sel]+"」色";return;}
+  regCol[rid]=sel;lastReg=rid;
+  moves++;
+  updHud();
+  if(conflictPairs===0){levelClear();return;}
+  if(moves>=budget){fail();return;}
+  elMsg.textContent="还剩 "+(budget-moves)+" 步,冲突 "+conflictPairs+" 处";
+}
+function levelClear(){
+  state="between";
+  var bonus=(budget-moves)*10+50;
+  score+=bonus;
+  updHud();
+  var last=lvIdx>=MAPS.length-1;
+  ovT.textContent=last?"全部窗花完成!":"第 "+(lvIdx+1)+" 关完成!";
+  ovP.textContent="用步 "+moves+"/"+budget+",奖励 "+bonus+" 分。\n"+(last?"四色窗花大师非你莫属!":"下一扇窗户更大更花。");
+  ovS.style.display="block";ovS.textContent="总得分 "+score;
+  btnGo.textContent=last?"再来一局":"下一关";
+  ov.classList.remove("hide");
+}
+function fail(){
+  state="over";
+  ovT.textContent="步数用尽";
+  ovP.textContent="冲突还剩 "+conflictPairs+" 处,预算不够了。\n提示:先规划哪些区域相邻,再少切换颜色。\n"+"本关用步 "+moves+"/"+budget+"。";
+  ovS.style.display="block";ovS.textContent="总得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function pos(e){
+  var rect=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-rect.left)*cv.width/rect.width,y:(t.clientY-rect.top)*cv.height/rect.height};
+}
+function cellAt(p){
+  var c=Math.floor(p.x/(cv.width/cols)),r=Math.floor(p.y/(cv.height/rows));
+  if(r<0||r>=rows||c<0||c>=cols)return -1;
+  return grid[r][c];
+}
+var dragging=false;
+function onDown(e){
+  if(state!=="play")return;
+  dragging=true;
+  paintRegion(cellAt(pos(e)));
+}
+function onMove(e){
+  if(!dragging||state!=="play")return;
+  var rid=cellAt(pos(e));
+  if(rid>=0&&rid!==lastReg)paintRegion(rid);
+}
+function onUp(){dragging=false;lastReg=-1;}
+cv.addEventListener("mousedown",onDown);
+window.addEventListener("mousemove",onMove);
+window.addEventListener("mouseup",onUp);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onDown(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();onMove(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();onUp();},{passive:false});
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k>="1"&&k<="4"){chooseColor(parseInt(k,10)-1);}
+});
+function chooseColor(i){
+  sel=i;
+  var bs=document.querySelectorAll(".tools button[data-c]"),k;
+  for(k=0;k<bs.length;k++)bs[k].className=k===i?"on":"";
+  if(state==="play")elMsg.textContent="已选「"+NAMES[i]+"」色";
+}
+var i;
+var cbs=document.querySelectorAll(".tools button[data-c]");
+for(i=0;i<cbs.length;i++){
+  (function(b){b.addEventListener("click",function(){chooseColor(parseInt(b.getAttribute("data-c"),10));});})(cbs[i]);
+}
+function draw(){
+  var t=Date.now();
+  ctx.fillStyle="#0d1320";ctx.fillRect(0,0,480,480);
+  var cw=cv.width/cols,ch=cv.height/rows,r,c,rid;
+  var conflictReg=[];
+  for(rid=0;rid<regs;rid++)conflictReg.push(false);
+  var a,b;
+  for(a=0;a<regs;a++)for(b=a+1;b<regs;b++)if(adj[a][b]&&regCol[a]===regCol[b]){conflictReg[a]=true;conflictReg[b]=true;}
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++){
+    rid=grid[r][c];
+    ctx.fillStyle=regCol[rid]>=0?COLORS[regCol[rid]]:"#1b2036";
+    ctx.fillRect(c*cw,r*ch,cw+1,ch+1);
+    if(conflictReg[rid]&&state==="play"){
+      ctx.fillStyle="rgba(251,113,133,"+(0.22+0.18*Math.sin(t/180))+")";
+      ctx.fillRect(c*cw,r*ch,cw+1,ch+1);
+    }
+  }
+  ctx.strokeStyle="#0f1220";ctx.lineWidth=3;
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++){
+    if(c+1<cols&&grid[r][c]!==grid[r][c+1]){ctx.beginPath();ctx.moveTo((c+1)*cw,r*ch);ctx.lineTo((c+1)*cw,(r+1)*ch);ctx.stroke();}
+    if(r+1<rows&&grid[r][c]!==grid[r+1][c]){ctx.beginPath();ctx.moveTo(c*cw,(r+1)*ch);ctx.lineTo((c+1)*cw,(r+1)*ch);ctx.stroke();}
+  }
+  ctx.strokeStyle="#a78bfa";ctx.lineWidth=4;
+  ctx.strokeRect(1,1,478,478);
+}
+btnGo.addEventListener("click",function(){
+  if(state==="over"||(state==="between"&&btnGo.textContent==="再来一局")){score=0;lvIdx=0;}
+  else if(state==="between")lvIdx++;
+  chooseColor(sel);
+  loadLevel();
+  state="play";
+  ovS.style.display="none";
+  ov.classList.add("hide");
+});
+chooseColor(0);
+loadLevel();
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==="play"||state==="between"||state==="over")draw();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

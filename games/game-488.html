@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风云靶场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ba68c8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ba68c8;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ba68c8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ba68c8;color:#2d0e33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>风云靶场</h1>
+  <p class="hint">会跑的靶 + 会变的气流 · 60 秒综合大考 · 冲 220 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">60</b>秒</span>
+    <span>连击 <b id="cb">0</b></span>
+    <span>目标 <b>220</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">风云靶场</h2>
+      <p id="ovD">综合大考来了:靶子在场上四处游走,垂直气流还在不断改变强弱。顶部的气标告诉你风往哪边吹——算好移动提前量,再让出一截风偏,两件事一起做对,箭才会咬住靶心。连击越高单发越值钱。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">迎战风云</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elCb=$("cb"),elMsg=$("msg");
+const GOAL=220,DUR=60,OX=240,OY=545;
+let state="menu",score=0,timeLeft=DUR,elapsed=0,tp=0,combo=0;
+let wind=0,windTarget=0,windTimer=3;
+let mouse={x:240,y:260},target=null,flies=[],pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function newTarget(){
+  const a=Math.random()*6.28;
+  target={x:120+Math.random()*240,y:130+Math.random()*260,r:36,vx:Math.cos(a),vy:Math.sin(a)};
+}
+function fire(){
+  if(state!=="play")return;
+  const dx=mouse.x-OX,dy=mouse.y-OY,d=Math.max(1,Math.hypot(dx,dy));
+  const sp=620;
+  flies.push({x:OX,y:OY,vx:dx/d*sp,vy:dy/d*sp,t:0,dur:d/sp});
+}
+function burst(x,y,col){
+  for(let i=0;i<10;i++){
+    const a=Math.random()*6.28,s=60+Math.random()*140;
+    pops.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:col});
+  }
+}
+function resolve(f){
+  if(Math.hypot(f.x-target.x,f.y-target.y)<target.r+6){
+    combo++;
+    const gain=12+combo*2;
+    score+=gain;
+    elMsg.textContent="风云之箭!+"+gain+(combo>1?" · 连击 x"+combo:"");
+    burst(f.x,f.y,"#ce93d8");
+  }else{
+    combo=0;
+    elMsg.textContent="被风带偏了";
+  }
+  elSc.textContent=score;elCb.textContent=combo;
+}
+function startGame(){
+  score=0;timeLeft=DUR;elapsed=0;tp=0;combo=0;
+  wind=0;windTarget=(Math.random()*2-1)*380;windTimer=3;
+  flies=[];pops=[];newTarget();
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;elCb.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"风云在手!":"风靶两误";
+  ovT.style.color=win?"#ba68c8":"#ef9a9a";
+  ovD.textContent=win?"移动与风向同时算清,这是顶尖射手才有的本事。":"先练预判,再练让风;两样分开稳了,合在一起就顺了。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    elapsed+=dt;timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    windTimer-=dt;
+    if(windTimer<=0){windTarget=(Math.random()*2-1)*380;windTimer=3.5+Math.random()*1.5;}
+    wind+=(windTarget-wind)*Math.min(1,dt*1.4);
+    const sp=Math.min(260,150+elapsed*1.8);
+    const m=Math.hypot(target.vx,target.vy);
+    target.vx=target.vx/m*sp;target.vy=target.vy/m*sp;
+    target.x+=target.vx*dt;target.y+=target.vy*dt;
+    if(target.x<44&&target.vx<0)target.vx=-target.vx;
+    if(target.x>436&&target.vx>0)target.vx=-target.vx;
+    if(target.y<60&&target.vy<0)target.vy=-target.vy;
+    if(target.y>480&&target.vy>0)target.vy=-target.vy;
+    for(let i=flies.length-1;i>=0;i--){
+      const f=flies[i];
+      f.vy+=wind*dt;
+      f.x+=f.vx*dt;f.y+=f.vy*dt;f.t+=dt;
+      if(f.t>=f.dur){resolve(f);flies.splice(i,1);}
+      else if(f.y<-40||f.y>H+40||f.x<-40||f.x>W+40){flies.splice(i,1);}
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=280*dt;
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function drawWind(){
+  const up=wind<0,n=Math.min(6,Math.ceil(Math.abs(wind)/70));
+  ctx.save();ctx.translate(240,40);
+  ctx.fillStyle="rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(-88,-20,176,40,10);else ctx.rect(-88,-20,176,40);
+  ctx.fill();
+  ctx.fillStyle="#ce93d8";ctx.font="bold 14px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  let s="气流 ";
+  for(let i=0;i<n;i++)s+=up?"↑":"↓";
+  if(n===0)s+="·静";
+  ctx.fillText(s,0,1);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#241a38");g.addColorStop(1,"#120e20");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(186,104,200,0.07)";
+  for(let i=0;i<4;i++){
+    const yy=100+i*120+Math.sin(tp*1.4+i*2)*14;
+    ctx.beginPath();ctx.ellipse((tp*30+i*140)%560-40,yy,60,10,0,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#1c2a1e";ctx.fillRect(0,500,W,H-500);
+  if(target){
+    ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+    const cols=["#eceff1","#e53935","#ffc107"];
+    const rs=[1,0.6,0.28];
+    for(let i=0;i<3;i++){
+      ctx.fillStyle=cols[i];
+      ctx.beginPath();ctx.arc(target.x,target.y,target.r*rs[i],0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(OX,OY+6,14,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  for(let i=0;i<flies.length;i++){
+    const f=flies[i];
+    const ang=Math.atan2(f.vy,f.vx);
+    ctx.save();ctx.translate(f.x,f.y);ctx.rotate(ang);
+    ctx.strokeStyle="#e0c987";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(0,0);ctx.stroke();
+    ctx.restore();
+  }
+  drawWind();
+  if(state==="play"){
+    ctx.strokeStyle="#ba68c8";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

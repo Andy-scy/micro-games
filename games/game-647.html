@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六十秒马拉松</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:14px;background:#232a48;border-radius:7px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#ffd166;border-radius:7px}
+#tbar.low{background:#ff5c5c}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:9px 13px;font-size:15px;margin-bottom:7px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#ffd166}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#skip{width:100%;border:2px dashed #2c3357;background:transparent;color:#9aa3c0;border-radius:10px;padding:9px 0;font-size:14px;cursor:pointer;font-family:inherit}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ffd166;color:#2a2008;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>六十秒马拉松</h1>
+  <p class="tips">60 秒内不限题量,能答多少答多少!题短量大,答对 +1 题、连击不断;答错扣 3 秒,拿不准可点「跳过」只扣 2 秒。倒计时归零立即结算,冲击你的答题极限!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">答对题数</div><div class="big" id="cnt">0</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="st">0</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tl">60 秒</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <button id="skip">跳过此题(-2 秒)</button>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">六十秒马拉松</h2><p id="ovp">· 全局 60 秒倒计时,题库连续滚动出题<br>· 答对:题数 +1,连击 +1<br>· 答错:扣 3 秒,标出正确答案<br>· 「跳过」:扣 2 秒,直接换下一题<br>· 时间归零结算,按答对题数评段位<br>· 手要快,心要稳,冲!</p><button class="btn" id="obtn">开跑!</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'一年有几个月?',o:['12','10','13','11']},
+{q:'一天有多少个小时?',o:['24','12','20','36']},
+{q:'一周有几天?',o:['7','5','6','8']},
+{q:'太阳从哪边升起?',o:['东方','西方','南方','北方']},
+{q:'水在多少摄氏度结冰?',o:['0','10','-10','100']},
+{q:'十二生肖排第一的是?',o:['鼠','牛','虎','兔']},
+{q:'中国共有多少个民族?',o:['56','55','57','50']},
+{q:'美术课说的"三原色"是?',o:['红黄蓝','红绿蓝','黄蓝紫','橙绿紫']},
+{q:'世界上最大的动物是?',o:['蓝鲸','非洲象','鲸鲨','虎鲸']},
+{q:'春节是农历几月初一?',o:['正月','腊月','二月','六月']},
+{q:'红绿灯红灯表示?',o:['停止','通行','慢行','掉头']},
+{q:'《咏鹅》的作者是?',o:['骆宾王','李白','杜甫','王维']},
+{q:'一米等于多少厘米?',o:['100','10','1000','50']},
+{q:'一公斤等于多少克?',o:['1000','100','500','10000']},
+{q:'直角是多少度?',o:['90','45','60','180']},
+{q:'体温计用来测量什么?',o:['温度','长度','重量','速度']},
+{q:'蜜蜂的家叫?',o:['蜂巢','鸟巢','蚁穴','蛛网']},
+{q:'猫头鹰白天还是晚上活跃?',o:['晚上','白天','清晨','中午']},
+{q:'小白兔最爱吃的通常是?',o:['胡萝卜','肉','鱼','骨头']},
+{q:'普通话共有几个声调?',o:['4','3','5','2']},
+{q:'中国的首都是?',o:['北京','上海','广州','西安']},
+{q:'一年有几个季节?',o:['4','2','3','6']},
+{q:'农历十五的月亮通常?',o:['最圆','最缺','看不见','最暗']},
+{q:'蚊子的幼虫叫?',o:['孑孓','蚕蛹','蝌蚪','毛毛虫']},
+{q:'大雁秋天往哪里飞?',o:['南方','北方','东方','西方']},
+{q:'企鹅主要生活在?',o:['南极地区','北极地区','沙漠','热带雨林']},
+{q:'我们用哪个器官闻气味?',o:['鼻子','眼睛','耳朵','舌头']},
+{q:'冰融化后变成?',o:['水','汽','雪','冰沙']},
+{q:'面包的主要原料是?',o:['面粉','大米','玉米','土豆']},
+{q:'中国国歌的名字是?',o:['《义勇军进行曲》','《茉莉花》','《东方红》','《歌唱祖国》']},
+{q:'五星红旗上有几颗星?',o:['5','4','6','8']},
+{q:'一刻钟是多少分钟?',o:['15','10','20','30']},
+{q:'鱼靠什么呼吸?',o:['鳃','肺','皮肤','鳍']},
+{q:'水烧开时冒出的"白气"是?',o:['水蒸气','氧气','二氧化碳','氢气']},
+{q:'一吨棉花和一吨铁相比?',o:['一样重','棉花重','铁重','无法比较']},
+{q:'0 是奇数还是偶数?',o:['偶数','奇数','都不是','看情况']},
+{q:'三角形有几条边?',o:['3','2','4','5']},
+{q:'通常一年有多少天?',o:['365','364','366','360']},
+{q:'闰年的 2 月有多少天?',o:['29','28','30','31']},
+{q:'中秋节人们通常吃?',o:['月饼','粽子','汤圆','饺子']},
+{q:'端午节吃粽子是为了纪念?',o:['屈原','李白','岳飞','孔子']},
+{q:'星期六的前一天是?',o:['星期五','星期四','星期日','星期一']},
+{q:'人用哪个器官思考?',o:['大脑','心脏','胃','肺']},
+{q:'汉字"山"有几画?',o:['3','2','4','5']}
+];
+var TOTAL=60;
+var pool=TOTAL,cnt=0,streak=0,bestStreak=0,playing=false,over=false,locked=false,S=0,qi=0,order=[];
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function paintPool(){
+  var pc=Math.max(0,pool)/TOTAL*100;
+  var bar=$('tbar');
+  bar.style.width=pc+'%';
+  bar.className=pool<=10?'low':'';
+  $('tl').textContent=Math.max(0,Math.ceil(pool))+' 秒';
+}
+function startGame(){
+  S++;pool=TOTAL;cnt=0;streak=0;bestStreak=0;over=false;playing=true;locked=false;qi=0;
+  order=shuffle(BANK.slice());
+  $('cnt').textContent='0';$('st').textContent='0';
+  $('overlay').classList.add('hide');
+  paintPool();
+  showQ();
+}
+function showQ(){
+  if(qi>=order.length){order=order.concat(shuffle(BANK.slice()));}
+  var it=order[qi];qi++;
+  locked=false;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var it=order[qi-1];
+  if(btn.dataset.ok==='1'){
+    cnt++;streak++;
+    if(streak>bestStreak)bestStreak=streak;
+    $('cnt').textContent=cnt;$('st').textContent=streak;
+    btn.classList.add('ok');
+    locked=true;
+    schedule(function(){if(playing&&!over)showQ();},220);
+  }else{
+    streak=0;$('st').textContent='0';
+    pool-=3;paintPool();
+    btn.classList.add('bad');
+    var btns=$('opts').children;
+    for(var i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent='-3 秒!正确答案:'+it.o[0];
+    locked=true;
+    schedule(function(){if(playing&&!over)showQ();},800);
+  }
+}
+function skipQ(){
+  if(!playing||over||locked)return;
+  locked=true;streak=0;$('st').textContent='0';
+  pool-=2;paintPool();
+  $('msg').textContent='跳过,-2 秒';
+  schedule(function(){if(playing&&!over)showQ();},260);
+}
+function finish(){
+  playing=false;over=true;
+  var rank=cnt>=30?'题海飞人!':(cnt>=20?'快手快手!':(cnt>=10?'渐入佳境!':'热身刚结束!'));
+  $('ovt').textContent='时间到!'; 
+  $('ovp').innerHTML='答对 <b>'+cnt+'</b> 题,最高连击 <b>'+bestStreak+'</b><br>'+rank+' 跳题要果断,抢分要冷静,再来一局!';
+  $('obtn').textContent='再跑一局';
+  $('overlay').classList.remove('hide');
+}
+$('skip').addEventListener('click',skipQ);
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    pool-=dt;
+    paintPool();
+    if(pool<=0)finish();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

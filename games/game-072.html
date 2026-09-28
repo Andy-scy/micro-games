@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>护盾飞行</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>护盾飞行</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 拍翅膀 · 捡到护盾晶体可挡一次撞击!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>护盾 <b id="sh">无</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">护盾飞行</h2>
+      <p id="ovDesc">经典穿越玩法,外加能量护盾:沿途拾取蓝色晶体获得护盾(已持盾时再拾 +2 分)。带盾撞击管道不会死,护盾碎裂并换来 1.5 秒无敌闪烁;坠地若带盾会强力弹起。每穿一对管 +1 分!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=70,GAP=155,SPACE=238,GRAV=1480,FLAP=-380,BX=120,BR=13,SPEED=150;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),elSh=$("sh"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,pipes,orbs,popups,score,best=0,tick,pidx,shield,inv;
+function newPipe(x){
+  pidx++;
+  var p={x:x,gy:64+Math.random()*(GROUND-128-GAP),passed:false};
+  if(pidx%3===0)orbs.push({x:x+PW+118,y:110+Math.random()*(GROUND-230),got:false,ph:Math.random()*6.28});
+  return p;
+}
+function reset(){
+  bird={y:280,vy:0,fl:0};
+  pipes=[];orbs=[];popups=[];
+  score=0;tick=0;pidx=0;shield=0;inv=0;
+  pipes.push(newPipe(W+150));
+  elScore.textContent="0";
+  elSh.textContent="无";
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function shText(){
+  elSh.textContent=shield>0?"●":"无";
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function useShield(){
+  shield=0;inv=1.5;
+  shText();
+  popups.push({x:BX+40,y:bird.y-30,txt:"护盾抵消!",life:1});
+}
+function update(dt){
+  var i,p,o;
+  tick+=dt;
+  if(inv>0)inv-=dt;
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){
+    if(shield>0){
+      bird.y=GROUND-BR;
+      bird.vy=-430;
+      useShield();
+    }else{die("小鸟坠落在地面上了!");return;}
+  }
+  for(i=0;i<pipes.length;i++)pipes[i].x-=SPEED*dt;
+  if(pipes[pipes.length-1].x<W-SPACE)pipes.push(newPipe(W+24));
+  if(pipes[0].x<-PW-12)pipes.shift();
+  for(i=0;i<pipes.length;i++){
+    p=pipes[i];
+    if(!p.passed&&p.x+PW<BX-BR){
+      p.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    if(inv<=0&&(circleRect(BX,bird.y,BR,p.x,0,PW,p.gy)||circleRect(BX,bird.y,BR,p.x,p.gy+GAP,PW,GROUND-p.gy-GAP))){
+      if(shield>0)useShield();
+      else{die("撞上了管道!");return;}
+    }
+  }
+  for(i=orbs.length-1;i>=0;i--){
+    o=orbs[i];
+    o.x-=SPEED*dt;
+    if(o.x<-30){orbs.splice(i,1);continue;}
+    var dx=BX-o.x,dy=bird.y-(o.y+Math.sin(tick*2.6+o.ph)*8),rr=BR+11;
+    if(dx*dx+dy*dy<rr*rr){
+      orbs.splice(i,1);
+      if(shield>0){
+        score+=2;
+        elScore.textContent=String(score);
+        popups.push({x:o.x,y:o.y-20,txt:"满盾 +2",life:0.9});
+      }else{
+        shield=1;shText();
+        popups.push({x:o.x,y:o.y-20,txt:"获得护盾!",life:1});
+      }
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawPipe(p){
+  ctx.fillStyle="#2b5aa6";
+  ctx.fillRect(p.x,0,PW,p.gy);
+  ctx.fillRect(p.x,p.gy+GAP,PW,GROUND-p.gy-GAP);
+  ctx.fillStyle="#60a5fa";
+  ctx.fillRect(p.x+6,0,7,p.gy);
+  ctx.fillRect(p.x+6,p.gy+GAP,7,GROUND-p.gy-GAP);
+  ctx.fillStyle="#16305c";
+  ctx.fillRect(p.x-4,p.gy-13,PW+8,13);
+  ctx.fillRect(p.x-4,p.gy+GAP,PW+8,13);
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0c1322";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(180,210,255,0.35)";
+  for(i=0;i<35;i++)ctx.fillRect((i*139)%W,(i*227)%GROUND,1.3,1.3);
+  for(i=0;i<pipes.length;i++)drawPipe(pipes[i]);
+  for(i=0;i<orbs.length;i++){
+    var o=orbs[i],oy=o.y+Math.sin(tick*2.6+o.ph)*8;
+    var g=ctx.createRadialGradient(o.x,oy,2,o.x,oy,22);
+    g.addColorStop(0,"rgba(96,165,250,0.55)");
+    g.addColorStop(1,"rgba(96,165,250,0)");
+    ctx.fillStyle=g;
+    ctx.fillRect(o.x-22,oy-22,44,44);
+    ctx.save();
+    ctx.translate(o.x,oy);
+    ctx.rotate(tick*2);
+    ctx.fillStyle="#bfdbfe";
+    ctx.fillRect(-6,-6,12,12);
+    ctx.fillStyle="#60a5fa";
+    ctx.fillRect(-3,-9,6,18);
+    ctx.fillRect(-9,-3,18,6);
+    ctx.restore();
+  }
+  ctx.fillStyle="#1b2a44";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#2a3d61";
+  var off=(tick*SPEED)%24;
+  for(i=-1;i<W/24+1;i++)ctx.fillRect(i*24-off,GROUND,12,6);
+  if(inv<=0||Math.sin(tick*30)>0){
+    ctx.fillStyle="#dbeafe";
+    ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#60a5fa";
+    ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#0c1322";
+    ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.4,0,Math.PI*2);ctx.fill();
+    if(shield>0){
+      ctx.strokeStyle="rgba(147,197,253,0.9)";ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.arc(BX,bird.y,BR+6+Math.sin(tick*5),0,Math.PI*2);ctx.stroke();
+    }
+  }
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(191,219,254,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

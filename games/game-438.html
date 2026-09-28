@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暗夜剪影</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#94a3b8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#94a3b8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#94a3b8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#94a3b8;color:#10131c;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>暗夜剪影</h1>
+  <p class="hint">一切只剩剪影:空格/↑ 跳过岩石 · 按住 ↓/S 压低身子躲垂藤 · 触屏:点右半跳,按住左半滑 · 靠闪电的一瞬间看清路况!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>天色 <b id="wx">阴</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">暗夜剪影</h2>
+      <p id="ovDesc">无月之夜,世界只剩下黑色的剪影。你几乎什么都看不清,只能靠偶尔划过的闪电记住障碍的位置——黑暗中的奔跑,全凭直觉。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elWx=$("wx"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s438");
+var state="menu",dist,score,speed,obs,px,py,vy,grounded,jumpHeld,slideHeld,sliding,nextGap,flash,flashT,nextBolt,t;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=310;obs=[];px=90;py=GY-42;vy=0;grounded=true;
+  jumpHeld=false;slideHeld=false;sliding=false;nextGap=430;
+  flash=0;flashT=0;nextBolt=2.5;t=0;
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elWx.textContent=flashT>0?"闪电":"阴";
+}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;sliding=false;}
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s438",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function pbox(){
+  if(sliding)return{x:px-8,y:GY-20,w:44,h:20};
+  return{x:px+3,y:py+3,w:20,h:37};
+}
+function update(dt){
+  var s=dt/1000,i,o,b;
+  t+=s;
+  speed=Math.min(560,310+dist*0.016);
+  dist+=speed*s;score=Math.floor(dist/10);
+  sliding=grounded&&slideHeld;
+  if(!grounded){
+    var g=2200;
+    if(vy<0&&jumpHeld)g=1150;
+    vy+=g*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  nextBolt-=s;
+  if(nextBolt<=0){flashT=0.38;nextBolt=3.2+Math.random()*3.4;}
+  if(flashT>0)flashT-=s;
+  flash=flashT>0?flashT/0.38:0;
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    if(Math.random()<0.55)obs.push({x:W+30,type:"rock",w:26+Math.round(Math.random()*10),h:28+Math.round(Math.random()*12)});
+    else obs.push({x:W+30,type:"vine",w:14,h:0});
+    nextGap=240+Math.random()*260+speed*0.3;
+  }
+  b=pbox();
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-80){obs.splice(i,1);continue;}
+    var oy,oh;
+    if(o.type==="vine"){oy=0;oh=218;}
+    else{oy=GY-o.h;oh=o.h;}
+    if(b.x+b.w>o.x+2&&b.x<o.x+o.w-2&&b.y+b.h>oy+3&&b.y<oy+oh-3){
+      gameOver(o.type==="vine"?"被垂藤绊倒——压低身子滑过去!":"撞上了乱石——跳跃要更果断!");
+      return;
+    }
+  }
+  updateHud();
+}
+function draw(){
+  var i,o,grd,rim;
+  rim=0.2+flash*0.75;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#0d1220");grd.addColorStop(1,"#131a2c");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  if(flash>0){
+    ctx.fillStyle="rgba(190,205,235,"+(flash*0.13)+")";
+    ctx.fillRect(0,0,W,H);
+    if(Math.random()<0.3){
+      ctx.strokeStyle="rgba(220,230,255,"+(flash*0.7)+")";ctx.lineWidth=2;
+      var lx=100+((dist*0.7)%400);
+      ctx.beginPath();ctx.moveTo(lx,0);ctx.lineTo(lx-14,60);ctx.lineTo(lx+8,70);ctx.lineTo(lx-10,140);ctx.stroke();
+      ctx.lineWidth=1;
+    }
+  }
+  ctx.fillStyle="#1a2338";
+  var o1=(dist*0.1)%300;
+  for(i=-1;i<3;i++){ctx.beginPath();ctx.arc(i*300-o1+80,GY+10,110,Math.PI,Math.PI*2);ctx.fill();}
+  ctx.fillStyle="#0a0d16";ctx.fillRect(0,GY,W,H-GY);
+  ctx.strokeStyle="rgba(190,205,235,"+(rim*0.7)+")";
+  ctx.beginPath();ctx.moveTo(0,GY);ctx.lineTo(W,GY);ctx.stroke();
+  var dsh=dist%80;
+  ctx.fillStyle="rgba(190,205,235,"+(rim*0.3)+")";
+  for(i=0;i<10;i++)ctx.fillRect(i*80-dsh,GY+16,34,3);
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    ctx.fillStyle="#04060c";
+    ctx.strokeStyle="rgba(190,205,235,"+rim+")";
+    if(o.type==="vine"){
+      ctx.beginPath();
+      ctx.moveTo(o.x+3,0);ctx.lineTo(o.x+o.w-3,0);
+      ctx.quadraticCurveTo(o.x+o.w+4,90,o.x+o.w/2,218);
+      ctx.quadraticCurveTo(o.x-4,90,o.x+3,0);
+      ctx.fill();ctx.stroke();
+    }else{
+      ctx.beginPath();
+      ctx.moveTo(o.x,GY);ctx.lineTo(o.x+4,GY-o.h+6);ctx.lineTo(o.x+o.w*0.45,GY-o.h);
+      ctx.lineTo(o.x+o.w-3,GY-o.h+4);ctx.lineTo(o.x+o.w,GY);
+      ctx.closePath();ctx.fill();ctx.stroke();
+    }
+  }
+  var ex=(dist*0.31%W+W)%W;
+  ctx.fillStyle="rgba(248,113,113,"+(0.25+flash*0.5)+")";
+  ctx.fillRect(ex,84,4,2);ctx.fillRect(ex+7,84,4,2);
+  if(sliding){
+    ctx.fillStyle="#04060c";
+    ctx.strokeStyle="rgba(190,205,235,"+(rim+0.25)+")";
+    rr(px-8,GY-18,42,16,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle="rgba(103,232,249,.9)";
+    ctx.fillRect(px+24,GY-14,5,2);
+  }else{
+    ctx.fillStyle="#04060c";
+    ctx.strokeStyle="rgba(190,205,235,"+(rim+0.25)+")";
+    rr(px,py+10,26,32,7);ctx.fill();ctx.stroke();
+    rr(px+6,py,19,15,5);ctx.fill();ctx.stroke();
+    ctx.fillStyle="rgba(103,232,249,.9)";
+    ctx.fillRect(px+15,py+5,6,2);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function jumpKey(k){return k===" "||k==="ArrowUp"||k==="w"||k==="W";}
+function slideKey(k){return k==="ArrowDown"||k==="s"||k==="S";}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(jumpKey(k)){jumpHeld=true;if(!e.repeat)doJump();}
+  if(slideKey(k))slideHeld=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(jumpKey(k))jumpHeld=false;
+  if(slideKey(k))slideHeld=false;
+});
+function zoneJump(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientX-rect.left)>rect.width*0.45;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  if(zoneJump(t)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();jumpHeld=false;slideHeld=false;},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  if(zoneJump(e)){jumpHeld=true;doJump();}
+  else slideHeld=true;
+});
+document.addEventListener("mouseup",function(){jumpHeld=false;slideHeld=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

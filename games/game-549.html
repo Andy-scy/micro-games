@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钓鱼收对 要牌对决</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:8px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:720px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+.row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;min-height:70px}
+.card{width:44px;height:62px;border-radius:7px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.45);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:13px;font-weight:800}
+.card .s{font-size:20px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+#asks{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;min-height:40px}
+#msg{min-height:38px;font-size:14px;color:#ffd166;text-align:center}
+#pond{font-size:13px;color:#9aa3c0}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>钓鱼收对 · 要牌对决</h1>
+<p id="how">向 AI 索要你手里也有的点数：AI 有就全交给你，凑成对子自动亮出收分；扑空则从牌塘钓一张，恰好钓中还能继续要。先收满 6 对者胜。</p>
+<div id="bar"><span>你的对子 <b id="pp">0</b>/6</span><span>AI 的对子 <b id="ap">0</b></span><span id="pond">牌塘 38</span></div>
+<div id="table">
+  <div class="lab">AI 手牌 <span id="an">7</span> 张</div>
+  <div class="row" id="airow"></div>
+  <div class="lab">你的手牌</div>
+  <div class="row" id="prow"></div>
+  <div id="asks"></div>
+  <div id="msg"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var pond=[],hands=[[],[]],pairs=[0,0],turn=0,phase='play',passStreak=0,aiTimer=null;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function cardHTML(c,back){
+  if(back)return '<div class="card back"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('pp').textContent=pairs[0];$('ap').textContent=pairs[1];
+  $('pond').textContent='牌塘 '+pond.length;
+  $('an').textContent=hands[1].length;
+  var ar='';for(var i=0;i<hands[1].length;i++)ar+=cardHTML(null,true);
+  $('airow').innerHTML=ar;
+  var pr='';for(var k=0;k<hands[0].length;k++)pr+=cardHTML(hands[0][k],false);
+  $('prow').innerHTML=pr;
+  var box=$('asks');box.innerHTML='';
+  if(phase==='play'&&turn===0){
+    var seen={};
+    for(var j=0;j<hands[0].length;j++){
+      var r=hands[0][j].r;
+      if(seen[r])continue;seen[r]=1;
+      var b=document.createElement('button');b.className='acc';b.textContent='要 '+r;
+      b.setAttribute('data-r',r);box.appendChild(b);
+    }
+    if(hands[0].length===0){var p=document.createElement('span');p.className='lab';p.textContent='（你手里没牌）';box.appendChild(p);}
+  }else{
+    var sp=document.createElement('span');sp.className='lab';sp.textContent=turn===1?'AI 正在行动…':'';box.appendChild(sp);
+  }
+}
+function log(s){$('msg').textContent=s;}
+function layPairs(who){
+  var h=hands[who],changed=true;
+  while(changed){
+    changed=false;
+    for(var i=0;i<h.length&&!changed;i++)for(var j=i+1;j<h.length;j++){
+      if(h[i].r===h[j].r){h.splice(j,1);h.splice(i,1);pairs[who]++;changed=true;break;}
+    }
+  }
+}
+function checkEnd(){
+  if(pairs[0]>=6){end(true,'你先收满 6 对！');return true;}
+  if(pairs[1]>=6){end(false,'AI 先收满 6 对');return true;}
+  if(pond.length===0&&(hands[0].length===0||hands[1].length===0)){
+    if(pairs[0]>pairs[1])end(true,'牌尽局终，你以 '+pairs[0]+' 对 '+pairs[1]+' 获胜');
+    else if(pairs[1]>pairs[0])end(false,'牌尽局终，AI 以 '+pairs[1]+' 对 '+pairs[0]+' 获胜');
+    else end(false,'牌尽局终，'+pairs[0]+' 对 '+pairs[1]+' 平分秋色');
+    return true;
+  }
+  return false;
+}
+function ask(who,r){
+  if(phase!=='play')return;
+  var other=1-who,h=hands[other],got=[];
+  for(var i=h.length-1;i>=0;i--)if(h[i].r===r){got.push(h[i]);h.splice(i,1);}
+  if(got.length){
+    hands[who]=hands[who].concat(got);
+    passStreak=0;
+    log((who===0?'你要 '+r+'：':'AI 要 '+r+'：')+'命中，拿走 '+got.length+' 张');
+    layPairs(who);render();
+    if(checkEnd())return;
+    if(who===0){render();}else{aiTimer=setTimeout(aiTurn,850);}
+    return;
+  }
+  var c=pond.length?pond.pop():null;
+  if(c){
+    hands[who].push(c);
+    var luck=(c.r===r);
+    log((who===0?'你要 '+r+'：':'AI 要 '+r+'：')+'扑空，钓到 '+(luck?'同一张 '+c.r+'！继续':'一张别的'));
+    layPairs(who);
+    if(checkEnd())return;
+    if(luck){passStreak=0;if(who===0){render();}else{aiTimer=setTimeout(aiTurn,850);}return;}
+  }else{
+    passStreak++;
+    log((who===0?'你要 '+r+'：':'AI 要 '+r+'：')+'扑空，牌塘也空了');
+    if(passStreak>=4){endByStuck();return;}
+  }
+  turn=1-who;render();
+  if(turn===1)aiTimer=setTimeout(aiTurn,850);
+}
+function aiTurn(){
+  if(phase!=='play'||turn!==1)return;
+  if(hands[1].length===0){turn=0;render();return;}
+  var r=hands[1][Math.floor(Math.random()*hands[1].length)].r;
+  ask(1,r);
+}
+function endByStuck(){
+  if(pairs[0]>=pairs[1])end(true,'双方都无牌可要，你以 '+pairs[0]+' 对 '+pairs[1]+' 领先');
+  else end(false,'双方都无牌可要，AI 以 '+pairs[1]+' 对 '+pairs[0]+' 领先');
+}
+function end(win){
+  phase='done';if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent='最终对子数 你 '+pairs[0]+' : AI '+pairs[1];
+  $('over').classList.remove('hide');
+}
+$('asks').addEventListener('click',function(e){
+  var t=e.target;
+  if(!t.getAttribute||!t.getAttribute('data-r'))return;
+  if(phase!=='play'||turn!==0)return;
+  ask(0,t.getAttribute('data-r'));
+  render();
+});
+$('again').onclick=newGame;
+function newGame(){
+  if(aiTimer){clearTimeout(aiTimer);aiTimer=null;}
+  pond=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)pond.push({s:SUITS[i],r:RANKS[j]});
+  shuffle(pond);
+  hands=[[],[]];
+  for(var k=0;k<7;k++){hands[0].push(pond.pop());hands[1].push(pond.pop());}
+  pairs=[0,0];turn=0;phase='play';passStreak=0;
+  layPairs(0);layPairs(1);
+  $('over').classList.add('hide');log('开局对子已自动亮出，点下方按钮向 AI 要牌');render();
+  if(checkEnd())return;
+}
+newGame();
+})();
+</script>
+</body>
+</html>

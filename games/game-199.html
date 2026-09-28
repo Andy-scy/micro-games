@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意翻牌</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#8fd3ff;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;align-items:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:420px}
+#board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%;transition:opacity .4s}
+#board.fade{opacity:0}
+.card{position:relative;aspect-ratio:1/1;cursor:pointer;perspective:700px}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s}
+.card.open .inner,.card.done .inner{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(20px,7vw,32px)}
+.bk{background:linear-gradient(145deg,#22304f,#18223c);border:2px solid #3d5a80;color:#5f7fb0;font-weight:bold}
+.ft{background:linear-gradient(145deg,#2d4560,#253a52);border:2px solid #6fa8dc;transform:rotateY(180deg)}
+.card.done{cursor:default;animation:pop .4s}
+.card.done .ft{border-color:#8fd3ff;background:linear-gradient(145deg,#1e4a5f,#194051)}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.1)}100%{transform:scale(1)}}
+#banner{position:absolute;top:40%;left:0;right:0;text-align:center;font-size:22px;color:#8fd3ff;font-weight:bold;opacity:0;transition:opacity .4s;pointer-events:none;z-index:8;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+#banner.show{opacity:1}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#8fd3ff}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#8fd3ff;color:#1a2a3a;font-weight:bold;cursor:pointer}
+button.mini{font-size:13px;padding:5px 12px;background:#22304f;color:#cdd3ea;border:1px solid #3d5a80}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>禅意翻牌</h1>
+<div class="hint">放下输赢,静心翻牌。没有时间限制、没有失败惩罚;配完一关自动进入下一关,连修 5 关即达圆满,也可随时点击「结束修行」收功。</div>
+<div class="bar"><span>关卡 <b id="stLevel">1/5</b></span><span>累计配对 <b id="stTotal">0</b></span><span>用时 <b id="stTime">0.0</b> 秒</span><button id="btnEnd" class="mini">结束修行</button></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="banner"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var SETS=[
+  ['🍎','🍋','🍉','🍇','🍓','🍑','🥝','🍍'],
+  ['🐶','🐱','🦊','🐻','🐼','🐨','🦁','🐮'],
+  ['🚗','🚌','🚲','✈️','🚀','🚁','🚚','🚕'],
+  ['⭐','🌙','☀️','⚡','❄️','🌈','🌸','🍀'],
+  ['🎈','🎁','🎵','⚽','🏀','🎲','🧩','🎨']
+];
+var LEVELN=5;
+var board=document.getElementById('board');
+var stage=document.getElementById('stage');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elLevel=document.getElementById('stLevel');
+var elTotal=document.getElementById('stTotal');
+var elTime=document.getElementById('stTime');
+var banner=document.getElementById('banner');
+var btnEnd=document.getElementById('btnEnd');
+var btnAgain=document.getElementById('btnAgain');
+var lock=true,first=null,level=1,pairs=0,totalPairs=0,moves=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function showBanner(text){
+  banner.textContent=text;banner.classList.add('show');
+  later(function(){banner.classList.remove('show');},1200);
+}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);el.sym=sym;
+  board.appendChild(el);return el;
+}
+function deal(){
+  first=null;pairs=0;
+  var set=SETS[level-1];
+  var syms=shuffle(set.concat(set));
+  for(var i=0;i<syms.length;i++)makeCard(syms[i]);
+  elLevel.textContent=level+'/'+LEVELN;
+  lock=true;
+  later(function(){lock=false;},450);
+}
+function newGame(){
+  clearTimers();
+  lock=true;first=null;level=1;pairs=0;totalPairs=0;moves=0;running=true;over=false;
+  elTotal.textContent='0';elTime.textContent='0.0';
+  overlay.classList.remove('show');
+  startAt=performance.now();
+  deal();
+}
+function onCard(el){
+  if(lock||over||!running)return;
+  if(el.classList.contains('open')||el.classList.contains('done'))return;
+  el.classList.add('open');
+  if(!first){first=el;return;}
+  moves++;
+  var a=first,b=el;first=null;
+  if(a.sym===b.sym){
+    pairs++;totalPairs++;elTotal.textContent=String(totalPairs);
+    a.classList.remove('open');b.classList.remove('open');
+    a.classList.add('done');b.classList.add('done');
+    if(pairs===8)levelClear();
+  }else{
+    lock=true;
+    later(function(){a.classList.remove('open');b.classList.remove('open');lock=false;},900);
+  }
+}
+function levelClear(){
+  if(level>=LEVELN){finishWin();return;}
+  showBanner('第 '+level+' 关 圆满,缓缓呼吸…');
+  later(function(){
+    if(over)return;
+    board.classList.add('fade');
+    later(function(){
+      if(over)return;
+      board.innerHTML='';
+      level++;
+      deal();
+      board.classList.remove('fade');
+    },420);
+  },1000);
+}
+function endSession(title){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  ovTitle.textContent=title;
+  ovDesc.innerHTML='修至第 '+level+' 关 · 累计配对 '+totalPairs+' 对<br>用时 '+sec.toFixed(1)+' 秒 · 共 '+moves+' 次翻牌<br>心静自然凉,随时欢迎回来。';
+  overlay.classList.add('show');
+}
+function finishWin(){
+  var total=moves;
+  var sec=(performance.now()-startAt)/1000;
+  over=true;running=false;
+  ovTitle.textContent='修行圆满!';
+  ovDesc.innerHTML='五关全部完成 · 共配对 '+totalPairs+' 对<br>用时 '+sec.toFixed(1)+' 秒 · 共 '+total+' 次翻牌<br>'+('★★★');
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+btnEnd.addEventListener('click',function(){
+  if(over)return;
+  endSession('修行结束');
+});
+var tick=function(){
+  if(running&&!over)elTime.textContent=((performance.now()-startAt)/1000).toFixed(1);
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

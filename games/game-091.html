@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>惯性漂移</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#74c0fc;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#74c0fc;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#74c0fc;color:#08243d;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#74c0fc;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>惯性漂移</h1>
+<p class="tip">太空没有刹车:←→/AD 转向,↑/W 点燃引擎推进,↓/S 反推减速(触屏按住屏幕向想要的方向拖动也可推进)。战机带着惯性漂移,击落 15 架巡逻无人机获胜。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">惯性漂移</h2>
+<p id="ovX">这架战机没有空气动力学,只有动量守恒。学会用惯性画出弧线,在漂移中开火。</p>
+<button id="btn">开始漂移</button>
+</div></div>
+</div>
+<div class="hud"><span>击坠<b id="hK">0/15</b></span><span>生命<b id="hH">3</b></span><span>得分<b id="hS">0</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hK=document.getElementById("hK"),hH=document.getElementById("hH"),hS=document.getElementById("hS");
+var GOAL=15;
+var state="ready",score=0,hp=3,kills=0,inv=0,cool=0,t=0,ang=-Math.PI/2,thrusting=false;
+var ship={x:W/2,y:H/2,vx:0,vy:0};
+var bullets=[],ebullets=[],drones=[],rocks=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*16+4});}
+function reset(){
+  score=0;hp=3;kills=0;inv=0;cool=0;t=0;ang=-Math.PI/2;thrusting=false;
+  ship.x=W/2;ship.y=H/2;ship.vx=0;ship.vy=0;
+  bullets=[];ebullets=[];drones=[];rocks=[];parts=[];
+  for(var k=0;k<3;k++)spawnDrone();
+  for(var k2=0;k2<2;k2++)spawnRock();
+}
+function spawnDrone(){
+  drones.push({x:Math.random()*W,y:-30-Math.random()*80,vx:(Math.random()-0.5)*90,vy:40+Math.random()*60,hp:2,ft:1.5+Math.random()*2});
+}
+function spawnRock(){
+  var r=18+Math.random()*14;
+  rocks.push({x:Math.random()*W,y:-40-Math.random()*60,vx:(Math.random()-0.5)*70,vy:30+Math.random()*50,r:r,rot:Math.random()*6.283,vr:(Math.random()-0.5)*1.5,hp:3});
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"漂移大师":"机体解体";
+  ovX.textContent="最终得分:"+score+(win?" · 你在惯性中起舞,猎杀了整支巡逻队。":" · 惯性是双刃剑,多用反推,少撞石头。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;inv-=dt;cool-=dt;
+  if(keys.ArrowLeft||keys.a)ang-=3.1*dt;
+  if(keys.ArrowRight||keys.d)ang+=3.1*dt;
+  thrusting=false;
+  if(keys.ArrowUp||keys.w){
+    thrusting=true;
+    ship.vx+=Math.cos(ang)*300*dt;
+    ship.vy+=Math.sin(ang)*300*dt;
+  }
+  if(pressed){
+    var dx=px-ship.x,dy=py-ship.y,d=Math.sqrt(dx*dx+dy*dy);
+    if(d>14){
+      thrusting=true;
+      ship.vx+=dx/d*300*dt;
+      ship.vy+=dy/d*300*dt;
+      ang=Math.atan2(dy,dx);
+    }
+  }
+  if(keys.ArrowDown||keys.s){
+    ship.vx-=ship.vx*3*dt;
+    ship.vy-=ship.vy*3*dt;
+  }
+  var fr=Math.pow(0.85,dt);
+  ship.vx*=fr;ship.vy*=fr;
+  var spd=Math.sqrt(ship.vx*ship.vx+ship.vy*ship.vy);
+  if(spd>380){ship.vx*=380/spd;ship.vy*=380/spd;}
+  ship.x+=ship.vx*dt;ship.y+=ship.vy*dt;
+  if(ship.x<-14)ship.x=W+14;
+  if(ship.x>W+14)ship.x=-14;
+  if(ship.y<-14)ship.y=H+14;
+  if(ship.y>H+14)ship.y=-14;
+  if((keys[" "]||keys.z)&&cool<=0){
+    cool=0.22;
+    bullets.push({x:ship.x+Math.cos(ang)*18,y:ship.y+Math.sin(ang)*18,vx:Math.cos(ang)*480,vy:Math.sin(ang)*480});
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var b=bullets[bi];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20)bullets.splice(bi,1);
+  }
+  for(i=drones.length-1;i>=0;i--){
+    var e=drones[i];
+    e.x+=e.vx*dt;e.y+=e.vy*dt;
+    if(e.x<18||e.x>W-18)e.vx*=-1;
+    if(e.y>H+30||e.y<-160){drones.splice(i,1);spawnDrone();continue;}
+    e.ft-=dt;
+    if(e.ft<=0){
+      e.ft=2.2+Math.random()*1.4;
+      var ddx=ship.x-e.x,ddy=ship.y-e.y,dd=Math.sqrt(ddx*ddx+ddy*ddy)||1;
+      ebullets.push({x:e.x,y:e.y+10,vx:ddx/dd*170,vy:ddy/dd*170});
+    }
+    if(inv<=0&&Math.abs(e.x-ship.x)<24&&Math.abs(e.y-ship.y)<24){
+      drones.splice(i,1);spawnDrone();hp--;inv=1.3;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+  }
+  for(i=rocks.length-1;i>=0;i--){
+    var r=rocks[i];
+    r.x+=r.vx*dt;r.y+=r.vy*dt;r.rot+=r.vr*dt;
+    if(r.x<r.r||r.x>W-r.r)r.vx*=-1;
+    if(r.y>r.r+16||r.y<r.r)r.vy*=-1;
+    if(inv<=0&&Math.abs(r.x-ship.x)<r.r+12&&Math.abs(r.y-ship.y)<r.r+12){
+      hp--;inv=1.3;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var b2=ebullets[i];
+    b2.x+=b2.vx*dt;b2.y+=b2.vy*dt;
+    if(b2.x<-10||b2.x>W+10||b2.y<-10||b2.y>H+10){ebullets.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(b2.x-ship.x)<11&&Math.abs(b2.y-ship.y)<13){
+      ebullets.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,12,"#ff6b6b");
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    var hit=false;
+    for(j=drones.length-1;j>=0;j--){
+      var e2=drones[j];
+      var ddx2=bl.x-e2.x,ddy2=bl.y-e2.y;
+      if(ddx2*ddx2+ddy2*ddy2<324){
+        bullets.splice(bi,1);hit=true;
+        e2.hp--;
+        if(e2.hp<=0){
+          boom(e2.x,e2.y,12,"#ffd166");
+          kills++;score+=30;
+          drones.splice(j,1);spawnDrone();
+        }
+        break;
+      }
+    }
+    if(hit)continue;
+    for(j=rocks.length-1;j>=0;j--){
+      var rk=rocks[j];
+      var dx3=bl.x-rk.x,dy3=bl.y-rk.y;
+      if(dx3*dx3+dy3*dy3<rk.r*rk.r){
+        bullets.splice(bi,1);
+        rk.hp--;
+        if(rk.hp<=0){boom(rk.x,rk.y,10,"#f0a35e");score+=10;rocks.splice(j,1);spawnRock();}
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(inv<=0&&hp<=0){gameOver(false);return;}
+  if(kills>=GOAL){score+=300;gameOver(true);}
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  for(i=0;i<rocks.length;i++){
+    var r=rocks[i];
+    ctx.save();ctx.translate(r.x,r.y);ctx.rotate(r.rot);
+    ctx.fillStyle="#7d6b58";
+    ctx.beginPath();ctx.arc(0,0,r.r,0,6.283);ctx.fill();
+    ctx.strokeStyle="#4a3f34";ctx.lineWidth=3;ctx.stroke();
+    ctx.restore();
+  }
+  for(i=0;i<drones.length;i++){
+    var e=drones[i];
+    ctx.save();ctx.translate(e.x,e.y);ctx.rotate(Math.atan2(e.vy,e.vx)+Math.PI/2);
+    ctx.fillStyle="#ff6b6b";
+    ctx.beginPath();ctx.moveTo(0,12);ctx.lineTo(-10,-8);ctx.lineTo(10,-8);ctx.closePath();ctx.fill();
+    ctx.fillStyle="#ffd166";ctx.fillRect(-2,-2,4,4);
+    ctx.restore();
+  }
+  ctx.fillStyle="#74c0fc";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-2,bullets[i].y-2,4,4);
+  ctx.fillStyle="#ffd166";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4,0,6.283);ctx.fill();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"&&!(inv>0&&Math.floor(inv*12)%2===0)){
+    ctx.save();ctx.translate(ship.x,ship.y);ctx.rotate(ang+Math.PI/2);
+    if(thrusting&&Math.floor(t*20)%2===0){
+      ctx.fillStyle="#ffd166";
+      ctx.beginPath();ctx.moveTo(-5,14);ctx.lineTo(0,24+Math.random()*8);ctx.lineTo(5,14);ctx.closePath();ctx.fill();
+    }
+    ctx.fillStyle="#74c0fc";
+    ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(-13,14);ctx.lineTo(0,7);ctx.lineTo(13,14);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  if(state==="play"){
+    for(var k=0;k<stars.length;k++){
+      var st=stars[k];
+      st.x-=ship.vx*dt*st.s*0.25;
+      st.y-=ship.vy*dt*st.s*0.25;
+      if(st.x<0)st.x+=W;if(st.x>W)st.x-=W;
+      if(st.y<0)st.y+=H;if(st.y>H)st.y-=H;
+    }
+  }
+  if(state==="play")update(dt);
+  draw();
+  hK.textContent=kills+"/"+GOAL;hH.textContent=hp;hS.textContent=score;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

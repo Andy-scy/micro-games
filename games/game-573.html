@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰方阵</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:460px}
+h1{font-size:25px;text-align:center;color:#7bd88f;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:14px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:320px;margin:0 auto}
+.cell{aspect-ratio:1;border:0;border-radius:10px;background:#232a48;color:#e8eaf6;font-size:26px;font-weight:800;cursor:default;font-family:inherit}
+.cell.free{background:#1d2742}
+.cell.ok{background:#2f5d43;box-shadow:inset 0 0 0 2px #7bd88f;cursor:pointer}
+.die{position:relative;width:58px;height:58px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#7bd88f}
+.mut{color:#9aa3c0;font-size:13px}
+.stat{flex:1;text-align:center}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#7bd88f;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰方阵</h1>
+  <p class="tips">4×4 方阵,规则如数独:每行、每列的 1-4 都不能重复。每回合掷出一颗骰子,点亮绿色格放入;若这个点数无处可放,只能「弃置」并记一次失误,<b>3 次失误出局</b>。填满 16 格即胜利,失误越少评价越高!</p>
+  <div class="row">
+    <div class="card stat"><div class="mut">已填格</div><div class="big" id="pc">0/16</div></div>
+    <div class="card stat"><div class="mut">失误</div><div class="big" id="fl">0/3</div></div>
+  </div>
+  <div class="card" style="text-align:center"><div id="grid"></div></div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="die"></div><span class="mut" id="curtx">等待掷骰…</span></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn sec" id="drop" disabled>弃置(失误+1)</button>
+    </div>
+  </div>
+  <div class="card log" id="log">第一颗骰子即将掷出,想好布局!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var g=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+var cur=0,fails=0,placed=0,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*4)}
+function rowOf(i){return Math.floor(i/4)}
+function colOf(i){return i%4}
+function canPlace(i,v){
+  if(g[i]!==0)return false;
+  var r=rowOf(i),c=colOf(i),j;
+  for(j=0;j<4;j++){if(g[r*4+j]===v)return false;if(g[j*4+c]===v)return false}
+  return true;
+}
+function hasLegal(v){
+  for(var i=0;i<16;i++)if(canPlace(i,v))return true;
+  return false;
+}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function buildGrid(){
+  var G=$('grid');G.innerHTML='';
+  for(var i=0;i<16;i++){
+    var b=document.createElement('button');
+    var cls='cell';
+    if(g[i]!==0)cls+=' fill';
+    else if(cur>0&&canPlace(i,cur))cls+=' ok';
+    else cls+=' free';
+    b.className=cls;
+    b.textContent=g[i]===0?'':g[i];
+    b.onclick=(function(k){return function(){
+      if(over||cur===0||!canPlace(k,cur))return;
+      g[k]=cur;
+      var v=cur;cur=0;placed++;
+      draw();
+      if(placed>=16){finish(true);return}
+      setTimeout(nextRoll,450);
+      $('log').textContent=v+' 号落位!下一颗骰子即将掷出…';
+    }})(i);
+    G.appendChild(b);
+  }
+}
+function draw(){
+  buildGrid();
+  $('pc').textContent=placed+'/16';
+  $('fl').textContent=fails+'/3';
+  if(cur>0){setDie($('die'),cur);$('curtx').textContent='当前骰面:'+cur+' 点'}
+  else{setDie($('die'),0);$('curtx').textContent='等待掷骰…'}
+  $('drop').disabled=over||cur===0;
+}
+function say(m){$('log').textContent=m}
+function nextRoll(){
+  if(over)return;
+  cur=rnd();
+  draw();
+  if(hasLegal(cur)){
+    say('掷出 '+cur+' 点!亮起的格子都可以放。');
+  }else{
+    say('掷出 '+cur+' 点,但方阵里无处可放,只能弃置了!');
+  }
+}
+$('drop').onclick=function(){
+  if(over||cur===0)return;
+  cur=0;fails++;
+  draw();
+  if(fails>=3){finish(false);return}
+  setTimeout(nextRoll,450);
+  say('弃置一次,失误 '+fails+'/3。振作,下一颗!');
+};
+function finish(good){
+  over=true;cur=0;draw();
+  if(good){
+    var t=fails===0?'无瑕方阵!':fails===1?'漂亮完成!':'有惊无险!';
+    $('ovt').textContent=t;
+    $('ovp').innerHTML='16 格全部填满,失误 <b>'+fails+'</b> 次<br>'+(fails===0?'零失误封神,你就是骰方阵大师!':'再挑战一次零失误吧!');
+  }else{
+    $('ovt').textContent='三次失误';
+    $('ovp').innerHTML='已填 <b>'+placed+'</b>/16 格。放置前多看看行列分布,别把自己堵死!';
+  }
+  $('overlay').classList.add('show');
+}
+$('again').onclick=function(){
+  g=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  cur=0;fails=0;placed=0;over=false;
+  $('overlay').classList.remove('show');
+  draw();say('新方阵开张,第一颗骰子马上掷出!');
+  setTimeout(nextRoll,400);
+};
+draw();
+setTimeout(nextRoll,400);
+</script>
+</body>
+</html>

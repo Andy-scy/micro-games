@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>谚语配对</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:640px}
+h1{font-size:24px;text-align:center;color:#90e0ef;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#90e0ef}
+#board{display:flex;gap:10px;justify-content:center;align-items:stretch}
+.col{flex:1;display:flex;flex-direction:column;gap:8px}
+.mid{width:26px;display:flex;align-items:center;justify-content:center;color:#3a4368;font-size:16px}
+.pk{border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 8px;font-size:13px;cursor:pointer;font-family:inherit;line-height:1.5;min-height:58px}
+.pk:hover{border-color:#90e0ef}
+.pk.sel{border-color:#ffd166;background:#2a2410;color:#ffd166}
+.pk.ok{border-color:#51d88a;background:#173327;cursor:default;opacity:.75}
+.pk.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:10px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#90e0ef;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#90e0ef;color:#062630;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>谚语配对</h1>
+  <p class="tips">左栏谚语,右栏释义,先把谚语点一下,再点它对应的释义完成配对(顺序不限)。共 6 轮,每轮 4 组;累计配错 8 次即失败,配对越准分越高!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">轮次</div><div class="big" id="pg">1/6</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">错配</div><div class="big" id="er">0/8</div></div>
+  </div></div>
+  <div class="card">
+    <div id="board">
+      <div class="col" id="left"></div>
+      <div class="mid">↔</div>
+      <div class="col" id="right"></div>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">谚语配对</h2><p id="ovp">· 每轮左栏 4 条谚语、右栏 4 条释义<br>· 先点一条谚语(或释义),再点它的<br>　另一半即可完成配对<br>· 配对成功 +100;配错 -30 并计 1 次错配<br>· 累计错配 8 次挑战失败<br>· 打通 6 轮即通关</p><button class="btn" id="obtn">开始配对</button></div></div>
+<script>
+'use strict';
+var PAIRS=[
+{a:'熟能生巧',b:'练习多了,技艺自然纯熟'},
+{a:'三个臭皮匠,顶个诸葛亮',b:'集众人的智慧,力量就大了'},
+{a:'磨刀不误砍柴工',b:'花时间做准备反而更有效率'},
+{a:'冰冻三尺,非一日之寒',b:'事情的形成是长期积累的结果'},
+{a:'瑞雪兆丰年',b:'好的兆头预示着好收成'},
+{a:'良药苦口利于病',b:'真诚的劝告虽刺耳却有益处'},
+{a:'千里之行,始于足下',b:'再大的事也要从小事做起'},
+{a:'众人拾柴火焰高',b:'大家齐心协力,力量就大'},
+{a:'亡羊补牢,为时未晚',b:'出错后及时补救还不算迟'},
+{a:'授人以鱼不如授人以渔',b:'教方法比直接给东西更有用'},
+{a:'玉不琢,不成器',b:'人需要学习和磨炼才能成才'},
+{a:'一分耕耘,一分收获',b:'有付出才会有回报'},
+{a:'近水楼台先得月',b:'位置近的人先得到好处'},
+{a:'树欲静而风不止',b:'事情往往不随人的意愿发展'},
+{a:'纸包不住火',b:'真相终究会暴露出来'},
+{a:'尺有所短,寸有所长',b:'人和事物各有长短与优势'},
+{a:'只要功夫深,铁杵磨成针',b:'坚持不懈终能成功'},
+{a:'当局者迷,旁观者清',b:'身在其中的人反而看不清楚'},
+{a:'兵来将挡,水来土掩',b:'根据不同情况灵活应对'},
+{a:'百闻不如一见',b:'亲眼所见胜过听别人说一百遍'},
+{a:'工欲善其事,必先利其器',b:'做事前先要把工具准备好'},
+{a:'人无远虑,必有近忧',b:'不做长远打算就会有眼前的麻烦'},
+{a:'满招损,谦受益',b:'自满带来损失,谦虚让人受益'},
+{a:'一寸光阴一寸金',b:'时间非常宝贵,要好好珍惜'}
+];
+var ROUNDS=6;
+var deck=[],round=0,score=0,errors=0,matched=0,playing=false,over=false,S=0;
+var sel={side:'',idx:-1};
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;round=0;score=0;errors=0;matched=0;over=false;playing=true;
+  deck=shuffle(PAIRS.slice());
+  $('sc').textContent='0';$('er').textContent='0/8';
+  $('overlay').classList.add('hide');
+  buildRound();
+}
+function buildRound(){
+  if(round>=ROUNDS){finish(true);return;}
+  sel.side='';sel.idx=-1;
+  $('pg').textContent=(round+1)+'/6';
+  var L=$('left'),R=$('right');
+  L.innerHTML='';R.innerHTML='';
+  var meanings=[],i;
+  for(i=0;i<4;i++){
+    meanings.push({pid:round*4+i,txt:deck[round*4+i].b});
+  }
+  shuffle(meanings);
+  for(i=0;i<4;i++){
+    var lb=mkBtn(deck[round*4+i].a,'L',round*4+i);
+    L.appendChild(lb);
+    var rb=mkBtn(meanings[i].txt,'R',meanings[i].pid);
+    rb.dataset.pid=meanings[i].pid;
+    R.appendChild(rb);
+  }
+  $('msg').textContent='';
+}
+function mkBtn(txt,side,pid){
+  var b=document.createElement('button');
+  b.className='pk';
+  b.textContent=txt;
+  b.dataset.side=side;
+  b.dataset.pid=pid;
+  b.dataset.done='0';
+  (function(btn){btn.addEventListener('click',function(){tap(btn)});})(b);
+  return b;
+}
+function tap(btn){
+  if(!playing||over)return;
+  if(btn.dataset.done==='1')return;
+  if(sel.side===''){
+    select(btn);
+    return;
+  }
+  if(sel.side===btn.dataset.side){
+    clearSel();
+    select(btn);
+    return;
+  }
+  var other=btnOf(sel.side,sel.idx);
+  if(other.dataset.pid===btn.dataset.pid){
+    other.classList.remove('sel');
+    other.classList.add('ok');other.dataset.done='1';
+    btn.classList.add('ok');btn.dataset.done='1';
+    score+=100;$('sc').textContent=score;
+    matched++;
+    clearSel();
+    $('msg').textContent='配对成功!+100';
+    if(matched>=4){
+      matched=0;round++;
+      schedule(buildRound,900);
+    }
+  }else{
+    errors++;
+    score=Math.max(0,score-30);
+    $('sc').textContent=score;
+    $('er').textContent=errors+'/8';
+    other.classList.remove('sel');
+    other.classList.add('bad');btn.classList.add('bad');
+    $('msg').textContent='配错了!再想想它们的联系';
+    clearSel();
+    schedule(function(){
+      other.classList.remove('bad');btn.classList.remove('bad');
+      if(errors>=8&&playing&&!over)finish(false);
+    },480);
+  }
+}
+function btnOf(side,idx){
+  var col=side==='L'?$('left'):$('right');
+  return col.children[idx];
+}
+function select(btn){
+  sel.side=btn.dataset.side;
+  sel.idx=Array.prototype.indexOf.call(btn.parentNode.children,btn);
+  btn.classList.add('sel');
+}
+function clearSel(){
+  var i;
+  var all=document.querySelectorAll('.pk.sel');
+  for(i=0;i<all.length;i++)all[i].classList.remove('sel');
+  sel.side='';sel.idx=-1;
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'配对完成 · 民间智慧通':'错配次数太多…';
+  $('ovp').innerHTML='完成 '+Math.min(round+1,6)+'/6 轮,错配 '+errors+' 次<br>最终得分 <b>'+score+'</b> 分<br>'+(win?'谚语张口就来,服!':'先懂意思再配对,再来一局!');
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+</script>
+</body>
+</html>

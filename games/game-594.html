@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词梯变换</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+.card{background:#151a30;border-radius:14px;padding:16px;text-align:center;margin-bottom:10px}
+#lvl{font-size:14px;color:#9aa3c7;margin-bottom:6px}
+#goal{font-size:16px;color:#8ecae6;margin-bottom:12px}
+#goal b{color:#ffd166;font-size:20px;letter-spacing:3px}
+#ladder{font-size:14px;color:#7ee2a8;font-family:Consolas,monospace;min-height:22px;margin-bottom:12px;word-break:break-all}
+#cur{display:flex;justify-content:center;gap:8px;margin-bottom:14px}
+#cur button{width:52px;height:58px;border:none;border-radius:10px;background:#232a4d;color:#fff;font-size:30px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+#cur button.active{background:#4cc9f0;color:#08131c}
+#cands{min-height:56px;display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+#cands button{width:44px;height:52px;border:none;border-radius:8px;background:#2a3160;color:#ffd166;font-size:24px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+#cands .hint{width:auto;height:auto;color:#9aa3c7;font-size:13px;font-family:system-ui;align-self:center}
+#act{display:flex;gap:10px;justify-content:center}
+#act button{padding:9px 24px;font-size:14px;border:none;border-radius:999px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px;margin-top:8px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>词梯变换</h1>
+<p id="tip">每次只能改变一个字母 且新词必须是词库中的单词 · 把 START 一路变到 GOAL · 点词中的字母会提示所有可行的替换</p>
+<div id="wrap">
+<div class="card">
+<div id="lvl"></div>
+<div id="goal"></div>
+<div id="ladder"></div>
+<div id="cur"></div>
+<div id="cands"></div>
+<div id="act"><button id="undoB">悔棋一步</button><button id="resetB">重开本关</button></div>
+<div id="msg"></div>
+</div>
+<div id="ov"><h2 id="ovT">词梯变换</h2><p id="ovP">单词阶梯:每步换一个字母
+把 CAT 变成 DOG 这样的变形
+在步数限制内走到目标词</p><button id="ovB">开始攀登</button></div>
+</div>
+<script>
+"use strict";
+var D3 = ["cat","cot","dot","dog","got","hot","lot","jog","fog","fig","fit","fat","hat","hog","log","not","nut","net","tan","ton","tin","ten","hen","bid","bud","bad","bed","bug","big","bit","bag","bat","can","car","cap","cut","cup","map","man","pan","pin","pig","rat","rug","rag","run","fun","fan","sat","set","sit","sun","son","won","win","let","leg","lag","pet","dig","dip","tip","tap","nap","nip","rap","rip","sap","sip","top","pop","pup","cab","cub","cob","tub","tab","rub","rib","rob","rot","rod","red","rag","pet","pen","pie","tie","tie","hie","die","due","dye","eye","gee","get","gut","gum","hum","ham","him","hip","hop","kit","kid","kin","lip","lit","lid","mad","mat","mop","mud","nab","nod","nor","oar","oak","oat","odd","off","our","out","owl","own","pad","par","pat","paw","pay","pea","peg","pit","ply","pod","pot","pro","pub","pun","pup","put","ram","ran","raw","ray","rid","rim","row","rub","rug","rum","sad","sag","sap","saw","say","sea","see","sew","she","shy","sin","sir","ski","sky","sly","sob","sod","son","sow","soy","spa","spy","sty","sub","sum","tab","tag","tar","tax","tea","the","thy","tic","till","toe","tog","tom","ton","too","tot","tow","toy","try","tug","two","van","vat","vet","via","vie","wag","war","was","wax","way","web","wed","wee","wet","who","why","wig","wit","woe","wok","won","wow","yak","yam","yaw","yes","yet","yew","yin","yip","you","zag","zen","zip"];
+var D4 = ["cold","cord","word","ward","warm","cost","coat","coal","coil","coin","hand","band","bond","bend","bent","beat","bear","dear","door","moon","soon","tool","cool","pool","fool","foot","food","good","wood","wake","lake","like","line","vine","wine","wind","sand","send","mend","mind","mine","fond","find","kind","king","sing","ring","rang","rank","raid","rail","mail","main","rain","gain","goat","goad","gold","golf","cart","care","core","cure","curd","curt","dart","dark","darn","date","dawn","dune","dunk","dusk","dust","fast","fate","fear","feat","fend","fern","fled","flew","flex","flip","flit","flog","flop","flow","fond","fork","form","fort","foul","four","frown","gale","gall","game","gape","gash","gasp","gate","gave","gaze","gear","gene","gent","germ","gift","gild","gill","girl","give","glad","glen","glow","glue","goal","gone","gore","gown","grab","gram","gray","grew","grey","grid","grim","grin","grip","gulf","gull","gust","hail","hair","hale","hall","halt","hang","hard","hare","hark","harm","hart","hash","hast","hate","haul","have","hawk","haze","hazy","heal","heap","hear","heat","heel","heir","held","hell","helm","help","herb","herd","here","hero","hers","hide","high","hike","hill","hilt","hint","hire","hive","hold","hole","holy","home","hone","hood","hoof","hook","hoop","hoot","hope","horn","hose","host","hour","huge","hulk","hull","hump","hung","hunt","hurl","hurt","hush","husk","icon","idea","idle","idol","inch","into","iron","item","jade","jail","jazz","jeep","jell","jest","jet? no","jibe","jilt","jinx","jolt","jump","junk","jury","just","jute","kale","keel","keen","keep","kelp","kern","kick","kill","kiln","kilo","kilt","kind","kine","kiss","kite","kiwi","knee","knew","knit","knob","knot","know","lace","lack","lacy","lade","laid","lain","lair","lame","lamp","land","lane","lard","lash","lass","last","late","lava","lawn","laws","lazy","lead","leaf","leak","lean","leap","left","lend","lens","lend","less","lest","lick","lien","lieu","life","lift","lilt","limb","lime","limp","link","lint","lion","lisp","list","live","load","loaf","loan","lobe","lock","loco","loft","logo","loll","lone","long","look","loom","loon","loop","loot","lope","lord","lore","lose","loss","lost","loud","lout","love","luck","lull","lump","lung","lure","lush","lust","lute","made","maid","mail","maim","main","make","male","mall","malt","mane","many","mare","mark","mash","mask","mass","mast","mate","math","mawk? no","maze","mead","meal","mean","meat","meek","meet","melt","memo","mend","menu","mere","mesh","mess","mice","mild","mile","milk","mill","mime","mind","mine","mint","miss","mist","mite","mitt","moan","moat","mock","mode","mold","mole","molt","monk","mood","moon","moor","moot","mope","more","morn","moss","most","moth","move","much","muck","muff","mule","mull","muse","mush","must","mute","nail","name","nao? no","nape","navy","near","neat","neck","need","nest","news","newt","next","nice","nick","nine","node","none","noon","nope","norm","nose","note","noun","obey","ogre","oily","okay","omen","omit","once","only","onto","onus","onze? no","ooze","open","oral","oven","over","pace","pack","pact","page","paid","pail","pain","pair","pale","pall","palm","pane","pant","park","part","pass","past","pate","path","pave","pawn","peak","peal","pear","peat","peat","peck","peek","peel","peer","pell? no","pent","peony? no","perk","pest","pick","pier","pike","pile","pill","pine","ping","pink","pint","pipe","pith","pity","plan","play","pled","plod","plot","plow","ploy","plug","plum","plus","poem","poet","poke","pole","poll","polo","pond","pony","pool","poor","pope","pore","pork","port","pose","posh","post","pout","pray","prep","prey","prim","prod","prop","pull","pulp","pump","punk","punt","puny","pupa","pure","purge? no","push","quit","quiz","race","rack","raff","raft","rage","raid","rail","rake","ramp","rang","rank","rant","rare","rash","rate","rave","read","real","ream","rear","reed","reef","reek","reel","rein","rend","rent","rest","rice","rich","ride","rift","rind","ring","rink","rise","risk","rite","road","roam","roar","robe","rock","rode","roll","roof","rook","room","root","rope","rosy","rout","rove","ruby","ruin","rule","rung","ruse","rush","rust","sack","safe","saga","sage","said","sail","sake","sale","salt","same","sand","sane","sang","sank","save","scab","scad","scam","scan","scar","seal","seam","sear","seat","sect","seed","seek","seem","seen","seep","self","sell","semi","send","sent","shed","shim","shin","ship","shod","shoe","shoo","shop","shot","show","shun","shut","sick","side","sift","sigh","sign","silk","sing","sink","sire","site","size","skid","skim","skin","skip","slab","slam","slap","slat","sled","slew","slide? no","slid","slim","slip","slit","slob","slog","slop","slot","slow","slug","slum","smog","smug","snag","snap","snip","snob","snot","snow","snub","snug","soak","soap","soar","soda","sofa","soft","soil","sold","sole","solo","some","song","soon","soot","sore","sort","soul","soup","spad? no","span","spar","spat","spay","sped","spin","spit","spot","spry","spud","spun","spur","stab","stag","star","stay","stem","step","stew","stir","stop","stow","stub","stud","stun","such","suck","sued","suet","suit","sulk","sung","sunk","sure","surf","swab","swam","swan","swap","swat","sway","swig","swim","tail","tale","talk","tall","tame","tamp","tang","tank","tape","taps","taro","tart","task","taut","teak","teal","team","tear","teem","tell","tend","tent","term","tern","test","text","than","that","thaw","thee","them","then","they","thin","this","thud","thug","thus","tick","tide","tidy","tied","tier","tile","till","tilt","time","tine","tint","tiny","tire","toad","tofu","toga","toil","told","toll","tomb","tome","tone","took","tool","toot","tore","torn","toss","tote","tour","tout","town","tram","trap","tray","tree","trek","trim","trio","trip","trod","trot","true","tub? no","tube","tuck","tuft","tugs","tuna","tune","turf","turn","tusk","twig","twin","twit","tyke","ugly","undo","unit","upon","urge","used","user","vail? no","vain","vale","vane","vans","vary","vase","vast","veal","veer","veil","vein","vend","vent","verb","very","vest","veto","vibe","vice","view","vile","vine","visa","void","volt","vote","wade","wage","wail","wait","wake","walk","wall","wane","want","ward","ware","warm","warn","warp","wart","wary","wash","wasp","wave","wavy","waxy","weak","wean","wear","weed","week","weep","weft","well","welt","went","wept","were","west","what","when","whet","whey","whim","whip","whir","whit","whiz","whom","wick","wide","wife","wiki","wild","wile","will","wilt","wily","wimp","wind","wine","wing","wink","wipe","wire","wiry","wise","wish","wisp","with","wit? no","woes","woke","wolf","womb","wont","wood","wool","word","wore","work","worm","worn","wrap","wren","yard","yarn","yawn","yeah","year","yell","yelp","yoga","yoke","yolk","yore","your","yowl","yuck","yule","zany","zeal","zero","zest","zinc","zone","zoom"];
+var LAD3 = [];
+for (var i = 0; i < D3.length; i++) if (D3[i].length === 3 && LAD3.indexOf(D3[i]) < 0) LAD3.push(D3[i]);
+var LAD4 = [];
+for (var j = 0; j < D4.length; j++) if (D4[j].length === 4 && D4[j].indexOf("?") < 0 && LAD4.indexOf(D4[j]) < 0) LAD4.push(D4[j]);
+var LEVELS = [
+  { s: "cat", t: "dog", budget: 4, dict: LAD3 },
+  { s: "cold", t: "warm", budget: 5, dict: LAD4 },
+  { s: "cost", t: "coin", budget: 5, dict: LAD4 }
+];
+var lvlEl = document.getElementById("lvl");
+var goalEl = document.getElementById("goal");
+var ladderEl = document.getElementById("ladder");
+var curEl = document.getElementById("cur");
+var candsEl = document.getElementById("cands");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var lv = 0, cur = "", visited = [], budget = 0, selPos = -1;
+var playing = false;
+
+function dict() { return LEVELS[lv].dict; }
+
+function loadLevel() {
+  var L = LEVELS[lv];
+  cur = L.s;
+  visited = [L.s];
+  budget = L.budget;
+  selPos = -1;
+  playing = true;
+  render();
+}
+
+function render() {
+  var L = LEVELS[lv];
+  lvlEl.textContent = "第 " + (lv + 1) + "/3 关 · 剩余步数 " + budget;
+  goalEl.innerHTML = "把 <b>" + L.s.toUpperCase() + "</b> 变成 <b>" + L.t.toUpperCase() + "</b>";
+  var lad = "";
+  for (var i = 0; i < visited.length; i++) {
+    lad += visited[i].toUpperCase() + (i < visited.length - 1 ? " → " : "");
+  }
+  ladderEl.textContent = lad;
+  curEl.innerHTML = "";
+  for (var p = 0; p < cur.length; p++) {
+    (function (pos) {
+      var b = document.createElement("button");
+      b.textContent = cur[pos].toUpperCase();
+      if (pos === selPos) b.className = "active";
+      b.onclick = function () { pickPos(pos); };
+      curEl.appendChild(b);
+    })(p);
+  }
+  candsEl.innerHTML = "";
+  if (selPos >= 0) {
+    var list = candsFor(selPos);
+    var lab = document.createElement("div");
+    lab.className = "hint";
+    lab.textContent = "替换第 " + (selPos + 1) + " 个字母:";
+    candsEl.appendChild(lab);
+    for (var k = 0; k < list.length; k++) {
+      (function (ch) {
+        var b = document.createElement("button");
+        b.textContent = ch.toUpperCase();
+        b.onclick = function () { applyCh(ch); };
+        candsEl.appendChild(b);
+      })(list[k]);
+    }
+  }
+}
+
+function candsFor(pos) {
+  var out = [];
+  for (var a = 0; a < 26; a++) {
+    var ch = String.fromCharCode(97 + a);
+    if (ch === cur[pos]) continue;
+    var w2 = cur.slice(0, pos) + ch + cur.slice(pos + 1);
+    if (dict().indexOf(w2) >= 0 && visited.indexOf(w2) < 0) out.push(ch);
+  }
+  return out;
+}
+
+function pickPos(pos) {
+  if (!playing) return;
+  selPos = (selPos === pos ? -1 : pos);
+  render();
+}
+
+function applyCh(ch) {
+  if (!playing || selPos < 0) return;
+  var w2 = cur.slice(0, selPos) + ch + cur.slice(selPos + 1);
+  if (dict().indexOf(w2) < 0 || visited.indexOf(w2) >= 0) {
+    msgEl.textContent = "这个词不可用";
+    setTimeout(function () { msgEl.textContent = ""; }, 1000);
+    return;
+  }
+  cur = w2;
+  visited.push(w2);
+  budget--;
+  selPos = -1;
+  if (cur === LEVELS[lv].t) {
+    playing = false;
+    render();
+    if (lv >= LEVELS.length - 1) {
+      ovT.textContent = "登顶成功!";
+      ovP.textContent = "3 道词梯全部走通\n你就是字母阶梯大师";
+      ovB.textContent = "再来一局";
+      ovB.onclick = restartAll;
+      ov.classList.remove("hide");
+    } else {
+      ovT.textContent = "第 " + (lv + 1) + " 关通过!";
+      ovP.textContent = visited.join(" → ").toUpperCase();
+      ovB.textContent = "下一关";
+      ovB.onclick = function () { ov.classList.add("hide"); loadLevel(); };
+      ov.classList.remove("hide");
+      lv++;
+    }
+    return;
+  }
+  if (budget <= 0) {
+    playing = false;
+    ovT.textContent = "步数用完";
+    ovP.textContent = "目标是 " + LEVELS[lv].t.toUpperCase() + "\n走到 " + cur.toUpperCase() + " 就停下了";
+    ovB.textContent = "重试本关";
+    ovB.onclick = function () { ov.classList.add("hide"); loadLevel(); };
+    ov.classList.remove("hide");
+    return;
+  }
+  render();
+}
+
+function restartAll() {
+  lv = 0;
+  ov.classList.add("hide");
+  loadLevel();
+}
+
+document.getElementById("undoB").onclick = function () {
+  if (!playing || visited.length <= 1) return;
+  visited.pop();
+  cur = visited[visited.length - 1];
+  budget++;
+  selPos = -1;
+  render();
+};
+document.getElementById("resetB").onclick = function () {
+  if (!playing) return;
+  loadLevel();
+};
+ovB.onclick = function () {
+  ov.classList.add("hide");
+  loadLevel();
+};
+</script>
+</body>
+</html>

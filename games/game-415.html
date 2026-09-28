@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>随波叠塔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:21px;margin:4px 0 2px;color:#3bc9db}
+.hint{font-size:13px;color:#9aa3c0;margin-bottom:6px;text-align:center;line-height:1.5}
+#cv{background:#141933;border-radius:14px;max-width:100%;touch-action:none}
+.ov{position:fixed;inset:0;background:rgba(8,10,22,.82);display:flex;align-items:center;justify-content:center;z-index:9}
+.card{background:#1b2040;border:1px solid #2e3660;border-radius:16px;padding:24px 28px;text-align:center;max-width:86%}
+.card h2{color:#3bc9db;margin-bottom:10px;font-size:22px}
+.card p{font-size:14px;color:#c3cae6;margin-bottom:8px;line-height:1.7}
+.card .sc{font-size:17px;color:#7ee0a3}
+button{margin-top:8px;background:#3bc9db;color:#141933;border:none;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>随波叠塔</h1>
+<p class="hint">整座塔随货轮随波漂移 · 方块从固定的卸货口垂直落下,点击或空格投放</p>
+<canvas id="cv" width="420" height="640"></canvas>
+<div class="ov" id="ov"><div class="card"><h2 id="ovT">随波叠塔</h2><p id="ovM">塔建在一艘随浪漂移的货轮上,而卸货口固定不动。<br>预测货轮的漂移节奏,让方块落在塔顶上;重心出界整块落海,直接结束!</p><p class="sc" id="ovS"></p><button id="ovB">开始游戏</button></div></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('ov'),ovT=document.getElementById('ovT'),ovM=document.getElementById('ovM'),ovS=document.getElementById('ovS'),ovB=document.getElementById('ovB');
+var W=cv.width,H=cv.height,GROUND=560,BH=22,WATER=470;
+var tower,drop,fx,pops,splash,score,state='ready',cam=0,t;
+
+function off(){return Math.sin(t*0.75)*Math.min(118,82+tower.length*1.4)+Math.sin(t*0.27+1.3)*34;}
+function layerC(i){return 'hsl('+((i*13+190)%360)+',52%,58%)';}
+function topB(){return tower[tower.length-1];}
+function reset(){tower=[{x:210,w:150}];score=0;fx=[];pops=[];splash=[];cam=0;t=0;drop=null;}
+function pop(txt,x,y,c){pops.push({t:txt,x:x,y:y,c:c||'#3bc9db',life:1});}
+function tap(){
+  if(state!=='play')return;
+  if(!drop){
+    var topY=GROUND-tower.length*BH;
+    drop={x:210,y:topY-170,vy:0,w:topB().w};
+  }
+}
+function finish(){
+  state='over';
+  var h=tower.length-1;
+  window.setTimeout(function(){
+    ovT.textContent='货落大海!';
+    ovS.textContent='最终高度 '+h+' 层 · 得分 '+score;
+    ovM.textContent='货轮的漂移是有节奏的,数拍子试试';
+    ovB.textContent='再来一局';
+    ov.style.display='flex';
+  },750);
+}
+function start(){reset();state='play';ov.style.display='none';}
+function step(dt){
+  t+=dt;
+  var i;
+  if(state==='play'&&drop){
+    drop.vy+=2000*dt;
+    drop.y+=drop.vy*dt;
+    var n=tower.length,topY=GROUND-n*BH;
+    if(drop.y+11>=topY){
+      var o=off();
+      var relX=210-o;
+      var tp=topB();
+      var err=Math.abs(relX-tp.x);
+      if(err<(tp.w+drop.w)/2){
+        var pts=err<9?25:10;
+        score+=pts;
+        if(err<9)pop('完美卸货 +25',tp.x,topY-16,'#7ee0a3');
+        tower.push({x:relX,w:drop.w});
+        drop=null;
+      }else{
+        splashDrop(drop.x);
+        drop=null;finish();
+      }
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];f.vy+=900*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;if(f.life<=0)fx.splice(i,1);}
+  for(i=splash.length-1;i>=0;i--){var s=splash[i];s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=700*dt;s.life-=dt;if(s.life<=0)splash.splice(i,1);}
+  for(i=pops.length-1;i>=0;i--){var p=pops[i];p.life-=dt;p.y-=34*dt;if(p.life<=0)pops.splice(i,1);}
+  cam=Math.max(0,300-(GROUND-tower.length*BH));
+}
+function splashDrop(x){
+  var i;
+  for(i=0;i<10;i++)splash.push({x:x+(Math.random()*30-15),y:WATER,vx:Math.random()*160-80,vy:-120-Math.random()*180,life:0.9});
+  fx.push({x:x,y:WATER-6,w:drop?drop.w:80,vx:0,vy:40,rot:0.4,vr:1.5,life:1,c:layerC(tower.length)});
+}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0e2333');g.addColorStop(1,'#0f1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var o=off(),gy=GROUND-cam;
+  var i,k,b,y;
+  ctx.fillStyle='#123a52';
+  ctx.beginPath();ctx.moveTo(0,WATER-cam);
+  for(k=0;k<=W;k+=20)ctx.lineTo(k,WATER-cam+Math.sin(k*0.05+t*2)*4);
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(120,220,255,.4)';ctx.lineWidth=2;
+  ctx.beginPath();
+  for(k=0;k<=W;k+=20){var wy=WATER-cam+Math.sin(k*0.05+t*2)*4;if(k===0)ctx.moveTo(k,wy);else ctx.lineTo(k,wy);}
+  ctx.stroke();
+  ctx.fillStyle='#37415f';
+  ctx.fillRect(210-95+o,gy+2,190,16);
+  ctx.fillStyle='#5b679e';
+  ctx.fillRect(210-80+o,gy+18,16,10);ctx.fillRect(210+64+o,gy+18,16,10);
+  for(i=0;i<tower.length;i++){
+    b=tower[i];y=GROUND-(tower.length-i)*BH-cam;
+    if(y<-BH||y>H)continue;
+    ctx.fillStyle=layerC(i);rr(b.x+o-b.w/2,y+2,b.w,BH-4,5);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(b.x+o-b.w/2+4,y+5,Math.max(0,b.w-8),4);
+  }
+  var dy=GROUND-tower.length*BH-170-cam;
+  if(dy>-40){
+    ctx.fillStyle='rgba(59,201,219,.5)';ctx.fillRect(206,dy,8,26);
+    ctx.beginPath();ctx.moveTo(202,dy);ctx.lineTo(218,dy);ctx.lineTo(210,dy-10);ctx.closePath();ctx.fill();
+  }
+  if(drop){ctx.fillStyle=layerC(tower.length);rr(drop.x-drop.w/2,drop.y-11-cam,drop.w,BH-4,5);ctx.fill();}
+  for(i=0;i<splash.length;i++){
+    var s=splash[i];ctx.globalAlpha=Math.max(0,s.life);ctx.fillStyle='#7fd8ff';ctx.fillRect(s.x,s.y-cam,3,3);
+  }
+  for(i=0;i<fx.length;i++){
+    var f=fx[i];ctx.save();ctx.translate(f.x,f.y-cam);ctx.rotate(f.rot);ctx.globalAlpha=Math.max(0,Math.min(1,f.life));ctx.fillStyle=f.c;ctx.fillRect(-f.w/2,-(BH-4)/2,f.w,BH-4);ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('得分 '+score,14,32);
+  ctx.textAlign='right';ctx.fillText('高度 '+(tower.length-1)+' 层',W-14,32);
+  for(i=0;i<pops.length;i++){var p=pops[i];ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.c;ctx.font='bold 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(p.t,p.x,p.y-cam);}
+  ctx.globalAlpha=1;ctx.textAlign='left';
+}
+if(window.PointerEvent){cv.addEventListener('pointerdown',function(e){e.preventDefault();tap();});}
+else{cv.addEventListener('mousedown',function(){tap();});cv.addEventListener('touchstart',function(e){e.preventDefault();tap();});}
+window.addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowDown'||e.key===' '){e.preventDefault();tap();}});
+ovB.addEventListener('click',start);
+reset();
+var last=0;
+function loop(ts){var dt=Math.min((ts-last)/1000,0.033);if(dt<0)dt=0;last=ts;step(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连锁爆发</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#ff5d5d;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#ff5d5d;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ff5d5d}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#ff5d5d;color:#3d0808;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>连锁爆发</h1>
+  <p class="hint">点击一枚元素,引爆同行同列的同色元素<br>被引爆的元素继续引爆,连锁波数越高分越高!</p>
+  <div class="hud">
+    <span>总分 <b id="score">0</b></span>
+    <span>本关 <b id="lvScore">0/600</b></span>
+    <span>步数 <b id="steps">6</b></span>
+    <span>第 <b id="level">1</b> 关</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="340" height="270"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">连锁爆发</h2>
+      <p id="ovP">一子落,全局燃。5 关之内引爆所有目标分数!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=9,ROWS=7,CELL=36,BX=8,BY=8;
+var CCOL=['#ff5d5d','#5aa9e6','#7ed957','#f9d71c'];
+var grid=[],burned=[],score=0,level=1,steps=6,goal=600,lvScore=0;
+var burst=null,flashes=[],state='ready';
+function addScore(n){
+  score+=n;lvScore+=n;
+  $('score').textContent=score;
+  $('lvScore').textContent=Math.min(lvScore,goal)+'/'+goal;
+}
+function newBoard(){
+  var r,c;
+  grid=[];burned=[];
+  for(r=0;r<ROWS;r++){
+    grid.push([]);burned.push([]);
+    for(c=0;c<COLS;c++){grid[r].push(1+Math.floor(Math.random()*4));burned[r].push(false);}
+  }
+}
+function compactRefill(){
+  var r,c,stack,i;
+  for(c=0;c<COLS;c++){
+    stack=[];
+    for(r=ROWS-1;r>=0;r--)if(grid[r][c]>0)stack.push(grid[r][c]);
+    for(r=ROWS-1,i=0;r>=0;r--,i++){
+      if(i<stack.length)grid[r][c]=stack[i];
+      else grid[r][c]=1+Math.floor(Math.random()*4);
+    }
+  }
+}
+function startBurst(r0,c0){
+  steps--;$('steps').textContent=steps;
+  burst={waves:[[{r:r0,c:c0}]],wi:0,t:0};
+  processWave();
+}
+function processWave(){
+  var cells=burst.waves[burst.wi],i,n=cells.length;
+  addScore(n*(burst.wi+1)*12);
+  for(i=0;i<n;i++){
+    var r=cells[i].r,c=cells[i].c;
+    cells[i].col=grid[r][c];
+    flashes.push({r:r,c:c,t:0});
+    grid[r][c]=0;burned[r][c]=true;
+  }
+  burst.wi++;burst.t=0;
+}
+function collectNext(){
+  var cells=burst.waves[burst.wi-1],next=[],i;
+  for(i=0;i<cells.length;i++){
+    var r=cells[i].r,c=cells[i].c,col0=cells[i].col;
+    var rr;
+    for(rr=0;rr<ROWS;rr++){
+      if(!burned[rr][c]&&grid[rr][c]===col0){
+        next.push({r:rr,c:c});burned[rr][c]=true;
+      }
+    }
+    var cc;
+    for(cc=0;cc<COLS;cc++){
+      if(!burned[r][cc]&&grid[r][cc]===col0){
+        next.push({r:r,c:cc});burned[r][cc]=true;
+      }
+    }
+  }
+  if(next.length>0)burst.waves.push(next);
+}
+function endBurst(){
+  burst=null;
+  compactRefill();
+  var r,c;
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++)burned[r][c]=false;
+  if(lvScore>=goal){levelClear();return;}
+  if(steps<=0){finish();return;}
+}
+function levelClear(){
+  state='between';
+  if(level>=5){
+    $('ovT').textContent='全部通关!';
+    $('ovP').textContent='五重爆发,全线点燃,你是连锁大师!';
+    $('btn').textContent='再来一局';
+  }else{
+    $('ovT').textContent='第 '+level+' 关达成';
+    $('ovP').textContent='下一关目标 '+(goal+400)+' 分,步数重置为 6';
+    $('btn').textContent='下一关';
+  }
+  $('ovS').textContent='总分 '+score;
+  $('ov').classList.remove('hide');
+}
+function finish(){
+  state='over';
+  $('ovT').textContent='游戏结束';
+  $('ovP').textContent='步数用完,第 '+level+' 关未达标';
+  $('ovS').textContent='总分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function startGame(){
+  score=0;level=1;steps=6;goal=600;lvScore=0;flashes=[];burst=null;
+  newBoard();
+  $('score').textContent='0';$('lvScore').textContent='0/600';
+  $('steps').textContent='6';$('level').textContent='1';
+  $('ov').classList.add('hide');state='play';
+}
+function nextLevel(){
+  level++;steps=6;goal+=400;lvScore=0;flashes=[];burst=null;
+  newBoard();
+  $('lvScore').textContent='0/'+goal;$('steps').textContent='6';$('level').textContent=String(level);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',function(){
+  if(state==='between')nextLevel();else startGame();
+});
+function clickAt(x,y){
+  if(state!=='play'||burst)return;
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=ROWS||c<0||c>=COLS)return;
+  if(grid[r][c]>0)startBurst(r,c);
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*340/rc.width,(e.clientY-rc.top)*270/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*340/rc.width,(t.clientY-rc.top)*270/rc.height);
+  e.preventDefault();
+},{passive:false});
+function update(dt){
+  var i;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  if(burst){
+    burst.t+=dt;
+    if(burst.t>=0.32){
+      collectNext();
+      if(burst.wi<burst.waves.length)processWave();
+      else endBurst();
+    }
+  }
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,340,270);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,340,270);
+  var r,c,i;
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(grid.length&&grid[r][c]>0){
+      ctx.fillStyle=CCOL[grid[r][c]-1];
+      roundRect(BX+c*CELL+2,BY+r*CELL+2,CELL-4,CELL-4,7);ctx.fill();
+    }
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.fillStyle='#fff';
+    roundRect(BX+f.c*CELL+2-pr*5,BY+f.r*CELL+2-pr*5,CELL-4+pr*10,CELL-4+pr*10,7);ctx.fill();
+    ctx.restore();
+  }
+  if(state==='play'&&burst){
+    var cells=burst.waves[burst.wi];
+    if(cells){
+      ctx.fillStyle='rgba(255,255,255,.75)';
+      ctx.font='700 13px system-ui';ctx.textAlign='center';
+      ctx.fillText('第 '+(burst.wi+1)+' 波 ×'+(burst.wi+1),170,BY+ROWS*CELL-6);
+    }
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

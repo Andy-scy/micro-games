@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六格烤箱</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffab4d;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#ffab4d;font-size:16px}
+.stage{position:relative;background:#1c1a14;border:2px solid #3a3424;border-radius:12px;padding:12px}
+.pantry{display:flex;gap:8px;justify-content:center;margin-bottom:10px;flex-wrap:wrap}
+.pfood{background:#242018;border:2px solid #3a3424;border-radius:10px;padding:6px 12px;cursor:pointer;text-align:center;user-select:none}
+.pfood .ic{font-size:22px}
+.pfood .nm{font-size:11px;color:#8b90b0}
+.pfood .tm{font-size:11px;color:#ffab4d}
+.pfood.cur{border-color:#ffab4d;box-shadow:0 0 10px rgba(255,171,77,.5)}
+.handline{text-align:center;font-size:13px;color:#c7cbe8;margin-bottom:8px;min-height:20px}
+.oven{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.oslot{background:#26221a;border:2px solid #3a3424;border-radius:10px;padding:8px;text-align:center;cursor:pointer;min-height:96px}
+.oslot .oic{font-size:26px;min-height:32px}
+.oslot .obar{height:10px;border-radius:5px;background:#111527;overflow:hidden;margin:6px 4px}
+.oslot .obar i{display:block;height:100%;width:0;background:#7ad0ff}
+.oslot .otag{font-size:11px;color:#8b90b0}
+.oslot.gold{border-color:#ffd23f;box-shadow:0 0 14px rgba(255,210,63,.55)}
+.oslot.gold .obar i{background:#ffd23f}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ffab4d}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#ffab4d;color:#3a2408;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>六格烤箱</h1>
+  <p class="hint">点食材拿在手上 → 点空烤格放入 → <b style="color:#ffd23f">烤好变金光时点烤格取出</b><br>不同食材烘烤时间不同,六格一起烤全靠你盯表,烤焦扣命!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>出炉 <b id="served">0</b></span>
+    <span>时间 <b id="time">90</b>秒</span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="pantry" id="pantry"></div>
+    <div class="handline" id="handline">手上:空</div>
+    <div class="oven" id="oven"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">六格烤箱</h2>
+      <p id="ovDesc">鸡腿 6 秒、蛋挞 4 秒、披萨 9 秒。烤好后烤格会金光闪烁,那是 2.6 秒的黄金出炉窗,越早取出分越高;金窗一过直接烤焦扣命。单手一次只能拿一样,尽快多线开工!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var FOOD=[["🍗","鸡腿",6],["🥧","蛋挞",4],["🍕","披萨",9]];
+var elScore=$("score"),elServed=$("served"),elTime=$("time"),elLife=$("life"),elBest=$("best");
+var pantryEl=$("pantry"),handline=$("handline"),ovenEl=$("oven"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s809");
+var state="menu",slots,hand,score,served,lives,timeLeft,lastT,msgT;
+var slotEls=[],panEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  var i;
+  for(i=0;i<FOOD.length;i++){
+    var p=document.createElement("div");
+    p.className="pfood";
+    p.setAttribute("data-i",String(i));
+    p.innerHTML='<div class="ic">'+FOOD[i][0]+'</div><div class="nm">'+FOOD[i][1]+'</div><div class="tm">'+FOOD[i][2]+"秒</div>";
+    pantryEl.appendChild(p);
+    panEls.push(p);
+  }
+  for(i=0;i<6;i++){
+    var s=document.createElement("div");
+    s.className="oslot";
+    s.setAttribute("data-i",String(i));
+    s.innerHTML='<div class="oic">·</div><div class="obar"><i></i></div><div class="otag">空烤格</div>';
+    ovenEl.appendChild(s);
+    slotEls.push({box:s,ic:s.children[0],fill:s.children[1].children[0],tag:s.children[2]});
+  }
+}
+function reset(){
+  slots=[null,null,null,null,null,null];hand=null;
+  score=0;served=0;lives=3;timeLeft=90;
+  msg.textContent="";msgT=0;render();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elServed.textContent=served;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function render(){
+  var i;
+  for(i=0;i<FOOD.length;i++)panEls[i].className="pfood"+(hand===i?" cur":"");
+  for(i=0;i<6;i++){
+    var f=slots[i],e=slotEls[i];
+    if(!f){
+      e.box.className="oslot";e.ic.textContent="·";e.fill.style.width="0";e.tag.textContent="空烤格";
+    }else{
+      var bake=FOOD[f.f][2],pct=Math.min(100,f.t/bake*100);
+      var gold=f.t>=bake;
+      e.box.className="oslot"+(gold?" gold":"");
+      e.ic.textContent=FOOD[f.f][0];
+      e.fill.style.width=(gold?100:pct)+"%";
+      e.tag.textContent=gold?"金黄出炉!点我取出":"烘烤中 "+Math.max(0,bake-f.t).toFixed(1)+"秒";
+    }
+  }
+  handline.innerHTML="手上:"+(hand===null?"空":FOOD[hand][0]+" "+FOOD[hand][1]);
+}
+function clickPantry(i){
+  if(state!=="playing")return;
+  if(hand!==null){showMsg("一只手只能拿一样!","#e8b06a");return;}
+  hand=i;render();
+}
+function clickSlot(i){
+  if(state!=="playing")return;
+  var f=slots[i];
+  if(f){
+    if(hand!==null){showMsg("先把手上的放进去再取!","#e8b06a");return;}
+    var bake=FOOD[f.f][2];
+    if(f.t>=bake){
+      var win=f.t-bake;
+      var pts=win<=1.1?25:15;
+      score+=pts;served++;
+      showMsg("出炉 +"+pts+(win<=1.1?" 完美!":""),"#4ade80");
+      slots[i]=null;
+    }else{
+      score=Math.max(0,score-5);
+      showMsg("还没烤好就取,浪费了!","#f87171");
+      slots[i]=null;
+    }
+  }else if(hand!==null){
+    slots[i]={f:hand,t:0};hand=null;
+  }
+  render();updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s809",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="90 秒里你共烤出 "+served+" 份点心。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(msgT>0){msgT-=dt/1000;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;updateHud();gameOver();return;}
+  var i;
+  for(i=0;i<6;i++){
+    var f=slots[i];
+    if(f){
+      f.t+=dt/1000;
+      var bake=FOOD[f.f][2];
+      if(f.t>bake+2.6){
+        slots[i]=null;lives--;
+        showMsg(FOOD[f.f][1]+"烤焦了!","#f87171");
+        updateHud();
+        if(lives<=0){render();gameOver();return;}
+      }
+    }
+  }
+  render();
+}
+pantryEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==pantryEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==pantryEl)clickPantry(parseInt(n.getAttribute("data-i"),10));
+});
+ovenEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==ovenEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==ovenEl)clickSlot(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

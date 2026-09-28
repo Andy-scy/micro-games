@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>夺命追击</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>夺命追击</h1>
+  <p class="hint">方向键 / WASD 转向 · 触屏滑动 · 用身体诱杀猎手</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>猎手速度 <b id="hs">50%</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">夺命追击</h2>
+      <p id="ovDesc">红色猎手循着你的气味步步逼近,且会越追越快!吃果 +10 分求生;把猎手诱到你的蛇身上,它会被当场斩杀(+40 分)并暂时变慢。被它碰到即出局!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=20,ROWS=20,CELL=24,W=480,H=480;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elHs=$("hs"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s020");
+var state="menu";
+var snake,dir,queue,food,hunter,hp,score,stepMs,acc,lastT,pulse,fx;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function wdist(ax,ay,bx,by){
+  var dx=Math.abs(ax-bx);dx=Math.min(dx,COLS-dx);
+  var dy=Math.abs(ay-by);dy=Math.min(dy,ROWS-dy);
+  return dx+dy;
+}
+function inSnake(x,y){
+  var i;
+  for(i=0;i<snake.length;i++){if(snake[i].x===x&&snake[i].y===y)return true;}
+  return false;
+}
+function freeCell(){
+  var p;
+  while(true){
+    p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0};
+    if(!inSnake(p.x,p.y)&&!(food&&food.x===p.x&&food.y===p.y))return p;
+  }
+}
+function spawnFood(){food=freeCell();}
+function respawnHunter(){
+  var bp=null,bd=-1,i;
+  for(i=0;i<16;i++){
+    var c=freeCell();
+    if(c.x===hunter.x&&c.y===hunter.y)continue;
+    var d=wdist(c.x,c.y,snake[0].x,snake[0].y);
+    if(d>bd){bd=d;bp=c;}
+  }
+  if(bp)hunter=bp;
+}
+function reset(){
+  snake=[{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+  dir={x:1,y:0};queue=[];
+  hp=0.5;score=0;stepMs=105;acc=0;pulse=0;fx=[];
+  spawnFood();
+  hunter={x:2,y:2};
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elHs.textContent=Math.round(hp*100)+"%";
+  elBest.textContent=best;
+}
+function queueDir(d){
+  var last=queue.length?queue[queue.length-1]:dir;
+  if(d.x===-last.x&&d.y===-last.y)return;
+  if(d.x===last.x&&d.y===last.y)return;
+  if(queue.length<2)queue.push(d);
+}
+function addFx(text,x,y){
+  fx.push({text:text,x:x,y:y,t:1200});
+}
+function killHunter(){
+  score+=40;
+  hp=Math.max(0.35,hp-0.08);
+  addFx("诱杀猎手 +40",hunter.x*CELL+CELL/2,hunter.y*CELL);
+  respawnHunter();
+  updateHud();
+}
+function moveHunter(){
+  var h=snake[0];
+  var dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+  var opts=[],i;
+  for(i=0;i<4;i++){
+    var nx=(hunter.x+dirs[i].x+COLS)%COLS;
+    var ny=(hunter.y+dirs[i].y+ROWS)%ROWS;
+    if(inSnake(nx,ny)&&!(snake[0].x===nx&&snake[0].y===ny))continue;
+    opts.push({x:nx,y:ny,d:wdist(nx,ny,h.x,h.y)});
+  }
+  if(!opts.length){killHunter();return;}
+  opts.sort(function(a,b){return a.d-b.d;});
+  var pick=opts[0];
+  if(pick.x===h.x&&pick.y===h.y){gameOver("猎手扑到了蛇头!");return;}
+  if(inSnake(pick.x,pick.y)){killHunter();return;}
+  hunter={x:pick.x,y:pick.y};
+}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h=snake[0];
+  var nh={x:(h.x+dir.x+COLS)%COLS,y:(h.y+dir.y+ROWS)%ROWS};
+  if(nh.x===hunter.x&&nh.y===hunter.y){gameOver("正面撞上了猎手!");return;}
+  var ate=(nh.x===food.x&&nh.y===food.y);
+  snake.unshift(nh);
+  if(ate){
+    score+=10;
+    hp=Math.min(0.95,hp+0.04);
+    spawnFood();
+    updateHud();
+  }
+  else snake.pop();
+  var i;
+  for(i=1;i<snake.length;i++){
+    if(snake[i].x===nh.x&&snake[i].y===nh.y){gameOver("灵蛇咬到了自己!");return;}
+  }
+  if(Math.random()<hp)moveHunter();
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s020",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var x,y,i,s;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  for(x=0;x<COLS;x++)for(y=0;y<ROWS;y++){if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);}
+  var pr=6.5+Math.sin(pulse)*1.8;
+  ctx.fillStyle="#4ade80";
+  ctx.shadowColor="#4ade80";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(food.x*CELL+CELL/2,food.y*CELL+CELL/2,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  var hx=hunter.x*CELL+CELL/2,hy=hunter.y*CELL+CELL/2;
+  var aggro=0.6+0.4*hp;
+  ctx.fillStyle="#f43f5e";
+  ctx.shadowColor="#f43f5e";ctx.shadowBlur=18*aggro;
+  ctx.beginPath();ctx.arc(hx,hy,9.5,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#fff";
+  ctx.beginPath();
+  ctx.arc(hx-3,hy-2,1.8,0,Math.PI*2);
+  ctx.arc(hx+3,hy-2,1.8,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle="#7f1d1d";
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(hx-4.5,hy-5.5);ctx.lineTo(hx-1.5,hy-3.5);
+  ctx.moveTo(hx+4.5,hy-5.5);ctx.lineTo(hx+1.5,hy-3.5);
+  ctx.stroke();
+  ctx.lineWidth=1;
+  for(i=snake.length-1;i>=0;i--){
+    s=snake[i];
+    ctx.fillStyle=i===0?"#86efac":"#4ade80";
+    rr(s.x*CELL+2,s.y*CELL+2,CELL-4,CELL-4,6);ctx.fill();
+  }
+  var h=snake[0],cx=h.x*CELL+CELL/2,cy=h.y*CELL+CELL/2;
+  var ex=dir.x*4.5,ey=dir.y*4.5,px=dir.y!==0?4:0,py=dir.x!==0?4:0;
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();
+  ctx.arc(cx+ex-px,cy+ey-py,2.2,0,Math.PI*2);
+  ctx.arc(cx+ex+px,cy+ey+py,2.2,0,Math.PI*2);
+  ctx.fill();
+  for(i=fx.length-1;i>=0;i--){
+    var f=fx[i];
+    f.t-=16;f.y-=0.4;
+    if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t/600);
+    ctx.fillStyle="#fbbf24";
+    ctx.font="bold 14px system-ui";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(f.text,f.x,f.y);
+    ctx.globalAlpha=1;
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.006;
+  if(state==="playing"){
+    acc+=dt;
+    var guard=0;
+    while(acc>=stepMs&&state==="playing"&&guard<5){acc-=stepMs;step();guard++;}
+  }
+  draw();
+}
+function keyDir(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")return{x:0,y:-1};
+  if(k==="ArrowDown"||k==="s"||k==="S")return{x:0,y:1};
+  if(k==="ArrowLeft"||k==="a"||k==="A")return{x:-1,y:0};
+  if(k==="ArrowRight"||k==="d"||k==="D")return{x:1,y:0};
+  return null;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=keyDir(e);
+  if(d){e.preventDefault();queueDir(d);}
+  else if(e.key===" ")e.preventDefault();
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueDir({x:dx>0?1:-1,y:0});
+  else queueDir({x:0,y:dy>0?1:-1});
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

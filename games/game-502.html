@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快乐小农场</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+.seeds{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.seed{background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 12px;font-size:12.5px;cursor:pointer;color:#e8eaf6;font-family:inherit}
+.seed.sel{border-color:#4ade80;color:#4ade80;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.plot{position:relative;height:64px;background:#1b2138;border:1px solid #2e3554;border-radius:10px;cursor:pointer;overflow:hidden;text-align:center}
+.plot .fill{position:absolute;left:0;bottom:0;width:100%;height:0;background:rgba(74,222,128,.3)}
+.plot .lb{position:relative;z-index:1;padding-top:8px;font-size:11.5px;line-height:1.35;color:#c7cbe8}
+.plot.ready{border-color:#4ade80;box-shadow:0 0 10px rgba(74,222,128,.55)}
+.plot.locked{opacity:.5}
+.plot.locked .lb{color:#8b90b0}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>快乐小农场</h1>
+  <p class="hint">选种子点空地播种,作物随时间生长,亮绿时点击收获赚钱 · 累计 <b>5000</b> 金币获胜</p>
+  <div class="hud">
+    <span>金币 <b id="hMoney">30</b></span>
+    <span>目标 <b>5000</b></span>
+    <span>已收 <b id="hCrop">0</b> 株</span>
+    <span>化肥 <b id="hFert">0</b> 级</span>
+  </div>
+  <div id="msg"></div>
+  <div class="seeds" id="seedBar"></div>
+  <div class="grid" id="grid"></div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">快乐小农场</h2>
+    <p id="ovDesc">先选种子再点空地播种:萝卜快而贱,南瓜慢而贵。作物进度条走满变绿时点击收割。点锁住的地块可以花金币开垦新田,化肥加速、市集抬价、良种增产。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">开始耕作</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elMoney=$("hMoney"),elCrop=$("hCrop"),elFert=$("hFert"),elMsg=$("msg");
+var seedBar=$("seedBar"),grid=$("grid"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var WIN=5000;
+var kinds=[
+ {nm:"萝卜",cost:4,yield:10,time:5,col:"#f97316"},
+ {nm:"麦子",cost:12,yield:34,time:14,col:"#eab308"},
+ {nm:"南瓜",cost:40,yield:130,time:30,col:"#a16207"}
+];
+var ups=[
+ {nm:"强力化肥",ds:"全场生长速度 +25%",base:220,mult:2,max:5},
+ {nm:"进城市集",ds:"售价 +40%",base:480,mult:2,max:3},
+ {nm:"优选良种",ds:"产量 +30%",base:600,mult:2.2,max:3}
+];
+var money,crops,plots,unlocked,upLv,sel,state,msgT,plotEls=[],seedBtns=[],upRows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function unlockCost(i){return Math.floor(250*Math.pow(2,i-6));}
+function sellVal(k){return Math.floor(kinds[k].yield*(1+0.4*upLv[1])*(1+0.3*upLv[2]));}
+function say(t){elMsg.textContent=t;msgT=2.4;}
+function buildUI(){
+  var i;
+  seedBtns=[];
+  for(i=0;i<kinds.length;i++){
+    var s=document.createElement("button");
+    s.className="seed";
+    (function(idx){s.addEventListener("click",function(){sel=idx;renderSeeds();});})(i);
+    seedBar.appendChild(s);seedBtns.push(s);
+  }
+  plotEls=[];
+  for(i=0;i<12;i++){
+    var p=document.createElement("div");
+    p.className="plot";
+    p.innerHTML='<div class="fill"></div><div class="lb"></div>';
+    (function(idx){p.addEventListener("click",function(){tapPlot(idx);});})(i);
+    grid.appendChild(p);plotEls.push(p);
+  }
+  upRows=[];
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    upRows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function renderSeeds(){
+  var i;
+  for(i=0;i<kinds.length;i++){
+    seedBtns[i].textContent=kinds[i].nm+" "+kinds[i].cost+"→"+sellVal(i);
+    seedBtns[i].classList.toggle("sel",sel===i);
+  }
+}
+function tapPlot(i){
+  if(state!=="play")return;
+  var pl=plots[i];
+  if(!pl.un){
+    var uc=unlockCost(i);
+    if(money<uc){say("开垦要 "+fmt(uc)+" 金币!");return;}
+    money-=uc;pl.un=true;unlocked++;say("开垦了一块新田!");
+    return;
+  }
+  if(pl.st===0){
+    var k=kinds[sel];
+    if(money<k.cost){say("种子钱不够!");return;}
+    money-=k.cost;pl.st=1;pl.t=0;pl.k=sel;
+  }else if(pl.st===2){
+    money+=sellVal(pl.k);crops++;pl.st=0;
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满级!");return;}
+  var c=upCost(i);
+  if(money<c){say("金币不够!");return;}
+  money-=c;upLv[i]++;renderSeeds();
+  say(ups[i].nm+" 升到 Lv"+upLv[i]);
+}
+function startGame(){
+  var i;
+  money=30;crops=0;upLv=[0,0,0];sel=0;msgT=0;unlocked=6;
+  plots=[];
+  for(i=0;i<12;i++)plots.push({un:i<6,st:0,t:0,k:0});
+  elMsg.textContent="";renderSeeds();
+  state="play";ov.classList.add("hide");
+}
+btn.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function render(){
+  var i;
+  elMoney.textContent=fmt(money);elCrop.textContent=crops;elFert.textContent=upLv[0];
+  for(i=0;i<12;i++){
+    var pl=plots[i],el=plotEls[i],fill=el.querySelector(".fill"),lb=el.querySelector(".lb");
+    el.classList.toggle("locked",!pl.un);
+    el.classList.toggle("ready",pl.st===2);
+    if(!pl.un){lb.textContent="未开垦\n"+fmt(unlockCost(i))+"金";fill.style.height="0";}
+    else if(pl.st===0){lb.textContent="空地\n点此播种";fill.style.height="0";fill.style.background="rgba(74,222,128,.3)";}
+    else if(pl.st===1){
+      var pc=Math.min(100,pl.t/kinds[pl.k].time*100);
+      lb.textContent=kinds[pl.k].nm+"\n生长 "+Math.floor(pc)+"%";
+      fill.style.height=pc+"%";fill.style.background=kinds[pl.k].col;
+    }else{lb.textContent=kinds[pl.k].nm+"\n可收 "+sellVal(pl.k)+"金";fill.style.height="100%";}
+  }
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    upRows[i].pr.textContent=full?"已满":fmt(c);
+    upRows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    upRows[i].el.classList.toggle("off",full||money<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000,spd=1+0.25*upLv[0],i;
+  for(i=0;i<12;i++){
+    if(plots[i].st===1){
+      plots[i].t+=ds*spd;
+      if(plots[i].t>=kinds[plots[i].k].time){plots[i].st=2;}
+    }
+  }
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+  if(money>=WIN){
+    state="over";
+    showOv("丰收大亨!","农场金币突破 5000,你在村里的名声响当当!","累计收获 "+crops+" 株作物","再来一局");
+  }
+}
+function showOv(t2,d,s,bt){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display=s?"block":"none";
+  btn.textContent=bt;ov.classList.remove("hide");
+}
+plots=[];
+var _pi;
+for(_pi=0;_pi<12;_pi++)plots.push({un:_pi<6,st:0,t:0,k:0});
+money=30;crops=0;upLv=[0,0,0];sel=0;state="menu";msgT=0;unlocked=6;
+buildUI();renderSeeds();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

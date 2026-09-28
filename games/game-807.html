@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旋风刀工</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#7ee2a0;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#7ee2a0;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#101a24;border-radius:10px;touch-action:none}
+.acts{text-align:center;margin-top:10px}
+.acts button{background:#7ee2a0;color:#0a2a14;border:none;border-radius:10px;padding:11px 30px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.acts button:active{transform:scale(.96)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#7ee2a0}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#7ee2a0;color:#0a2a14;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>旋风刀工</h1>
+  <p class="hint">蔬菜乘传送带驶向刀口,在最靠近刀刃中心时按 空格 / 点击画面下刀<br>切得越正连击越高,漏切一个蔬菜扣一条命!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">旋风刀工</h2>
+      <p id="ovDesc">传送带源源不断送来蔬菜,在刀口中心(发亮区域)附近下刀:误差 9 像素内算完美并叠连击,空刀会断连击,蔬菜漂过未切则扣命,共 3 条命。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div class="acts"><button id="btnCut">下 刀(空格)</button></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo"),btnCut=$("btnCut");
+var best=loadBest("mg_s807");
+var VEG=[["🥕","#ff9f43"],["🥒","#7ed957"],["🍆","#a55eea"],["🫑","#ffd23f"],["🍄","#e8b06a"]];
+var KX=240;
+var state="menu",items,parts,score,combo,lives,spawnT,speed,lastT,beltX;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function reset(){
+  items=[];parts=[];score=0;combo=0;lives=3;spawnT=0.4;speed=120;beltX=0;
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function spawn(){
+  var v=VEG[(Math.random()*VEG.length)|0];
+  items.push({x:510,ic:v[0],c:v[1]});
+}
+function burst(x,y,c){
+  for(var i=0;i<10;i++){
+    parts.push({x:x,y:y,vx:(Math.random()-0.5)*220,vy:-60-Math.random()*160,life:0.55,c:c});
+  }
+}
+function cut(){
+  if(state!=="playing")return;
+  var bi=-1,bd=999,i,d;
+  for(i=0;i<items.length;i++){
+    d=Math.abs(items[i].x-KX);
+    if(d<30&&d<bd){bd=d;bi=i;}
+  }
+  if(bi<0){
+    combo=0;score=Math.max(0,score-5);
+    updateHud();
+    return;
+  }
+  var it=items[bi];
+  var pts;
+  if(bd<=9){combo++;pts=30+10*combo;burst(it.x,190,it.c);}
+  else if(bd<=20){pts=12;burst(it.x,190,it.c);}
+  else{combo=0;pts=5;}
+  score+=pts;
+  items.splice(bi,1);
+  updateHud();
+}
+function gameOver(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s807",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=reason;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(dtSec){
+  ctx.clearRect(0,0,480,300);
+  ctx.fillStyle="rgba(255,255,255,.04)";
+  ctx.fillRect(20,160,440,56);
+  ctx.fillStyle="#1c2c3a";
+  ctx.fillRect(20,216,440,10);
+  beltX=(beltX+speed*dtSec)%36;
+  ctx.fillStyle="#2a3f52";
+  for(var bx=20-36+beltX;bx<460;bx+=36)ctx.fillRect(bx,216,22,10);
+  ctx.fillStyle="rgba(126,226,160,.12)";
+  ctx.fillRect(KX-28,150,56,76);
+  ctx.fillStyle="rgba(126,226,160,.35)";
+  ctx.fillRect(KX-2,150,4,76);
+  ctx.fillStyle="#cfd4ea";
+  ctx.beginPath();
+  ctx.moveTo(KX-7,58);ctx.lineTo(KX+7,58);ctx.lineTo(KX+2,150);ctx.lineTo(KX-2,150);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle="#8b6d3f";
+  rr(KX-14,40,28,20,6);ctx.fill();
+  for(var i=0;i<items.length;i++){
+    var it=items[i];
+    ctx.fillStyle="rgba(0,0,0,.3)";
+    ctx.beginPath();ctx.ellipse(it.x,206,18,5,0,0,Math.PI*2);ctx.fill();
+    ctx.font="26px system-ui";
+    ctx.textAlign="center";
+    ctx.fillText(it.ic,it.x,196);
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.life-=dtSec;
+    if(p.life<=0){parts.splice(i,1);continue;}
+    p.x+=p.vx*dtSec;p.y+=p.vy*dtSec;p.vy+=520*dtSec;
+    ctx.globalAlpha=Math.max(0,p.life/0.55);
+    ctx.fillStyle=p.c;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="#555b80";
+  ctx.font="12px system-ui";
+  ctx.textAlign="left";
+  ctx.fillText("传送带",28,176);
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(state==="playing"){
+    speed=Math.min(300,120+score*0.8);
+    spawnT-=dts;
+    if(spawnT<=0){
+      spawnT=Math.max(0.55,1.4-score*0.008);
+      spawn();
+    }
+    for(var i=items.length-1;i>=0;i--){
+      items[i].x-=speed*dts;
+      if(items[i].x<-30){
+        items.splice(i,1);
+        lives--;combo=0;updateHud();
+        if(lives<=0){gameOver("漏切的蔬菜堆成了山,被主厨开除了!");break;}
+      }
+    }
+  }
+  draw(dts);
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else cut();
+  }
+});
+cv.addEventListener("click",cut);
+cv.addEventListener("touchstart",function(e){e.preventDefault();cut();},{passive:false});
+btnCut.addEventListener("click",cut);
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

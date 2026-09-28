@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雨中疾驰</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>雨中疾驰</h1>
+  <p class="tips">暴雨夜路:方向盘像泡了油,转向全是惯性;轧进水膜直接打滑失控,松开方向听天由命。跑完 1200 米!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/1200</div></div>
+    <div class="stat"><div class="mut">时速</div><div class="big" id="sv">0</div></div>
+    <div class="stat"><div class="mut">打滑次数</div><div class="big" id="sh">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="400" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">雨中疾驰</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 转向(触屏拖动),车身会<b>带着惯性漂</b><br>· 轧过浅蓝色<b>水膜</b>会打滑 0.75 秒,期间转向无效<br>· 打滑前先回正,别在水膜前急打方向<br>· 撞上前车出局;轻蹭护栏会掉速<br>· 跑完 1200 米胜利</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=560,TOTAL=1200,RL=22,RR=W-22;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var px,vx,speed,dist,slips,running,stripe,spawnT,poolT,hydro;
+var cars=[],pools=[],spray=[],rain=[];
+var keys={};
+var PY=H-104;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;vx=0;speed=340;dist=0;slips=0;stripe=0;spawnT=0.7;poolT=0.5;hydro=0;
+  cars.length=0;pools.length=0;spray.length=0;rain.length=0;
+  var i;
+  for(i=0;i<34;i++)rain.push({x:Math.random()*W,y:Math.random()*H,l:14+Math.random()*16});
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/1200';
+  $i('sv').textContent=Math.floor(speed*0.42);
+  $i('sh').textContent=slips;
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawnCar(){
+  var x=RL+34+Math.random()*(RR-RL-68),i;
+  for(i=0;i<cars.length;i++){
+    if(cars[i].y<150&&Math.abs(cars[i].x-x)<95)return;
+  }
+  cars.push({x:x,y:-90,spd:170+Math.random()*60,c:['#4da3ff','#b07cff','#ff9f43'][Math.floor(Math.random()*3)]});
+}
+function spawnPool(){
+  pools.push({x:RL+40+Math.random()*(RR-RL-80),y:-50,w:70+Math.random()*60,used:false});
+}
+function update(dt){
+  speed=Math.min(480,speed+7*dt);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%70;
+  spawnT-=dt;poolT-=dt;
+  if(spawnT<=0){spawnCar();spawnT=1.3+Math.random()*0.8;}
+  if(poolT<=0){spawnPool();poolT=1.1+Math.random()*0.9;}
+  var s=0;
+  if(hydro<=0){
+    if(keys.ArrowLeft||keys.a||keys.A)s=-1;
+    if(keys.ArrowRight||keys.d||keys.D)s=1;
+  }
+  vx+=s*950*dt;
+  vx*=1-(hydro>0?0.5:2.5)*dt;
+  vx=Math.max(-250,Math.min(250,vx));
+  px+=vx*dt;
+  if(px<RL+20){px=RL+20;vx=0;speed=Math.max(220,speed-140*dt);}
+  if(px>RR-20){px=RR-20;vx=0;speed=Math.max(220,speed-140*dt);}
+  if(hydro>0)hydro-=dt;
+  var i;
+  for(i=cars.length-1;i>=0;i--){
+    var c=cars[i];
+    c.y+=(speed-c.spd)*dt;
+    if(c.y>H+100){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<38&&Math.abs(c.y-PY)<62){
+      endRun('追尾了!','里程 '+Math.floor(dist)+' m / 1200 m,打滑 '+slips+' 次<br>雨天提前半个车身就开始让线!');
+      return;
+    }
+  }
+  for(i=pools.length-1;i>=0;i--){
+    var p=pools[i];
+    p.y+=speed*dt;
+    if(p.y>H+70){pools.splice(i,1);continue;}
+    if(!p.used&&Math.abs(p.x-px)<p.w/2&&Math.abs(p.y-PY)<26){
+      p.used=true;hydro=0.75;slips++;
+      vx*=1.5;
+      var k;
+      for(k=0;k<12;k++){
+        var an=Math.random()*6.28,sp2=70+Math.random()*160;
+        spray.push({x:px,y:PY,vx:Math.cos(an)*sp2,vy:Math.sin(an)*sp2,life:0.5});
+      }
+    }
+  }
+  for(i=spray.length-1;i>=0;i--){
+    spray[i].x+=spray[i].vx*dt;spray[i].y+=spray[i].vy*dt;
+    spray[i].life-=dt;
+    if(spray[i].life<=0)spray.splice(i,1);
+  }
+  for(i=0;i<rain.length;i++){
+    rain[i].y+=(560+speed*0.6)*dt;
+    rain[i].x-=110*dt;
+    if(rain[i].y>H){rain[i].y=-20;rain[i].x=Math.random()*(W+120);}
+    if(rain[i].x<-10)rain[i].x+=W+120;
+  }
+  if(dist>=TOTAL){
+    endRun('雨夜到达!','全程 1200 m,打滑 '+slips+' 次<br>稳住惯性,你就是雨战之王!');
+    return;
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-20,y-34,40,68,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-15,y-19,30,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-15,y+6,30,17,5);ctx.fill();
+  ctx.fillStyle='#c9d4ff';
+  ctx.fillRect(x-18,y+28,10,5);ctx.fillRect(x+8,y+28,10,5);
+}
+function draw(){
+  ctx.fillStyle='#131a2e';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#28304f';ctx.fillRect(RL,0,RR-RL,H);
+  ctx.strokeStyle='rgba(230,240,255,.6)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(RL+2,0);ctx.lineTo(RL+2,H);ctx.moveTo(RR-2,0);ctx.lineTo(RR-2,H);ctx.stroke();
+  ctx.strokeStyle='rgba(230,240,255,.2)';ctx.lineWidth=3;
+  ctx.setLineDash([22,32]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  var i;
+  for(i=0;i<pools.length;i++){
+    var p=pools[i];
+    var g=ctx.createRadialGradient(p.x,p.y,4,p.x,p.y,p.w/2);
+    g.addColorStop(0,'rgba(130,170,230,.5)');
+    g.addColorStop(1,'rgba(130,170,230,.12)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.ellipse(p.x,p.y,p.w/2,16,0,0,6.2832);ctx.fill();
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].c);
+  var tilt=Math.max(-0.3,Math.min(0.3,vx/700));
+  ctx.save();
+  ctx.translate(px,PY);ctx.rotate(tilt);
+  ctx.fillStyle='#ff5c5c';rr(-19,-32,38,64,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';rr(-14,-18,28,17,5);ctx.fill();
+  ctx.restore();
+  if(hydro>0){
+    ctx.font='bold 17px system-ui';ctx.textAlign='center';
+    ctx.fillStyle='rgba(140,200,255,'+(0.5+0.4*Math.sin(Date.now()*0.03))+')';
+    ctx.fillText('打滑!控制不住!',px,PY-52);
+  }
+  for(i=0;i<spray.length;i++){
+    ctx.globalAlpha=Math.max(0,spray[i].life*2);
+    ctx.fillStyle='#9fc0ee';
+    ctx.beginPath();ctx.arc(spray[i].x,spray[i].y,3,0,6.2832);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.strokeStyle='rgba(190,215,255,.35)';ctx.lineWidth=1.5;
+  for(i=0;i<rain.length;i++){
+    ctx.beginPath();
+    ctx.moveTo(rain[i].x,rain[i].y);
+    ctx.lineTo(rain[i].x-rain[i].l*0.24,rain[i].y-rain[i].l);
+    ctx.stroke();
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(!dragOn||!running)return;
+  var t=ptrX(e);
+  var d=t-px;
+  vx=Math.max(-250,Math.min(250,vx+d*4));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

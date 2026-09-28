@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双层联动灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.gbtn{background:#143524;color:#4ade80;border:1px solid #4ade80;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#4ade80;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.layers{display:flex;flex-direction:column;gap:10px;max-width:320px;margin:0 auto}
+.layerTag{text-align:center;font-size:12px;letter-spacing:2px;margin-bottom:4px}
+.tagA{color:#4ade80}.tagB{color:#fbbf24}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.gridB .cell{border-color:#4a3c14}
+.cell{aspect-ratio:1/1;border-radius:11px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .18s,box-shadow .18s,transform .08s}
+.cell.onA{background:linear-gradient(145deg,#bbf7d0,#22c55e);border-color:#dcfce7;box-shadow:0 0 14px rgba(74,222,128,.55)}
+.cell.onB{background:linear-gradient(145deg,#fde68a,#d97706);border-color:#fef3c7;box-shadow:0 0 14px rgba(251,191,36,.55)}
+.cell:active{transform:scale(.92)}
+.link{display:flex;justify-content:center;gap:60px;color:#3b4a78;font-size:11px;margin:2px 0}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#4ade80;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#4ade80;color:#143524;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双层联动灯</h1>
+  <p class="hint">上下两层 3×3 灯盘彼此联动:点某一层的任意格,该层十字翻转,同时另一层的同位置单格也会翻转。两层共 18 盏灯全部点亮才算通关。</p>
+  <div class="hud">
+    <span>步数 <b id="moves">0</b></span>
+    <span>上层 <b id="litA">0</b>/9</span>
+    <span>下层 <b id="litB">0</b>/9</span>
+    <span>最少步纪录 <b id="best">--</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="layers">
+    <div>
+      <div class="layerTag tagA">上 层</div>
+      <div class="grid" id="gridA"></div>
+    </div>
+    <div class="link"><span>▲ 联动 ▲</span><span>▼ 联动 ▼</span></div>
+    <div>
+      <div class="layerTag tagB">下 层</div>
+      <div class="grid gridB" id="gridB"></div>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">双层联动灯</h2>
+    <p id="ovDesc">一石二鸟的点灯:每次点击都在两层同时留下痕迹——本层是十字,对层是镜像单点。两层都要全亮,只顾一层必然顾此失彼。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始联动</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=3,CNT=9;
+var gridA=$("gridA"),gridB=$("gridB");
+var elMoves=$("moves"),elLitA=$("litA"),elLitB=$("litB"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cellsA=[],cellsB=[],boardA=[],boardB=[],moves=0,state="menu";
+var best=loadNum("mg334_best");
+
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function setMsg(s){elMsg.textContent=s;clearTimeout(setMsg.t);setMsg.t=setTimeout(function(){elMsg.textContent="";},2200);}
+function build(){
+  var i;
+  gridA.innerHTML="";gridB.innerHTML="";cellsA=[];cellsB=[];
+  for(i=0;i<CNT;i++){
+    var a=document.createElement("div");
+    a.className="cell";a.dataset.i=i;
+    gridA.appendChild(a);cellsA.push(a);
+    var b=document.createElement("div");
+    b.className="cell";b.dataset.i=i;
+    gridB.appendChild(b);cellsB.push(b);
+  }
+}
+function paint(){
+  var i;
+  for(i=0;i<CNT;i++){
+    if(boardA[i])cellsA[i].classList.add("onA");else cellsA[i].classList.remove("onA");
+    if(boardB[i])cellsB[i].classList.add("onB");else cellsB[i].classList.remove("onB");
+  }
+}
+function crossList(r,c){
+  var list=[r*N+c];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function press(r,c,layer){
+  var list=crossList(r,c),i,t=r*N+c;
+  if(layer===0){
+    for(i=0;i<list.length;i++)boardA[list[i]]^=1;
+    boardB[t]^=1;
+  }else{
+    for(i=0;i<list.length;i++)boardB[list[i]]^=1;
+    boardA[t]^=1;
+  }
+  moves++;
+}
+function litA(){var n=0,i;for(i=0;i<CNT;i++)if(boardA[i])n++;return n;}
+function litB(){var n=0,i;for(i=0;i<CNT;i++)if(boardB[i])n++;return n;}
+function pickCells(k){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function updateHud(){
+  elMoves.textContent=moves;elLitA.textContent=litA();elLitB.textContent=litB();
+  elBest.textContent=best>0?best+" 步":"--";
+}
+function newGame(){
+  var i;
+  boardA=[];boardB=[];
+  for(i=0;i<CNT;i++){boardA.push(1);boardB.push(1);}
+  moves=0;state="playing";
+  var ps=pickCells(5),j;
+  for(j=0;j<ps.length;j++)press((ps[j]/N)|0,ps[j]%N,j%2);
+  paint();updateHud();
+}
+function doPress(i,layer){
+  if(state!=="playing")return;
+  press((i/N)|0,i%N,layer);
+  paint();updateHud();
+  if(litA()===CNT&&litB()===CNT)win();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||moves<best){best=moves;saveNum("mg334_best",best);isNew=true;}
+  ovTitle.textContent="双层同辉!";
+  ovDesc.textContent=isNew?"新纪录!上下两层被你一次想通。":"两盘灯火隔空呼应,联动之美尽收眼底。";
+  ovScore.style.display="block";
+  ovScore.textContent="本局步数 "+moves;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function start(){newGame();ov.classList.add("hide");}
+function bindGrid(el,layer){
+  el.addEventListener("click",function(e){
+    var t=e.target;
+    if(t&&t.classList&&t.classList.contains("cell"))doPress(parseInt(t.dataset.i,10),layer);
+  });
+}
+bindGrid(gridA,0);
+bindGrid(gridB,1);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}
+    return;
+  }
+});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();setMsg("已重开一局");
+});
+build();
+boardA=[];boardB=[];
+for(var z=0;z<CNT;z++){boardA.push(1);boardB.push(1);}
+var ps0=pickCells(5),z2;
+for(z2=0;z2<ps0.length;z2++)press((ps0[z2]/N)|0,ps0[z2]%N,z2%2);
+paint();updateHud();
+})();
+</script>
+</body>
+</html>

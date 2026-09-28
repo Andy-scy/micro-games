@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双子快跑</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#2dd4bf;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#2dd4bf;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#2dd4bf;color:#042e28;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双子快跑</h1>
+  <p class="hint">上/下双赛道各有跑者:↑/W 让蓝双子跳,↓/S 让橙双子跳 · 触屏:点上半跳蓝,点下半跳橙 · 一人倒下全队结束</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>速度 <b id="spd">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="330"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双子快跑</h2>
+      <p id="ovDesc">一对双子在不同楼层并肩狂奔!两条赛道障碍各不相同,你要一手一个同时照顾——一心二用,才是真跑者。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=330;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSpd=$("spd"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s433");
+var GY=[176,312];
+var state="menu",dist,score,speed,obs,runners,nextLane,phase;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=280;obs=[];phase=0;
+  runners=[{y:GY[0]-36,vy:0,grounded:true},{y:GY[1]-36,vy:0,grounded:true}];
+  nextLane=[420,650];
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elSpd.textContent=Math.round(speed);}
+function jump(lane){
+  if(state!=="playing")return;
+  var r=runners[lane];
+  if(r.grounded){r.vy=-500;r.grounded=false;}
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s433",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,l,o,r;
+  speed=Math.min(540,280+dist*0.018);
+  dist+=speed*s;score=Math.floor(dist/10);
+  phase+=s*speed*0.05;
+  for(l=0;l<2;l++){
+    r=runners[l];
+    if(!r.grounded){
+      r.vy+=2200*s;r.y+=r.vy*s;
+      if(r.y>=GY[l]-36){r.y=GY[l]-36;r.vy=0;r.grounded=true;}
+    }
+    nextLane[l]-=speed*s;
+    if(nextLane[l]<=0){
+      obs.push({x:W+30,lane:l,w:24+Math.round(Math.random()*10),h:28+Math.round(Math.random()*16)});
+      nextLane[l]=280+Math.random()*320;
+    }
+  }
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-80){obs.splice(i,1);continue;}
+    r=runners[o.lane];
+    var oy=GY[o.lane]-o.h;
+    if(90+26>o.x+3&&90<o.x+o.w-3&&r.y+34>oy+3){
+      gameOver(o.lane===0?"蓝双子撞上了障碍——上面的赛道也要盯着!":"橙双子撞上了障碍——下面的赛道也不能松手!");
+      return;
+    }
+  }
+  updateHud();
+}
+function drawRunner(r,lane,col,dark){
+  var l=r.grounded?Math.sin(phase+lane*2.1)*4:0;
+  ctx.fillStyle=col;
+  rr(90,r.y+8,26,26,6);ctx.fill();
+  rr(90+5,r.y-6,18,15,5);ctx.fill();
+  ctx.fillStyle=dark;
+  if(lane===0){ctx.fillRect(90+11,r.y-2,8,3);ctx.fillRect(90+13,r.y-16,2,10);}
+  else{ctx.fillRect(90+10,r.y,12,4);}
+  ctx.fillStyle=dark;
+  if(r.grounded){ctx.fillRect(90+4,r.y+32+Math.max(0,-l),7,5);ctx.fillRect(90+15,r.y+32+Math.max(0,l),7,5);}
+  else{ctx.fillRect(90+3,r.y+30,8,5);ctx.fillRect(90+15,r.y+28,8,5);}
+}
+function draw(){
+  var i,o,l,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#101f2b");grd.addColorStop(1,"#241a10");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  for(l=0;l<2;l++){
+    grd=ctx.createLinearGradient(0,GY[l]-90,0,GY[l]);
+    if(l===0){grd.addColorStop(0,"rgba(45,212,191,.05)");grd.addColorStop(1,"rgba(45,212,191,.14)");}
+    else{grd.addColorStop(0,"rgba(251,146,60,.05)");grd.addColorStop(1,"rgba(251,146,60,.14)");}
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,GY[l]-90,W,90);
+  }
+  ctx.fillStyle="rgba(45,212,191,.5)";ctx.fillRect(0,GY[0],W,2);
+  ctx.fillStyle="rgba(251,146,60,.5)";ctx.fillRect(0,GY[1],W,2);
+  ctx.fillStyle="#2a2436";ctx.fillRect(0,GY[0]+2,W,GY[1]-GY[0]-2);
+  ctx.fillStyle="rgba(255,255,255,.06)";
+  var dsh=dist%80;
+  for(l=0;l<2;l++)for(i=0;i<9;i++)ctx.fillRect(i*80-dsh,GY[l]+8,32,3);
+  ctx.fillStyle="rgba(45,212,191,.6)";
+  ctx.font="bold 12px system-ui";ctx.textAlign="right";
+  ctx.fillText("↑ / W",W-10,GY[0]-46);
+  ctx.fillStyle="rgba(251,146,60,.7)";
+  ctx.fillText("↓ / S",W-10,GY[1]-46);
+  ctx.textAlign="left";ctx.font="14px system-ui";
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    ctx.fillStyle=o.lane===0?"#3c7a70":"#8a5a30";
+    rr(o.x,GY[o.lane]-o.h,o.w,o.h,4);ctx.fill();
+    ctx.fillStyle=o.lane===0?"#2c5a52":"#6b4423";
+    ctx.fillRect(o.x+3,GY[o.lane]-o.h+4,o.w-6,3);
+  }
+  drawRunner(runners[0],0,"#2dd4bf","#053a34");
+  drawRunner(runners[1],1,"#fb923c","#431c05");
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if((k==="ArrowUp"||k==="w"||k==="W")&&!e.repeat)jump(0);
+  if((k==="ArrowDown"||k==="s"||k==="S")&&!e.repeat)jump(1);
+});
+function tapLane(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientY-rect.top)<rect.height*0.5?0:1;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  jump(tapLane(t));
+},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  var rect=cv.getBoundingClientRect();
+  jump((e.clientY-rect.top)<rect.height*0.5?0:1);
+});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

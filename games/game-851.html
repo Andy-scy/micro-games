@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>点灯谜阵</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px;display:flex;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(5,52px);grid-auto-rows:52px;gap:5px}
+.lt{background:#22284a;border:2px solid #3a4470;border-radius:10px;cursor:pointer;transition:all .18s;font-family:inherit}
+.lt:hover{background:#2a3157}
+.lt.on{background:#ffd668;border-color:#ffe9a8;box-shadow:0 0 12px rgba(255,214,104,.55)}
+#msg{text-align:center;min-height:20px;font-size:14px;color:#4ade80;margin-bottom:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>点灯谜阵</h1>
+<p class="tip">点击一盏灯,它会连同上下左右的灯一起翻转亮灭。<br>把 5×5 的灯全部熄灭即可过关,共 3 关!</p>
+<div class="hud"><span id="hL">第 1/3 关</span><span id="hM">步数 0</span><span id="hT">用时 0 秒</span></div>
+<div class="panel"><div id="board"></div></div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn" id="bBack">还原本关</button><button class="btn pri" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const N=5,CELLS=25,PRESES=[5,7,9];
+let bd=[],initBd=[],lvl=0,moves=0,sec=0,timer=null,over=false,lock=false;
+const boardEl=document.getElementById("board");
+const cells=[];
+for(let i=0;i<CELLS;i++){
+  const b=document.createElement("button");
+  b.className="lt";b.dataset.i=String(i);
+  boardEl.appendChild(b);cells.push(b);
+}
+boardEl.addEventListener("click",e=>{
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined||over||lock)return;
+  press(parseInt(t.dataset.i,10),true);
+});
+function press(i,count){
+  const r=Math.floor(i/N),c=i%N;
+  const list=[[r,c],[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+  for(const p of list){
+    if(p[0]<0||p[0]>=N||p[1]<0||p[1]>=N)continue;
+    bd[p[0]*N+p[1]]^=1;
+  }
+  if(count)moves++;
+  render();
+  if(count)checkClear();
+}
+function render(){
+  for(let i=0;i<CELLS;i++)cells[i].classList.toggle("on",bd[i]===1);
+}
+function checkClear(){
+  if(bd.some(x=>x===1))return;
+  lock=true;
+  document.getElementById("msg").textContent="第 "+lvl+" 关完成!";
+  setTimeout(()=>{
+    lock=false;
+    lvl++;
+    if(lvl>=PRESES.length){
+      over=true;clearInterval(timer);
+      show("谜阵全破!","3 关全部点亮又熄灭 · 总步数 "+moves+" · 用时 "+sec+" 秒");
+    }else{
+      loadLevel();
+    }
+  },900);
+}
+function loadLevel(){
+  bd=new Array(CELLS).fill(0);
+  const spots=[...Array(CELLS).keys()];
+  for(let i=spots.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=spots[i];spots[i]=spots[j];spots[j]=t;}
+  for(let k=0;k<PRESES[lvl];k++)press(spots[k],false);
+  if(bd.every(x=>x===0))loadLevel();
+  initBd=bd.slice();
+  moves=0;
+  document.getElementById("hL").textContent="第 "+(lvl+1)+"/"+PRESES.length+" 关";
+  document.getElementById("hM").textContent="步数 0";
+  document.getElementById("msg").textContent="";
+  render();
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hT").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(){
+  over=false;lock=false;lvl=0;moves=0;sec=0;
+  document.getElementById("hT").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  loadLevel();startTimer();
+}
+document.getElementById("bBack").addEventListener("click",()=>{
+  if(over||lock)return;
+  bd=initBd.slice();moves=0;
+  document.getElementById("hM").textContent="步数 0";
+  document.getElementById("msg").textContent="";
+  render();
+});
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

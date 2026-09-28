@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真假闪光</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#fbbf24;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.gbtn{background:#3a2c0a;color:#fbbf24;border:1px solid #fbbf24;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#fbbf24;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:340px;margin:0 auto;touch-action:manipulation}
+.cell{aspect-ratio:1/1;border-radius:10px;background:#141830;border:1px solid #232c50;cursor:pointer;transition:box-shadow .1s,background .1s;user-select:none;-webkit-user-select:none}
+.cell.real{background:#f59e0b;border-color:#fde68a;box-shadow:0 0 24px rgba(245,158,11,.9)}
+.cell.decoy{background:#e5e7eb;border-color:#f3f4f6;box-shadow:0 0 14px rgba(229,231,235,.7)}
+.legend{display:flex;justify-content:center;gap:16px;font-size:12px;color:#8b90b0;margin-bottom:8px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#fbbf24;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#fbbf24;color:#3a2c0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>真假闪光</h1>
+  <p class="hint">抗干扰记忆序列:4×4 方阵里,金色闪光是真序列,白色闪光全是烟雾弹!只复述金色序列,白光出现越多越要稳住。轮数越高,干扰弹越密集。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>真序列 <b id="len">0</b> 步</span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="legend"><span><i style="background:#f59e0b"></i>金色=真</span><span><i style="background:#e5e7eb"></i>白色=假</span></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">真假闪光</h2>
+    <p id="ovDesc">记忆力的照妖镜:满屏乱闪的白光里,只有金色那几步是真的。先记住「哪些是真」再记「顺序」,两步走,别被烟雾弹带偏。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg352_best",N=16,GAP=760,REAL_MS=380,DECOY_MS=150;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var cells=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.3;v=v==null?0.15:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var box=$("grid");for(var i=0;i<N;i++){var d=document.createElement("div");d.className="cell";d.dataset.i=String(i);box.appendChild(d);cells.push(d);}})();
+function flashCell(i,cls,ms,withTone){var el=cells[i];el.classList.add(cls);if(withTone)tone(392,0.28,0.16);timers.push(setTimeout(function(){el.classList.remove(cls);},ms));}
+function clearFx(){for(var i=0;i<N;i++)cells[i].classList.remove("real","decoy");}
+function rnd(){var n;do{n=(Math.random()*N)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";setMsg("盯住金光,无视白光…");
+var total=seq.length*GAP+420,i=0,k;
+for(k=0;k<seq.length;k++)timers.push(setTimeout(function(st){return function(){flashCell(seq[st],"real",REAL_MS,true);};}(k),k*GAP));
+var decoyN=Math.min(9,1+((level*0.9)|0));
+var used=[];
+for(k=0;k<decoyN;k++){var t=0,tries=0,ok=false;
+while(tries<40&&!ok){t=150+((Math.random()*(total-400))|0);ok=true;var s2;
+for(s2=0;s2<seq.length;s2++){if(Math.abs(t-s2*GAP)<340){ok=false;break;}}
+if(ok){var u;for(u=0;u<used.length;u++){if(Math.abs(t-used[u])<200){ok=false;break;}}}
+tries++;}
+if(!ok)continue;used.push(t);
+var near=Math.min(seq.length-1,Math.max(0,Math.round(t/GAP)));
+var cell=0,c2=0;
+do{cell=(Math.random()*N)|0;c2++;}while(cell===seq[near]&&c2<30);
+timers.push(setTimeout(function(tt,cc){return function(){flashCell(cc,"decoy",DECOY_MS,false);};}(t,cell),t));}
+timers.push(setTimeout(function(){state="input";pos=0;setMsg("只复述金色序列!");},total+100));}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearFx();seq=[];pos=0;level=0;state="wait";setMsg("");updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;state="wait";setMsg("火眼金睛!干扰升级…");updateHud();timers.push(setTimeout(nextRound,850));}
+function fail(){clearTimers();clearFx();state="over";tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="被烟雾弹骗了";
+ovDesc.textContent="白光越来越密,真序列在第 "+seq.length+" 步失守。诀窍:演示时只在心里给金光编号「一二三」,白光一律视而不见。";
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flashCell(i,"real",220,true);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+$("grid").addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

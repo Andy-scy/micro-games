@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一弹再接</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>一弹再接</h1>
+  <p class="tips">球直接接不算分——必须等它落地弹起后再接!← → 或 A/D 移篮,触屏拖动。弹起时接住 +25;球第二次落地就溜走,-1 生命,共 3 条。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">弹接数</div><div class="big" id="bc">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">一弹再接</h2><p id="ovp">玩法:反弹球,二段接应。<br>· 球下落时接住不算分(提示「太早」)<br>· 球落地弹起后进入可接状态:接住 +25<br>· 同一颗球第二次落地 = 溜走,-1 生命<br>· 球会左右弹墙,落点难猜<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始接球</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,lives:3,bc:0,st:0.9,t:0,balls:[],pops:[],bx:W/2,bw:90,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('bc').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function update(dt){
+  S.t+=dt;
+  var sp=350,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.85+Math.random()*0.45;
+    var v=150+Math.random()*80;
+    S.balls.push({x:50+Math.random()*(W-100),y:-14,vx:(Math.random()-0.5)*170,vy:40,v:v,r:12+Math.random()*4,ph:0,col:Math.random()<0.5?'#4cc9f0':'#b07cff'});
+  }
+  var by=H-46,ground=H-10;
+  for(var i=S.balls.length-1;i>=0;i--){
+    var b=S.balls[i];
+    b.vy+=520*dt;b.y+=b.vy*dt;b.x+=b.vx*dt;
+    if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx)}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx=-Math.abs(b.vx)}
+    if(b.vy>0&&b.y>=ground-b.r){
+      if(b.ph===0){
+        b.ph=1;b.vy=-Math.max(200,b.v*0.66);b.vx*=1.05;
+        pop(b.x,ground-30,'咚!可接','#9aa3c0');
+      }else{
+        S.balls.splice(i,1);
+        S.lives--;$('hp').textContent=hearts();
+        pop(b.x,ground-40,'球溜走了!-1 生命','#ff6b6b');
+        if(S.lives<=0)gameOver();
+        continue;
+      }
+    }
+    if(b.y>=by-16-b.r&&b.y<=by+10&&Math.abs(b.x-S.bx)<S.bw/2+b.r){
+      if(b.ph===1){
+        S.score+=25;S.bc++;$('sc').textContent=S.score;$('bc').textContent=S.bc;
+        pop(b.x,by-32,'+25 弹接!','#ffd166');
+      }else{
+        pop(b.x,by-32,'太早!等它弹一下','#9aa3c0');
+      }
+      S.balls.splice(i,1);
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='球都溜走了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>成功弹接 <b>'+S.bc+'</b> 次<br>耐心等反弹,二段才是真接球!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  for(var i=0;i<S.balls.length;i++){
+    var b=S.balls[i];
+    ctx.fillStyle=b.col;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.4)';
+    ctx.beginPath();ctx.arc(b.x-b.r*0.3,b.y-b.r*0.3,b.r*0.3,0,Math.PI*2);ctx.fill();
+    if(b.ph===1){
+      ctx.strokeStyle='#ffd166';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r+4,0,Math.PI*2);ctx.stroke();
+    }
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('弹接篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

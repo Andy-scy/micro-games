@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连锁点灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#2dd4bf;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#2dd4bf;font-size:16px}
+.gbtn{background:#0d3a36;color:#2dd4bf;border:1px solid #2dd4bf;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#2dd4bf;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:360px;margin:0 auto;touch-action:manipulation}
+.cell{aspect-ratio:1/1;border-radius:11px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .18s,box-shadow .18s,transform .08s}
+.cell.on{background:linear-gradient(145deg,#99f6e4,#0d9488);border-color:#ccfbf1;box-shadow:0 0 14px rgba(45,212,191,.55)}
+.cell.chain{animation:cc .45s ease}
+@keyframes cc{0%{box-shadow:0 0 0 rgba(250,204,21,0)}40%{box-shadow:0 0 22px rgba(250,204,21,.95);border-color:#fde047}100%{box-shadow:0 0 14px rgba(45,212,191,.55)}}
+.cell.cur{outline:2px solid rgba(45,212,191,.75);outline-offset:2px}
+.cell:active{transform:scale(.92)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#2dd4bf;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#2dd4bf;color:#0d3a36;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>连锁点灯</h1>
+  <p class="hint">这里的灯有脾气:点击翻转十字后,有 40% 概率引发连锁——某个相邻灯再次翻转它的十字(金色闪光,甚至二段连锁)。在混乱中点亮全部 4×4。</p>
+  <div class="hud">
+    <span>步数 <b id="moves">0</b></span>
+    <span>已点亮 <b id="lit">0</b>/16</span>
+    <span>连锁 <b id="chains">0</b> 次</span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">连锁点灯</h2>
+    <p id="ovDesc">概率学登场的点灯:每次点击都有四成几率带动邻灯连锁翻转,谁也算不尽下一步。别灰心——混乱是双向的,它拆你的台,也帮你拆台。稳住心态,全亮点亮即胜。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">挑战混乱</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=4,CNT=16;
+var gridEl=$("grid"),elMoves=$("moves"),elLit=$("lit"),elChains=$("chains"),elMsg=$("msg"),btnNew=$("btnNew");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cells=[],board=[],moves=0,chains=0,state="menu";
+
+function setMsg(s){elMsg.textContent=s;clearTimeout(setMsg.t);setMsg.t=setTimeout(function(){elMsg.textContent="";},2200);}
+function build(){
+  gridEl.innerHTML="";cells=[];
+  for(var i=0;i<CNT;i++){
+    var d=document.createElement("div");
+    d.className="cell";d.dataset.i=i;
+    gridEl.appendChild(d);cells.push(d);
+  }
+}
+function paint(i){if(board[i])cells[i].classList.add("on");else cells[i].classList.remove("on");}
+function paintAll(){for(var i=0;i<CNT;i++)paint(i);}
+function crossList(r,c){
+  var list=[r*N+c];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function flipCross(r,c){
+  var list=crossList(r,c),i;
+  for(i=0;i<list.length;i++){board[list[i]]^=1;paint(list[i]);}
+}
+function nbrs(r,c){
+  var list=[];
+  if(r>0)list.push((r-1)*N+c);
+  if(r<N-1)list.push((r+1)*N+c);
+  if(c>0)list.push(r*N+c-1);
+  if(c<N-1)list.push(r*N+c+1);
+  return list;
+}
+function press(r,c){
+  flipCross(r,c);
+  moves++;
+  var nr=nbrs(r,c);
+  if(nr.length&&Math.random()<0.4){
+    var n1=nr[(Math.random()*nr.length)|0];
+    flipCross((n1/N)|0,n1%N);
+    chains++;
+    cells[n1].classList.remove("chain");
+    void cells[n1].offsetWidth;
+    cells[n1].classList.add("chain");
+    var msg="连锁反应!";
+    if(nr.length>1&&Math.random()<0.375){
+      var n2=nr[(Math.random()*nr.length)|0];
+      flipCross((n2/N)|0,n2%N);
+      chains++;
+      cells[n2].classList.remove("chain");
+      void cells[n2].offsetWidth;
+      cells[n2].classList.add("chain");
+      msg="二段连锁!!";
+    }
+    setMsg(msg);
+  }
+}
+function litCount(){var n=0,i;for(i=0;i<CNT;i++)if(board[i])n++;return n;}
+function pickCells(k){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function updateHud(){
+  elMoves.textContent=moves;elLit.textContent=litCount();elChains.textContent=chains;
+}
+function newGame(){
+  board=[];for(var i=0;i<CNT;i++)board.push(1);
+  moves=0;chains=0;state="playing";
+  var ps=pickCells(5),j;
+  for(j=0;j<ps.length;j++)flipCross((ps[j]/N)|0,ps[j]%N);
+  paintAll();updateHud();
+}
+function doPress(i){
+  if(state!=="playing")return;
+  press((i/N)|0,i%N);
+  updateHud();
+  if(litCount()===CNT)win();
+}
+function win(){
+  state="over";
+  ovTitle.textContent="乱中取胜!";
+  ovDesc.textContent="在连锁的搅局下依然点亮了全盘,共触发 "+chains+" 次连锁。运气与实力,缺一不可。";
+  ovScore.style.display="block";
+  ovScore.textContent="本局步数 "+moves+" · 连锁 "+chains+" 次";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){newGame();ov.classList.add("hide");}
+var cur=-1;
+function setCur(i){
+  if(cur>=0)cells[cur].classList.remove("cur");
+  cur=i;
+  if(cur>=0)cells[cur].classList.add("cur");
+}
+gridEl.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.classList&&t.classList.contains("cell"))doPress(parseInt(t.dataset.i,10));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}
+    return;
+  }
+  if(cur<0)setCur(5);
+  var r=(cur/N)|0,c=cur%N,k=e.key;
+  if(k==="ArrowUp"){r=(r+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowDown"){r=(r+1)%N;e.preventDefault();}
+  else if(k==="ArrowLeft"){c=(c+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowRight"){c=(c+1)%N;e.preventDefault();}
+  else if(k==="Enter"||k===" "){e.preventDefault();doPress(cur);return;}
+  else return;
+  setCur(r*N+c);
+});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();setMsg("已重开一局");
+});
+build();
+board=[];for(var z=0;z<CNT;z++)board.push(1);
+var ps0=pickCells(5),z2;
+for(z2=0;z2<ps0.length;z2++){
+  var l0=crossList((ps0[z2]/N)|0,ps0[z2]%N),z3;
+  for(z3=0;z3<l0.length;z3++)board[l0[z3]]^=1;
+}
+paintAll();updateHud();
+})();
+</script>
+</body>
+</html>

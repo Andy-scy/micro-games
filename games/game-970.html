@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极限足球</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#0f2a1c;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>极限足球</h1>
+<div id="tip">把球撞进对方球门!玩家1:WASD 移动 + F 射门(近身加力)· 玩家2:方向键移动 + K 射门 · 率先进 3 球获胜;75 秒到则分高者胜 · 蓝方守左门,橙方守右门</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">极限足球</div><div id="ovS">一对一单刀对决,身体可以撞球也能护球<br>玩家1:WASD 移动,F 近身射门 · 玩家2:方向键移动,K 近身射门<br>蓝方守左门攻右门,橙方守右门攻左门<br>率先进 3 球获胜;75 秒结束则分高者胜</div><button id="ovB">开球!</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var keys={},st;
+function mkP(i){return{x:i===0?170:550,y:240,vx:0,vy:0,fx:i===0?1:-1,fy:0,kick:0};}
+function mkBall(){return{x:360,y:240,vx:0,vy:0};}
+function reset(){
+ st={ph:"count",cd:70,score:[0,0],p:[mkP(0),mkP(1)],ball:mkBall(),msg:"",msgT:0,t:4500};
+}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function tryKick(i){
+ if(st.ph!=="play")return;
+ var p=st.p[i],b=st.ball;
+ if(Math.hypot(p.x-b.x,p.y-b.y)<50){
+  b.vx+=p.fx*7.4;b.vy+=p.fy*4.4;p.kick=9;
+ }
+}
+function moveP(i,dt){
+ var p=st.p[i],ix=0,iy=0;
+ if(i===0){if(keys["a"])ix--;if(keys["d"])ix++;if(keys["w"])iy--;if(keys["s"])iy++;}
+ else{if(keys["arrowleft"])ix--;if(keys["arrowright"])ix++;if(keys["arrowup"])iy--;if(keys["arrowdown"])iy++;}
+ if(ix!==0||iy!==0){var l=Math.hypot(ix,iy);p.fx=ix/l;p.fy=iy/l;}
+ p.vx+=(ix*0.5-p.vx*0.25)*dt;p.vy+=(iy*0.5-p.vy*0.25)*dt;
+ var v=Math.hypot(p.vx,p.vy);if(v>3.4){p.vx*=3.4/v;p.vy*=3.4/v;}
+ p.x+=p.vx*dt;p.y+=p.vy*dt;
+ if(p.x<40){p.x=40;p.vx=0;}
+ if(p.x>680){p.x=680;p.vx=0;}
+ if(p.y<24){p.y=24;p.vy=0;}
+ if(p.y>456){p.y=456;p.vy=0;}
+ if(p.kick>0)p.kick-=dt;
+}
+function step(dt){
+ var i;
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){
+  st.t-=dt;
+  if(st.t<=0){
+   st.ph="over";
+   var s0=st.score[0],s1=st.score[1];
+   show(s0===s1?"终场哨响,平局!":(s0>s1?"蓝方获胜!":"橙方获胜!"),"终场比分 "+s0+" : "+s1);
+   return;
+  }
+  for(i=0;i<2;i++)moveP(i,dt);
+  var a=st.p[0],b=st.p[1],dxp=b.x-a.x,dyp=b.y-a.y,dp=Math.hypot(dxp,dyp);
+  if(dp<40&&dp>0.01){
+   var nxp=dxp/dp,nyp=dyp/dp,ovp=(40-dp)/2;
+   a.x-=nxp*ovp;a.y-=nyp*ovp;b.x+=nxp*ovp;b.y+=nyp*ovp;
+  }
+  var bl=st.ball;
+  bl.vx*=Math.pow(0.9915,dt);bl.vy*=Math.pow(0.9915,dt);
+  var bv=Math.hypot(bl.vx,bl.vy);if(bv>9.5){bl.vx*=9.5/bv;bl.vy*=9.5/bv;}
+  bl.x+=bl.vx*dt;bl.y+=bl.vy*dt;
+  if(bl.y<26){bl.y=26;bl.vy=Math.abs(bl.vy)*0.85;}
+  if(bl.y>454){bl.y=454;bl.vy=-Math.abs(bl.vy)*0.85;}
+  var inMouth=bl.y>172&&bl.y<308;
+  if(bl.x<30&&bl.vx<0&&!inMouth){bl.x=30;bl.vx=Math.abs(bl.vx)*0.85;}
+  if(bl.x>690&&bl.vx>0&&!inMouth){bl.x=690;bl.vx=-Math.abs(bl.vx)*0.85;}
+  for(i=0;i<2;i++){
+   var p=st.p[i],dx=bl.x-p.x,dy=bl.y-p.y,d=Math.hypot(dx,dy);
+   if(d<32&&d>0.01){
+    var nx=dx/d,ny=dy/d;
+    bl.x+=nx*(32-d);bl.y+=ny*(32-d);
+    var rv=(bl.vx-p.vx)*nx+(bl.vy-p.vy)*ny;
+    if(rv<0){bl.vx-=nx*rv*1.8;bl.vy-=ny*rv*1.8;}
+   }
+  }
+  if(bl.x<14&&inMouth){st.score[1]++;st.ph="rend";st.msgT=85;st.msg="橙方进球!";}
+  else if(bl.x>706&&inMouth){st.score[0]++;st.ph="rend";st.msgT=85;st.msg="蓝方进球!";}
+ }else if(st.ph==="rend"){
+  st.msgT-=dt;
+  if(st.msgT<=0){
+   if(st.score[0]>=3||st.score[1]>=3){
+    st.ph="over";
+    show(st.score[0]>=3?"蓝方大胜!":"橙方大胜!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{
+    st.p=[mkP(0),mkP(1)];st.ball=mkBall();st.ph="play";
+   }
+  }
+ }
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ ctx.strokeStyle="rgba(255,255,255,.22)";ctx.lineWidth=2;
+ ctx.strokeRect(30,14,660,452);
+ ctx.beginPath();ctx.moveTo(360,14);ctx.lineTo(360,466);ctx.stroke();
+ ctx.beginPath();ctx.arc(360,240,52,0,6.2832);ctx.stroke();
+ ctx.fillStyle="rgba(79,209,197,.25)";ctx.fillRect(6,172,24,136);
+ ctx.fillStyle="rgba(246,173,85,.25)";ctx.fillRect(690,172,24,136);
+ ctx.fillStyle="rgba(255,255,255,.2)";ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+ ctx.fillText("蓝方球门",18,240);ctx.fillText("橙方球门",702,240);
+ var i,p;
+ for(i=0;i<2;i++){
+  p=st.p[i];
+  ctx.beginPath();ctx.arc(p.x,p.y,20,0,6.2832);
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";ctx.fill();
+  ctx.lineWidth=3;ctx.strokeStyle="#0f1220";ctx.stroke();
+  ctx.fillStyle="#0f1220";ctx.font="bold 15px system-ui";
+  ctx.fillText(i===0?"1":"2",p.x,p.y+1);
+  if(p.kick>0){
+   ctx.strokeStyle="rgba(255,255,255,.7)";ctx.lineWidth=2;
+   ctx.beginPath();ctx.arc(p.x,p.y,26,-1,1);ctx.stroke();
+  }
+ }
+ var bl=st.ball;
+ ctx.beginPath();ctx.arc(bl.x,bl.y,12,0,6.2832);
+ ctx.fillStyle="#f4f6ff";ctx.fill();
+ ctx.fillStyle="#20263f";
+ ctx.beginPath();ctx.arc(bl.x,bl.y,4.5,0,6.2832);ctx.fill();
+ ctx.font="bold 17px system-ui";ctx.textBaseline="top";
+ ctx.textAlign="left";ctx.fillStyle="#4fd1c5";ctx.fillText("蓝方 "+st.score[0],14,8);
+ ctx.textAlign="right";ctx.fillStyle="#f6ad55";ctx.fillText(st.score[1]+" 橙方",706,8);
+ ctx.textAlign="center";ctx.fillStyle="#e9edf8";
+ ctx.fillText(Math.max(0,Math.ceil(st.t/60))+" 秒",360,8);
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 44px system-ui";
+  ctx.fillText("开球!",360,180);
+  ctx.font="bold 28px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/24)),360,240);
+ }
+ if(st.ph==="rend"){
+  ctx.fillStyle="#f6c945";ctx.font="bold 36px system-ui";
+  ctx.fillText(st.msg+"  "+st.score[0]+":"+st.score[1],360,190);
+ }
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph!=="over")step(dt);
+ draw();requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ keys[k]=true;
+ if((k==="f"||k===" ")&&!e.repeat)tryKick(0);
+ if((k==="k"||k==="enter")&&!e.repeat)tryKick(1);
+});
+window.addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

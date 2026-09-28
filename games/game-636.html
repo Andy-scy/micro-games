@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>调色配方</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#sbar{height:100%;width:100%;background:#ffd166;border-radius:6px}
+#tgtrow{display:flex;gap:14px;align-items:center;justify-content:center;margin:8px 0}
+#tgt{width:84px;height:64px;border-radius:12px;border:2px solid rgba(255,255,255,.25);background:#232a48}
+#cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:6px}
+.rc{background:#232a48;border:2px solid #333c63;border-radius:11px;padding:10px;cursor:pointer;text-align:center}
+.rc .txt{font-size:14px;font-weight:700;color:#e8eaf6;line-height:1.5}
+.rc .sw{width:100%;height:34px;border-radius:8px;margin-top:7px;border:1px solid rgba(255,255,255,.2)}
+#q{text-align:center;font-size:15px;color:#cdd6f4;min-height:22px;margin-top:8px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>调色配方</h1>
+  <p class="tips">先记忆:4 张配方卡(如「红×2 + 蓝×1」)各配一种成色,限时记忆。再测验:给出目标成色,点出能调出它的那张配方——记忆阶段色卡会藏起来!答错 -1 生命(共 3 条),通过两轮记忆+测验即通关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">轮次</div><div class="big" id="cy">1/2</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="tbarWrap"><div id="sbar"></div></div>
+    <div id="tgtrow"><span class="mut">目标成色</span><div id="tgt"></div></div>
+    <div id="cards"></div>
+    <div id="q"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">调色配方</h2><p id="ovp">玩法:配色联想记忆。<br>· 记忆阶段:4 张配方卡展示各自调出的成色(约 9 秒)<br>· 测验阶段:色卡藏起,只剩配方文字;给出目标成色,点对应配方<br>· 第一轮 6 题、第二轮 8 题,第二轮重新抽配方<br>· 答对 +15 分;答错 -1 生命<br>· 混合规则:份数越多,该原料颜色占比越高</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var ING=[['红',[232,72,72]],['黄',[244,205,84]],['蓝',[86,122,235]],['白',[243,243,243]]];
+var recipes=[],cycle=1,phase='idle',qIdx=0,qTotal=6,tgtR=0;
+var score=0,lives=3,S=0,studyLen=9,studyT=9;
+var playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function rgbStr(c){return 'rgb('+Math.round(c[0])+','+Math.round(c[1])+','+Math.round(c[2])+')'}
+function dist(a,b){
+  var d=(a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]);
+  return Math.sqrt(d);
+}
+function genRecipes(){
+  recipes=[];
+  var guard=0;
+  while(recipes.length<4&&guard<600){
+    guard++;
+    var a=Math.floor(Math.random()*4),b=Math.floor(Math.random()*4);
+    if(a===b)continue;
+    var w1=1+Math.floor(Math.random()*3),w2=1+Math.floor(Math.random()*3);
+    var rgb=[
+      (ING[a][1][0]*w1+ING[b][1][0]*w2)/(w1+w2),
+      (ING[a][1][1]*w1+ING[b][1][1]*w2)/(w1+w2),
+      (ING[a][1][2]*w1+ING[b][1][2]*w2)/(w1+w2)
+    ];
+    var ok=true;
+    if(guard<=300){
+      for(var i=0;i<recipes.length;i++)if(dist(rgb,recipes[i].rgb)<70)ok=false;
+    }
+    if(ok)recipes.push({txt:ING[a][0]+'×'+w1+' + '+ING[b][0]+'×'+w2,rgb:rgb});
+  }
+}
+function renderCards(showSwatch,clickable){
+  var box=$('cards');box.innerHTML='';
+  for(var i=0;i<recipes.length;i++){
+    var d=document.createElement('div');
+    d.className='rc';
+    var t=document.createElement('div');
+    t.className='txt';
+    t.textContent=recipes[i].txt;
+    d.appendChild(t);
+    var s=document.createElement('div');
+    s.className='sw';
+    s.style.background=rgbStr(recipes[i].rgb);
+    s.style.visibility=showSwatch?'visible':'hidden';
+    d.appendChild(s);
+    if(clickable)(function(idx){d.addEventListener('click',function(){answer(idx)})})(i);
+    box.appendChild(d);
+  }
+}
+function startStudy(){
+  phase='study';
+  studyLen=cycle===1?9:8;
+  studyT=studyLen;
+  genRecipes();
+  renderCards(true,false);
+  $('tgt').style.background='#232a48';
+  $('q').textContent='记忆阶段:记住每张配方调出的成色!';
+}
+function startQuiz(){
+  phase='quiz';
+  qTotal=cycle===1?6:8;
+  qIdx=0;
+  renderCards(false,true);
+  nextQ();
+}
+function nextQ(){
+  tgtR=Math.floor(Math.random()*recipes.length);
+  $('tgt').style.background=rgbStr(recipes[tgtR].rgb);
+  $('q').textContent='第 '+(qIdx+1)+'/'+qTotal+' 题:哪张配方能调出这个成色?';
+}
+function answer(i){
+  if(!playing||over||phase!=='quiz')return;
+  if(i===tgtR){
+    score+=15;
+    $('q').textContent='答对!+15 分';
+  }else{
+    lives--;
+    $('q').textContent='答错……正确配方是「'+recipes[tgtR].txt+'」';
+    $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    if(lives<=0){finish(false);return;}
+  }
+  $('sc').textContent=score;
+  qIdx++;
+  phase='wait';
+  if(qIdx>=qTotal){
+    if(cycle===1){
+      cycle=2;
+      $('cy').textContent='2/2';
+      $('q').textContent='第一轮测验完成!新的配方来了……';
+      var tk=++S;
+      setTimeout(function(){if(tk===S&&playing&&!over)startStudy()},1400);
+    }else{
+      finish(true);
+    }
+  }else{
+    var tk2=++S;
+    setTimeout(function(){
+      if(tk2!==S||!playing||over)return;
+      phase='quiz';
+      nextQ();
+    },1000);
+  }
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'配色配方烂熟于心!':'记岔了配方…';
+  $('ovp').innerHTML=(win?'两轮记忆与测验全部通过!':'生命耗尽,止步第 '+cycle+' 轮。')+'<br>总分 <b>'+score+'</b><br>「红加黄偏橙,多蓝则闷」,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  S++;cycle=1;score=0;lives=3;
+  playing=true;over=false;
+  $('cy').textContent='1/2';
+  $('sc').textContent='0';
+  $('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  startStudy();
+}
+$('obtn').addEventListener('click',startGame);
+genRecipes();renderCards(true,false);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&phase==='study'){
+    studyT-=dt;
+    $('sbar').style.width=(Math.max(0,studyT)/studyLen*100)+'%';
+    if(studyT<=0)startQuiz();
+  }else if(playing&&!over&&phase==='quiz'){
+    $('sbar').style.width='0%';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

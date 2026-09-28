@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流光搅盏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#4fd8c4;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 12px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{font-weight:700}
+.ctl button.sel.d0{background:#ff7b8a;border-color:#ff7b8a;color:#4c0519}
+.ctl button.sel.d1{background:#4fd8c4;border-color:#4fd8c4;color:#042f2e}
+.ctl button.sel.d2{background:#f7c948;border-color:#f7c948;color:#451a03}
+.ctl button.sel.dn{background:#4fd8c4;border-color:#4fd8c4;color:#042f2e;font-weight:700}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4fd8c4}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#4fd8c4;color:#042f2e;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>流光搅盏</h1>
+  <p class="hint">按住在盏中划圈搅动 · 可点色入染 · 漩涡指数搅到银河级并稳住 3 秒即圆满</p>
+  <div class="hud">
+    <span>漩涡指数 <b id="hIdx">0.00</b></span>
+    <span>水相 <b id="hLvl">静水</b></span>
+    <span>银河维持 <b id="hHold">0.0</b>/3s</span>
+  </div>
+  <div class="ctl" id="chips">
+    <button data-d="-1" class="sel dn">不染</button>
+    <button data-d="0" class="d0">绯</button>
+    <button data-d="1" class="d1">松石</button>
+    <button data-d="2" class="d2">藤黄</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">流光搅盏</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">执匙搅盏</button>
+      <button id="btnMore" style="display:none">继续慢搅</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hIdx=$("hIdx"),hLvl=$("hLvl"),hHold=$("hHold");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,CX=235,CY=158,R=132,TAU=Math.PI*2;
+var DYE=["#ff7b8a","#4fd8c4","#f7c948"];
+var LVN=["静水","奶纹","初涡","碧波","星涡","银河"];
+var LVT=[0.5,1.1,1.9,2.9,4.1];
+var parts=[],N=620,i;
+for(i=0;i<N;i++){
+  var a=Math.random()*TAU,rr=Math.sqrt(Math.random())*(R-10);
+  parts.push({x:CX+Math.cos(a)*rr,y:CY+Math.sin(a)*rr,vx:0,vy:0,col:"#5d6b96"});
+}
+var curDye=-1,pressing=false,pX=0,pY=0,prevX=0,prevY=0;
+var state="menu",goalDone=false,hold=0;
+function step(dt){
+  var i2,pdx=0,pdy=0;
+  if(pressing){
+    pdx=pX-prevX;pdy=pY-prevY;
+    if(pdx>40)pdx=40;if(pdx<-40)pdx=-40;
+    if(pdy>40)pdy=40;if(pdy<-40)pdy=-40;
+  }
+  var sc=0,sv=0;
+  for(i2=0;i2<N;i2++){var p=parts[i2];
+    if(pressing){
+      var dxm=p.x-pX,dym=p.y-pY,dm=Math.sqrt(dxm*dxm+dym*dym);
+      if(dm<62){
+        var fall=1-dm/62;
+        p.vx+=pdx*10*fall;p.vy+=pdy*10*fall;
+        if(curDye>=0)p.col=DYE[curDye];
+      }
+    }
+    p.x+=p.vx*dt;p.y+=p.vy*dt;
+    p.vx*=(1-1.1*dt);p.vy*=(1-1.1*dt);
+    var dx=p.x-CX,dy=p.y-CY,r=Math.sqrt(dx*dx+dy*dy);
+    if(r>R-4){
+      p.x=CX+dx/r*(R-4);p.y=CY+dy/r*(R-4);
+      var dot=(p.vx*dx+p.vy*dy)/r;
+      if(dot>0){p.vx-=dot*dx/r*1.6;p.vy-=dot*dy/r*1.6;}
+      p.vx*=0.94;p.vy*=0.94;
+      r=R-4;
+    }
+    sc+=dx*p.vy-dy*p.vx;sv+=r*r+400;
+  }
+  var om=Math.abs(sc/sv)*60;
+  var lvl=0,i3;
+  for(i3=0;i3<LVT.length;i3++)if(om>=LVT[i3])lvl=i3+1;
+  hIdx.textContent=om.toFixed(2);
+  hLvl.textContent=LVN[lvl];
+  if(om>=4.1)hold=Math.min(3,hold+dt);
+  else hold=Math.max(0,hold-dt*1.5);
+  hHold.textContent=hold.toFixed(1);
+  prevX=pX;prevY=pY;
+  if(!goalDone&&hold>=3){
+    goalDone=true;state="zen";
+    ovT.textContent="盏中银河";
+    ovD.textContent="漩涡已成银河之相,流光不散。\n搅与不搅,皆可再续。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#1a2140";
+  ctx.beginPath();ctx.arc(CX,CY,R+12,0,TAU);ctx.fill();
+  ctx.fillStyle="#0d1226";
+  ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.fill();
+  ctx.strokeStyle="rgba(79,216,196,.4)";ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(CX,CY,R,0,TAU);ctx.stroke();
+  ctx.strokeStyle="rgba(79,216,196,.12)";ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.arc(CX,CY,R-14,0,TAU);ctx.stroke();
+  var i2;
+  for(i2=0;i2<N;i2++){var p=parts[i2];
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-1.2,p.y-1.2,2.4,2.4);}
+  if(pressing){
+    ctx.strokeStyle="rgba(255,255,255,.35)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(pX,pY,14,0,TAU);ctx.stroke();
+  }
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;var p=ptr(e);pX=p.x;pY=p.y;prevX=p.x;prevY=p.y;}
+function mv(e){
+  var p=ptr(e);
+  pX=p.x;pY=p.y;
+  if(!pressing){prevX=p.x;prevY=p.y;return;}
+  if(state==="play")e.preventDefault();
+}
+function up(){pressing=false;}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+var cbs=document.querySelectorAll("[data-d]");
+for(i=0;i<cbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    var dd=b.getAttribute("data-d");
+    curDye=parseInt(dd,10);
+    for(var k=0;k<cbs.length;k++){
+      var od=cbs[k].getAttribute("data-d");
+      cbs[k].className=od==="-1"?"dn":"d"+od;
+    }
+    b.className="sel "+b.className;
+  });
+})(cbs[i]);}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="流光搅盏";
+  ovD.textContent="盏中盛着六百点流光。按住并划圈搅动,\n流光便随你的手旋转成涡;选一种颜色可随手入染。\n漩涡指数越搅越高:奶纹、初涡、碧波、星涡,\n直至银河——稳稳维持三秒,即算圆满。";
+  btnGo.textContent="执匙搅盏";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

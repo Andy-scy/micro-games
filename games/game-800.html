@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钓鱼大赛</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:400px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>钓鱼大赛</h1>
+<p class="tip">60 秒正赛,14 份鱼饵,三位强劲对手同湖竞技!每隔一会儿出现「巨物窗口」——窗口期下竿有四成钓到 250 分巨物。把鱼饵花在刀刃上,只拿第一名!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">60</b> 秒</span><span>鱼饵 <b id="s3">14</b></span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">钓鱼大赛</h2><p id="op">老周、阿莉、小凯都已就位。<br>普通鱼 20/50/90 分,巨物 250 分;<br>盯紧「巨物窗口」的警报再下竿,<br>60 秒后积分榜见真章!</p><button id="ob">入场检录</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2'),eB=document.getElementById('s3');
+var W=cv.width,H=cv.height,WL=170;
+var state='ready',tl=60,score=0,bait=14,msg='';
+var phase='idle',pt=0,tWait=0,bigT=12,bigWin=0,jump=null,jv=0,bobDip=0;
+var bots=[['老周',0,0],['阿莉',0,0],['小凯',0,0]];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function cast(){
+  if(state!=='play')return;
+  if(phase!=='idle')return;
+  if(bait<=0){msg='鱼饵用完了,只能干瞪眼…';return}
+  bait--;phase='wait';pt=0;msg='';jump=null;
+  tWait=rnd(1.6,2.2);
+}
+function resolve(){
+  var v,name;
+  if(bigWin>0&&Math.random()<0.4){
+    v=250;name='巨物!!';
+  }else{
+    var r=Math.random();
+    if(r<0.55){v=20;name='小白条'}
+    else if(r<0.85){v=50;name='鳊鱼'}
+    else{v=90;name='大鲤子'}
+  }
+  score+=v;jv=v;jump={t:0};
+  msg='钓起'+name+'+'+v+' 分';
+  phase='idle';bobDip=0;
+}
+function finish(win,rank){
+  state='over';ob.textContent='再赛一场';
+  ot.textContent=win?'冠军!金牌钓手':(rank===2?'亚军,惜败!':'第 '+rank+' 名,再接再厉');
+  var rows=[['你',score]];var i;
+  for(i=0;i<3;i++)rows.push([bots[i][0],bots[i][1]]);
+  var txt='';
+  for(i=0;i<4;i++)txt+=rows[i][0]+' '+rows[i][1]+(i<3?' · ':'');
+  op.innerHTML='最终积分榜:'+txt+'<br>'+(win?'奖杯属于沉得住气的人!':'巨物窗口才是胜负手,别把饵撒在平水期。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=60;score=0;bait=14;msg='';phase='idle';pt=0;
+  bigT=12;bigWin=0;jump=null;bobDip=0;
+  bots=[['老周',0,0],['阿莉',0,0],['小凯',0,0]];
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(jump){jump.t+=dt;if(jump.t>0.9)jump=null}
+  var i;
+  if(state!=='play')return;
+  tl-=dt;
+  if(tl<=0){
+    tl=0;
+    var rows=[['你',score]];
+    for(i=0;i<3;i++)rows.push([bots[i][0],bots[i][1]]);
+    rows.sort(function(a,b){return b[1]-a[1]});
+    var rank=0;
+    for(i=0;i<4;i++){if(rows[i][0]==='你'){rank=i+1;break}}
+    finish(rank===1,rank);
+    return;
+  }
+  if(bigWin>0)bigWin-=dt;
+  else{
+    bigT-=dt;
+    if(bigT<=0){bigT=18;bigWin=4;msg='巨物窗口!!快下竿!'}
+  }
+  for(i=0;i<3;i++){
+    var b=bots[i];
+    b[2]+=dt;
+    if(b[2]>=1){
+      b[2]-=1;
+      b[1]+=Math.floor(rnd(4,11));
+      if(Math.random()<0.1)b[1]+=40;
+    }
+  }
+  pt+=dt;
+  if(phase==='wait'){
+    bobDip=pt>tWait-0.5?10:3;
+    if(pt>=tWait)resolve();
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WL);g.addColorStop(0,'#151c36');g.addColorStop(1,'#2b3157');
+  X.fillStyle=g;X.fillRect(0,0,W,WL);
+  var g2=X.createLinearGradient(0,WL,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#091631');
+  X.fillStyle=g2;X.fillRect(0,WL,W,H-WL);
+  var t=Date.now()*0.001,i,xx,yy;
+  X.strokeStyle='rgba(127,212,255,.16)';X.lineWidth=2;
+  for(i=0;i<3;i++){X.beginPath();for(xx=0;xx<=W;xx+=16){yy=WL+40+i*100+Math.sin(xx*0.04+t*(1+i*0.3))*5;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke()}
+  var byy=WL-8+bobDip;
+  X.strokeStyle='rgba(230,238,246,.6)';X.lineWidth=1.5;
+  X.beginPath();X.moveTo(40,50);X.quadraticCurveTo(150,90,240,byy-6);X.stroke();
+  X.fillStyle='#ff5f5f';X.beginPath();X.arc(240,byy,7,Math.PI,Math.PI*2);X.fill();
+  X.fillStyle='#eef3fa';X.beginPath();X.arc(240,byy,7,0,Math.PI);X.fill();
+  if(jump){
+    var k=jump.t/0.9,fy=WL-50-Math.sin(k*Math.PI)*90;
+    X.fillStyle=jv>=250?'#ffd75e':'#8fb7d9';
+    X.beginPath();X.ellipse(240,fy,jv>=250?30:20,jv>=250?13:9,-0.4,0,7);X.fill();
+  }
+  var rows=[['你',score,true]];
+  for(i=0;i<3;i++)rows.push([bots[i][0],bots[i][1],false]);
+  rows.sort(function(a,b){return b[1]-a[1]});
+  var rank=1;
+  for(i=0;i<4;i++){if(rows[i][2]){rank=i+1;break}}
+  X.fillStyle='rgba(8,12,24,.85)';X.strokeStyle='rgba(127,212,255,.5)';X.lineWidth=1.5;
+  X.fillRect(296,10,176,118);X.strokeRect(296,10,176,118);
+  X.fillStyle='#7fd4ff';X.font='bold 13px system-ui';X.textAlign='left';
+  X.fillText('大赛实时榜',306,30);
+  for(i=0;i<4;i++){
+    X.fillStyle=rows[i][2]?'#ffd75e':'rgba(200,215,235,.85)';
+    X.font=(rows[i][2]?'bold ':'')+'13px system-ui';
+    X.fillText((i+1)+'. '+rows[i][0],306,52+i*20);
+    X.textAlign='right';X.fillText(String(rows[i][1]),462,52+i*20);
+    X.textAlign='left';
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 15px system-ui';X.textAlign='center';
+  X.fillText(msg,W/2,30);
+  if(bigWin>0){
+    X.fillStyle=Math.sin(t*10)>0?'#ff6b6b':'#ffd75e';
+    X.font='bold 17px system-ui';
+    X.fillText('巨物窗口 '+bigWin.toFixed(0)+' 秒!',W/2,58);
+  }else{
+    X.fillStyle='rgba(154,163,181,.8)';X.font='12px system-ui';
+    X.fillText('下一个巨物窗口约 '+Math.ceil(bigT)+' 秒后',W/2,58);
+  }
+  X.fillStyle='#7fd4ff';X.font='bold 14px system-ui';
+  X.fillText('当前第 '+rank+' 名',W/2,WL-16);
+  if(phase==='idle'){X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';X.fillText('点击 / 空格 抛竿',W/2,H-14)}
+}
+cv.addEventListener('pointerdown',cast);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else cast();
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);eB.textContent=bait;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

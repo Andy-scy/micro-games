@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>发球机特训</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;gap:10px}
+h1{margin:2px 0;font-size:22px;letter-spacing:4px;color:#22d3ee}
+#wrap{position:relative;width:min(96vw,860px)}
+canvas{display:block;width:100%;height:auto;border-radius:14px;background:#141830;box-shadow:0 0 0 1px #262b4a;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(10,12,26,.86);border-radius:14px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#msg{font-size:16px;line-height:2;white-space:pre-line}
+#row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.btn{background:#06b6d4;color:#04283a;border:none;border-radius:10px;padding:10px 26px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:700}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>发球机特训</h1>
+<div id="wrap">
+<canvas id="cv" width="800" height="500"></canvas>
+<div id="overlay"><div id="msg"></div><div id="row"></div></div>
+</div>
+<script>
+'use strict';
+var W=800,H=500;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var overlay=document.getElementById('overlay'),msg=document.getElementById('msg'),row=document.getElementById('row');
+var state='menu';
+var player={x:26,y:H/2-55,w:14,h:110};
+var ball=null,serveT=80,lives=3,score=0,machineY=H/2;
+var keys={},mouseY=null,floats=[];
+
+function mkBtn(text,fn){
+  var b=document.createElement('button');
+  b.className='btn';b.textContent=text;
+  b.addEventListener('click',fn);
+  row.appendChild(b);
+  return b;
+}
+var bStart=mkBtn('开始特训',function(){start();});
+function showMenu(){
+  state='menu';
+  msg.textContent='右侧发球机会不断变换位置射球来袭，\n把球回击到右侧得分，漏接一球扣 1 条命（共 3 条）。\n回击越多，发球越快越刁钻。看你能接住多少球！\n操作：鼠标/触屏滑动，或 ↑↓（W/S）上下移动。';
+  bStart.textContent='开始特训';
+  overlay.classList.remove('hide');
+}
+function start(){
+  ball=null;serveT=80;lives=3;score=0;floats=[];keys={};mouseY=null;
+  machineY=H/2;
+  player.y=H/2-player.h/2;
+  state='play';
+  overlay.classList.add('hide');
+}
+function endGame(){
+  state='end';
+  msg.textContent='特训结束！\n本次成功回击 '+score+' 球';
+  bStart.textContent='再来一局';
+  overlay.classList.remove('hide');
+}
+function flash(t){floats.push({t:t,x:W/2,y:H/2-70,life:60});}
+function fire(){
+  machineY=90+Math.random()*(H-180);
+  var spd=Math.min(8.4,3.4+score*0.11);
+  ball={
+    x:W-52,y:machineY,
+    vx:-spd,
+    vy:(Math.random()*2-1)*(1.4+Math.min(2.6,score*0.06)),
+    r:9,ret:false
+  };
+}
+function update(dt){
+  var pv=0;
+  if(keys.up){pv=-1;}else if(keys.down){pv=1;}
+  if(pv!==0){mouseY=null;player.y+=pv*7.4*dt;}
+  else if(mouseY!==null){player.y+=(mouseY-(player.y+player.h/2))*Math.min(1,0.3*dt);}
+  player.y=Math.max(6,Math.min(H-player.h-6,player.y));
+  var i;
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].life-=dt;floats[i].y-=0.5*dt;
+    if(floats[i].life<=0){floats.splice(i,1);}
+  }
+  if(!ball){
+    serveT-=dt;
+    if(serveT<=0){fire();}
+    return;
+  }
+  ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+  if(ball.y<ball.r){ball.y=ball.r;ball.vy=Math.abs(ball.vy);}
+  if(ball.y>H-ball.r){ball.y=H-ball.r;ball.vy=-Math.abs(ball.vy);}
+  if(ball.vx<0&&ball.x+ball.r>player.x&&ball.x-ball.r<player.x+player.w&&ball.y+ball.r>player.y&&ball.y-ball.r<player.y+player.h){
+    var rel=(ball.y-(player.y+player.h/2))/(player.h/2);
+    rel=Math.max(-1,Math.min(1,rel));
+    var spd=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy);
+    spd=Math.min(10,spd*1.04+0.2);
+    ball.vx=spd;
+    ball.vy=rel*3.2+ball.vy*0.2;
+    ball.x=player.x+player.w+ball.r;
+    ball.ret=true;
+  }
+  if(ball.x>W+24){
+    if(ball.ret){
+      score++;
+      flash('回击成功 +1');
+      ball=null;
+      serveT=Math.max(46,96-score*2.4);
+    }
+  }else if(ball.x<-24){
+    lives--;
+    flash('漏接！生命 -1');
+    ball=null;
+    serveT=70;
+    if(lives<=0){endGame();}
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(232,234,246,.14)';
+  ctx.lineWidth=3;ctx.setLineDash([10,14]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign='center';
+  ctx.font='bold 50px system-ui';
+  ctx.fillStyle='rgba(232,234,246,.9)';
+  ctx.fillText(score,W/2,64);
+  ctx.font='13px system-ui';
+  ctx.fillStyle='#22d3ee';
+  ctx.fillText('成功回击',W/2,84);
+  var i;
+  ctx.fillStyle='#f43f5e';
+  for(i=0;i<lives;i++){
+    ctx.beginPath();ctx.arc(30+i*28,28,8,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle='#334155';
+  for(i=lives;i<3;i++){
+    ctx.beginPath();ctx.arc(30+i*28,28,8,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle='#334155';
+  ctx.fillRect(W-36,machineY-46,26,92);
+  ctx.fillStyle='#0e7490';
+  ctx.fillRect(W-30,machineY-10,20,20);
+  ctx.fillStyle='#22d3ee';
+  ctx.fillRect(W-36,machineY-46,26,6);
+  if(ball){
+    ctx.fillStyle='#f8fafc';
+    ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(34,211,238,.4)';
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r+4,0,Math.PI*2);ctx.stroke();
+  }else if(state==='play'&&serveT<28&&Math.floor(serveT/6)%2===0){
+    ctx.strokeStyle='#f43f5e';
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(W-52,machineY,16,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.fillStyle='#22d3ee';
+  ctx.fillRect(player.x,player.y,player.w,player.h);
+  ctx.font='16px system-ui';ctx.fillStyle='#67e8f9';
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].life/30);
+    ctx.fillText(floats[i].t,floats[i].x,floats[i].y);
+  }
+  ctx.globalAlpha=1;
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(2.5,Math.max(0.2,(t-last)/16.7));
+  last=t;
+  if(state==='play'){update(dt);}
+  draw();
+  requestAnimationFrame(loop);
+}
+window.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=true;e.preventDefault();}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=false;}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=false;}
+});
+function ptrY(e){
+  var r=cv.getBoundingClientRect();
+  var cy=e.touches&&e.touches[0]?e.touches[0].clientY:e.clientY;
+  mouseY=(cy-r.top)*(H/r.height);
+}
+cv.addEventListener('mousemove',ptrY);
+cv.addEventListener('touchstart',function(e){e.preventDefault();ptrY(e);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();ptrY(e);},{passive:false});
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

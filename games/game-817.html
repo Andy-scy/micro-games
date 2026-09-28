@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>菜单扩张记</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#facc15;font-size:16px}
+.stage{position:relative;background:#211d10;border:2px solid #3c341c;border-radius:12px;padding:12px}
+.sec{font-size:12px;color:#8b90b0;margin:2px 0 6px}
+.bubbles{display:flex;gap:10px;min-height:104px;flex-wrap:wrap}
+.bub{width:104px;background:#fdf6e3;color:#333;border-radius:12px;padding:8px;text-align:center;cursor:pointer;user-select:none}
+.bub .bic{font-size:26px}
+.bub .bnm{font-size:12px;font-weight:700}
+.bub .bp{font-size:11px;color:#a0522d;font-weight:700}
+.bub .cbar{height:8px;border-radius:4px;background:#d9c79a;overflow:hidden;margin-top:4px}
+.bub .cbar i{display:block;height:100%;width:0;background:#e67e22}
+.bub.cooking{outline:3px solid #e67e22}
+.menurow{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.mn{background:#2a2414;border:1px solid #4a4024;border-radius:8px;padding:4px 10px;font-size:12px;color:#c7cbe8}
+.mn.lock{opacity:.35}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.94);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:23px;color:#facc15}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#facc15;color:#3a2a05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.shop{display:none;flex-wrap:wrap;gap:8px;justify-content:center;max-width:420px}
+.shop button{margin-top:0;background:#2a2414;color:#c7cbe8;border:1px solid #4a4024;border-radius:10px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer}
+.shop button:disabled{opacity:.4;cursor:default}
+.shop button.owned{border-color:#4ade80;color:#4ade80}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>菜单扩张记</h1>
+  <p class="hint">经营 5 天:点客人的<b style="color:#facc15">订单气泡</b>占用灶位开做,做好自动收钱<br>每天有营业额指标,打烊后用利润解锁更贵的菜,明天更赚!</p>
+  <div class="hud">
+    <span><b id="day">第1天</b></span>
+    <span>金币 <b id="coins">$0</b></span>
+    <span>今日 <b id="today">$0</b></span>
+    <span>时间 <b id="time">32</b>秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="sec">到店客人(点击下单 · 灶位 2 口)</div>
+    <div class="bubbles" id="bubbles"></div>
+    <div class="sec">本店菜单</div>
+    <div class="menurow" id="menurow"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">菜单扩张记</h2>
+      <p id="ovDesc">每天 32 秒营业时间,点击客人气泡让厨房开做(同时只能做 2 份),做好自动上菜收钱。达到当日指标才能继续经营,打烊后记得投资新菜!</p>
+      <div class="shop" id="ovShop"></div>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始第 1 天</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var CAT=[
+ {n:"蛋炒饭",ic:"🍚",p:8,t:1.6,cost:0},
+ {n:"牛肉拉面",ic:"🍜",p:14,t:3.0,cost:0},
+ {n:"黄金饺子",ic:"🥟",p:24,t:4.5,cost:60},
+ {n:"香烤秋刀",ic:"🐟",p:38,t:6.5,cost:130},
+ {n:"什锦火锅",ic:"🍲",p:60,t:9.0,cost:240}
+];
+var QUOTA=[50,110,190,290,410],DAYLEN=32;
+var elDay=$("day"),elCoins=$("coins"),elToday=$("today"),elTime=$("time"),elBest=$("best");
+var bubblesEl=$("bubbles"),menurow=$("menurow"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),ovShop=$("ovShop"),btnGo=$("btnGo");
+var best=loadBest("mg_s817");
+var state="menu",day,coins,unlocked,dayEarn,timeLeft,bubbles,spawnT,lastT,msgT;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function cookingCount(){
+  var n=0,i;
+  for(i=0;i<bubbles.length;i++)if(bubbles[i].st==="cook")n++;
+  return n;
+}
+function renderMenu(){
+  var h="",i;
+  for(i=0;i<CAT.length;i++){
+    h+='<div class="mn'+(unlocked[i]?"":" lock")+'">'+CAT[i].ic+" "+CAT[i].n+" $"+CAT[i].p+"</div>";
+  }
+  menurow.innerHTML=h;
+}
+function updateHud(){
+  elDay.textContent="第"+day+"天";
+  elCoins.textContent="$"+coins;
+  elToday.textContent="$"+dayEarn+"/"+QUOTA[day-1];
+  elTime.textContent=Math.max(0,Math.ceil(timeLeft));
+  elBest.textContent=best;
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function renderBubbles(){
+  var h="";
+  for(var i=0;i<bubbles.length;i++){
+    var b=bubbles[i],c=CAT[b.dish];
+    h+='<div class="bub'+(b.st==="cook"?" cooking":"")+'" data-i="'+i+'">'
+      +'<div class="bic">'+c.ic+'</div><div class="bnm">'+c.n+'</div>';
+    if(b.st==="cook")h+='<div class="bp">烹饪中</div><div class="cbar"><i style="width:'+Math.min(100,b.t/c.t*100)+'%"></i></div>';
+    else h+='<div class="bp">点击开做 $'+c.p+'</div><div class="cbar"><i style="width:0"></i></div>';
+    h+="</div>";
+  }
+  if(!bubbles.length)h='<div style="color:#8b90b0;font-size:13px;align-self:center">暂无客人,喝口茶…</div>';
+  bubblesEl.innerHTML=h;
+}
+function endDay(){
+  var quota=QUOTA[day-1];
+  if(dayEarn<quota){
+    state="over";
+    if(coins>best){best=coins;saveBest("mg_s817",best);}
+    ovShop.style.display="none";
+    ovTitle.textContent="第 "+day+" 天亏损结业";
+    ovDesc.textContent="今日流水 $"+dayEarn+",未达到 $"+quota+" 的指标。";
+    ovScore.style.display="block";
+    ovScore.textContent="金币 $"+coins+" · 最佳 $"+best;
+    btnGo.textContent="从头再来";
+    ov.classList.remove("hide");
+    updateHud();
+    return;
+  }
+  if(day>=5){
+    state="win";
+    if(coins>best){best=coins;saveBest("mg_s817",best);}
+    ovShop.style.display="none";
+    ovTitle.textContent="五星小店养成成功!";
+    ovDesc.textContent="五天全部达标,你的小馆远近驰名!";
+    ovScore.style.display="block";
+    ovScore.textContent="最终金币 $"+coins+" · 最佳 $"+best;
+    btnGo.textContent="再开一家";
+    ov.classList.remove("hide");
+    updateHud();
+    return;
+  }
+  state="shop";
+  ovScore.style.display="none";
+  ovTitle.textContent="第 "+day+" 天打烊";
+  ovDesc.textContent="今日流水 $"+dayEarn+" 达标!\n明天指标 $"+QUOTA[day]+" · 采购新菜(明天上架):";
+  ovShop.style.display="flex";
+  var h="",i;
+  for(i=0;i<CAT.length;i++){
+    if(unlocked[i])h+='<button class="owned" disabled>✓ '+CAT[i].n+"</button>";
+    else h+='<button data-i="'+i+'"'+(coins<CAT[i].cost?" disabled":"")+">"+CAT[i].ic+" "+CAT[i].n+" · $"+CAT[i].cost+"</button>";
+  }
+  ovShop.innerHTML=h;
+  btnGo.textContent="开始第 "+(day+1)+" 天";
+  ov.classList.remove("hide");
+  renderMenu();updateHud();
+}
+function buy(i){
+  var c=CAT[i];
+  if(unlocked[i]||coins<c.cost)return;
+  coins-=c.cost;
+  unlocked[i]=true;
+  showMsg("新菜上架:"+c.n+"!","#4ade80");
+  renderMenu();updateHud();
+  endDayShopRefresh();
+}
+function endDayShopRefresh(){
+  if(state!=="shop")return;
+  var h="",i;
+  for(i=0;i<CAT.length;i++){
+    if(unlocked[i])h+='<button class="owned" disabled>✓ '+CAT[i].n+"</button>";
+    else h+='<button data-i="'+i+'"'+(coins<CAT[i].cost?" disabled":"")+">"+CAT[i].ic+" "+CAT[i].n+" · $"+CAT[i].cost+"</button>";
+  }
+  ovShop.innerHTML=h;
+}
+function beginDay(d){
+  day=d;dayEarn=0;timeLeft=DAYLEN;bubbles=[];spawnT=0.4;
+  state="playing";
+  ov.classList.add("hide");
+  ovShop.style.display="none";
+  msg.textContent="";msgT=0;
+  renderMenu();renderBubbles();updateHud();
+}
+function startGame(){
+  coins=0;
+  unlocked=[true,true,false,false,false];
+  beginDay(1);
+}
+function clickBubble(i){
+  if(state!=="playing")return;
+  var b=bubbles[i];
+  if(!b||b.st!=="wait")return;
+  if(cookingCount()>=2){showMsg("灶位满了,等等再接!","#e8b06a");return;}
+  b.st="cook";b.t=0;
+  renderBubbles();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  timeLeft-=dts;
+  if(timeLeft<=0){timeLeft=0;updateHud();endDay();return;}
+  spawnT-=dts;
+  if(spawnT<=0){
+    spawnT=2.2;
+    if(bubbles.length<3){
+      var pool=[],i;
+      for(i=0;i<CAT.length;i++)if(unlocked[i])pool.push(i);
+      bubbles.push({dish:pool[(Math.random()*pool.length)|0],st:"wait",t:0});
+    }
+  }
+  var served=[];
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    if(b.st==="cook"){
+      b.t+=dts;
+      if(b.t>=CAT[b.dish].t){
+        coins+=CAT[b.dish].p;dayEarn+=CAT[b.dish].p;
+        showMsg("上菜 +$"+CAT[b.dish].p,"#4ade80");
+        bubbles.splice(i,1);
+        updateHud();
+      }
+    }
+  }
+  renderBubbles();
+}
+ovShop.addEventListener("click",function(e){
+  var n=e.target;
+  var i=n.getAttribute&&n.getAttribute("data-i");
+  if(i!==null&&i!==undefined)buy(parseInt(i,10));
+});
+bubblesEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==bubblesEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==bubblesEl)clickBubble(parseInt(n.getAttribute("data-i"),10));
+});
+btnGo.addEventListener("click",function(){
+  if(state==="shop")beginDay(day+1);
+  else startGame();
+});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.code==="Space")&&(state==="menu"||state==="over"||state==="win")){
+    e.preventDefault();startGame();
+  }
+});
+unlocked=[true,true,false,false,false];
+day=1;coins=0;dayEarn=0;timeLeft=DAYLEN;bubbles=[];
+renderMenu();updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>翻词配对</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.card2{aspect-ratio:3/3.4;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:15px;font-weight:bold;cursor:pointer;user-select:none;transition:transform .15s;background:#232a4d;border:2px solid #2a3160;color:transparent}
+.card2 .front{display:none}
+.card2.open{background:#10142a;border-color:#4cc9f0;color:#fff;transform:scale(1.03)}
+.card2.open.zh{font-size:13px;color:#8ecae6;font-weight:normal}
+.card2.done{background:#1d2f26;border-color:#2ec27e;color:#7ee2a8;cursor:default;transform:none}
+.card2.done.zh{color:#7ee2a8;font-weight:normal}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>翻词配对</h1>
+<p id="tip">16 张牌里藏着 8 对「英文词 ↔ 中文释义」 · 每次翻开两张 配对成功即消去 · 步数越少评级越高</p>
+<div id="wrap">
+<div id="hud"><span>配对 <b id="cnt">0</b>/8</span><span>步数 <b id="steps">0</b></span><span>用时 <b id="time">0</b> 秒</span></div>
+<div id="grid"></div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">翻词配对</h2><p id="ovP">翻开卡片找到
+英文单词和它对应的中文释义
+全部配对即通关</p><button id="ovB">开始翻牌</button></div>
+</div>
+<script>
+"use strict";
+var PAIRS = [
+  ["tiger", "老虎"], ["ocean", "海洋"], ["apple", "苹果"], ["cloud", "云"],
+  ["piano", "钢琴"], ["bread", "面包"], ["night", "夜晚"], ["heart", "心脏"],
+  ["zebra", "斑马"], ["lemon", "柠檬"], ["storm", "风暴"], ["river", "河流"],
+  ["house", "房子"], ["mouse", "老鼠"], ["plant", "植物"], ["sugar", "糖"],
+  ["whale", "鲸鱼"], ["eagle", "老鹰"], ["chair", "椅子"], ["light", "光"],
+  ["money", "钱"], ["queen", "女王"], ["snake", "蛇"], ["table", "桌子"]
+];
+var PAIRN = 8;
+var cntEl = document.getElementById("cnt");
+var stepsEl = document.getElementById("steps");
+var timeEl = document.getElementById("time");
+var gridEl = document.getElementById("grid");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var cards = [], open = [], matched = 0, steps = 0;
+var playing = false, timeLeft = 0, lastTs = 0, rafId = 0, lockAll = false;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function build() {
+  var picks = PAIRS.slice();
+  shuffle(picks);
+  picks = picks.slice(0, PAIRN);
+  var deck = [];
+  for (var i = 0; i < picks.length; i++) {
+    deck.push({ pair: i, txt: picks[i][0], zh: false });
+    deck.push({ pair: i, txt: picks[i][1], zh: true });
+  }
+  shuffle(deck);
+  cards = deck;
+  open = [];
+  matched = 0;
+  steps = 0;
+  cntEl.textContent = "0";
+  stepsEl.textContent = "0";
+  render();
+}
+
+function render() {
+  gridEl.innerHTML = "";
+  for (var i = 0; i < cards.length; i++) {
+    (function (idx) {
+      var c = cards[idx];
+      var d = document.createElement("div");
+      var isOpen = open.indexOf(idx) >= 0;
+      var isDone = c.done;
+      d.className = "card2";
+      if (isDone) d.classList.add("done");
+      else if (isOpen) d.classList.add("open");
+      if ((isOpen || isDone) && c.zh) d.classList.add("zh");
+      d.textContent = (isOpen || isDone) ? c.txt : "?";
+      d.onclick = function () { tap(idx); };
+      gridEl.appendChild(d);
+    })(i);
+  }
+}
+
+function tap(idx) {
+  if (!playing || lockAll) return;
+  var c = cards[idx];
+  if (c.done || open.indexOf(idx) >= 0) return;
+  open.push(idx);
+  steps++;
+  stepsEl.textContent = steps;
+  render();
+  if (open.length === 2) {
+    var a = cards[open[0]], b = cards[open[1]];
+    if (a.pair === b.pair) {
+      a.done = true;
+      b.done = true;
+      matched++;
+      cntEl.textContent = matched;
+      open = [];
+      msgEl.textContent = "配对成功:" + a.txt + " = " + b.txt;
+      render();
+      if (matched === PAIRN) {
+        playing = false;
+        cancelAnimationFrame(rafId);
+        var used = Math.round(timeLeft);
+        var rank = steps <= 12 ? "★★★ 记忆大师" : (steps <= 16 ? "★★ 眼力不错" : "★ 完成挑战");
+        setTimeout(function () {
+          ovT.textContent = "全部配对!";
+          ovP.textContent = "用时 " + used + " 秒 · 步数 " + steps + "\n评级 " + rank;
+          ovB.textContent = "再来一局";
+          ov.classList.remove("hide");
+        }, 700);
+      }
+    } else {
+      lockAll = true;
+      msgEl.textContent = "不配对,记住位置";
+      setTimeout(function () {
+        open = [];
+        lockAll = false;
+        msgEl.textContent = "";
+        render();
+      }, 850);
+    }
+  }
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft += (ts - lastTs) / 1000;
+  lastTs = ts;
+  timeEl.textContent = Math.round(timeLeft);
+  rafId = requestAnimationFrame(loop);
+}
+
+function start() {
+  timeLeft = 0;
+  lastTs = 0;
+  playing = true;
+  lockAll = false;
+  msgEl.textContent = "";
+  build();
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+ovB.onclick = start;
+</script>
+</body>
+</html>

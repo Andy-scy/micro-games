@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四宫数独</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#22d3ee;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:12px}
+.hud b{color:#22d3ee;font-size:16px}
+.board{display:grid;grid-template-columns:repeat(4,72px);grid-auto-rows:60px;gap:4px;justify-content:center;background:#0b0e1a;padding:8px;border-radius:12px}
+.board .cell{background:#232949;border-radius:6px;font-size:26px;font-weight:800;color:#e8eaf6;display:flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit;border:none}
+.board .cell.given{background:#1a2036;color:#22d3ee;cursor:default}
+.board .cell.sel{outline:2px solid #22d3ee}
+.board .cell.err{background:#3a1620;color:#f87171}
+.board .cell[data-c="1"],.board .cell[data-c="3"]{margin-right:0}
+.bigb{border-right:4px solid #4a5382!important;border-bottom:4px solid #4a5382!important}
+.tools{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.tools button{width:52px;height:48px;background:#232949;color:#e8eaf6;border:none;border-radius:10px;font-size:21px;font-weight:800;cursor:pointer;font-family:inherit}
+.tools button:active{transform:scale(.93)}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:10px;color:#8b90b0}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#062a33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>四宫数独</h1>
+  <p class="hint">每行、每列、每个 2×2 宫都要有 1~4 · 点格子再点数字,青色为已知提示 · 填满且无冲突即胜</p>
+  <div class="hud">
+    <span>用时 <b id="time">0:00</b></span>
+    <span>错误 <b id="mist">0</b>/6</span>
+  </div>
+  <div class="stage">
+    <div class="board" id="board"></div>
+    <div class="tools" id="tools">
+      <button data-v="1">1</button><button data-v="2">2</button>
+      <button data-v="3">3</button><button data-v="4">4</button>
+    </div>
+    <div class="msg" id="msg">点选一个空格开始</div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">四宫数独</h2>
+      <p id="ovD">迷你数独:四行四列四个宫,数字 1~4 每行每列每宫恰好一次。冲突放置会被拒绝并记一次错误,累计 6 次失败;填满整盘即胜利,越快分越高!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var board=$("board"),tools=$("tools"),elMsg=$("msg");
+var elTime=$("time"),elMist=$("mist");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var state,sol,given,grid,sel,mist,elapsed,cells,lastT;
+
+function shuffle(a){
+  var i,j,t;
+  for(i=a.length-1;i>0;i--){j=(Math.random()*(i+1))|0;t=a[i];a[i]=a[j];a[j]=t;}
+  return a;
+}
+function okAt(g,i,v){
+  var r=(i/4)|0,c=i%4,j;
+  for(j=0;j<4;j++){
+    if(g[r*4+j]===v)return false;
+    if(g[j*4+c]===v)return false;
+  }
+  var br=((r/2)|0)*2,bc=((c/2)|0)*2,rr,cc;
+  for(rr=br;rr<br+2;rr++)for(cc=bc;cc<bc+2;cc++){
+    if(g[rr*4+cc]===v)return false;
+  }
+  return true;
+}
+function genSol(){
+  var g=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  function fill(i){
+    if(i===16)return true;
+    var vals=shuffle([1,2,3,4]),k;
+    for(k=0;k<4;k++){
+      if(okAt(g,i,vals[k])){
+        g[i]=vals[k];
+        if(fill(i+1))return true;
+        g[i]=0;
+      }
+    }
+    return false;
+  }
+  fill(0);
+  return g;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function buildBoard(){
+  board.innerHTML="";
+  cells=[];
+  var i;
+  for(i=0;i<16;i++){
+    var b=document.createElement("button");
+    b.className="cell";
+    b.setAttribute("data-i",i);
+    var r=(i/4)|0,c=i%4;
+    if(c===1)b.classList.add("bigb");
+    if(r===1)b.classList.add("bigb");
+    b.addEventListener("click",function(ev){
+      cellTap(parseInt(ev.currentTarget.getAttribute("data-i"),10));
+    });
+    board.appendChild(b);
+    cells.push(b);
+  }
+}
+function render(){
+  var i;
+  for(i=0;i<16;i++){
+    var el=cells[i];
+    el.textContent=grid[i]===0?"":grid[i];
+    var cls="cell";
+    if(given[i])cls+=" given";
+    if(sel===i)cls+=" sel";
+    el.className=cls;
+  }
+  elMist.textContent=mist;
+}
+function newPuzzle(){
+  sol=genSol();
+  given=[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false];
+  grid=sol.slice();
+  var idx=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+  shuffle(idx);
+  var k;
+  for(k=0;k<16;k++){
+    if(k<8)grid[idx[k]]=0;
+    else given[idx[k]]=true;
+  }
+  sel=-1;mist=0;elapsed=0;lastT=0;
+  setMsg("点选一个空格开始","");
+  render();
+}
+function cellTap(i){
+  if(state!=="playing")return;
+  if(given[i]){setMsg("青色格子是题目提示,不能修改","badc");return;}
+  if(grid[i]>0){
+    grid[i]=0;
+    sel=i;
+    render();
+    return;
+  }
+  sel=i;
+  setMsg("已选格子,点下方数字放入(再点一次取出)","");
+  render();
+}
+function place(v){
+  if(state!=="playing")return;
+  if(sel<0||given[sel]){setMsg("先点选一个空格","badc");return;}
+  if(!okAt(grid,sel,v)){
+    mist++;
+    elMist.textContent=mist;
+    setMsg("数字 "+v+" 与行/列/宫冲突,不能放","badc");
+    cells[sel].classList.add("err");
+    var si=sel;
+    setTimeout(function(){cells[si].classList.remove("err");},450);
+    if(mist>=6){setTimeout(gameOverLose,500);}
+    return;
+  }
+  grid[sel]=v;
+  sel=-1;
+  render();
+  var i,full=true;
+  for(i=0;i<16;i++)if(grid[i]===0)full=false;
+  if(full)gameOverWin();
+}
+function fmtTime(ms){
+  var s=(ms/1000)|0;
+  return ((s/60)|0)+":"+("0"+(s%60)).slice(-2);
+}
+function gameOverWin(){
+  state="over";
+  var sec=(elapsed/1000)|0;
+  var pts=Math.max(50,600-((sec/2)|0)-mist*40);
+  ovT.textContent="数独完成!";
+  ovD.textContent="用时 "+fmtTime(elapsed)+" · 冲突 "+mist+" 次";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+pts;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function gameOverLose(){
+  state="over";
+  ovT.textContent="冲突太多…";
+  ovD.textContent="累计 6 次冲突。放数前先扫一眼它所在的行、列和小宫格。";
+  ovS.style.display="block";
+  ovS.textContent="—";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";
+  ovS.style.display="none";
+  newPuzzle();
+  ov.classList.add("hide");
+}
+tools.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute("data-v"))place(parseInt(t.getAttribute("data-v"),10));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key>="1"&&e.key<="4"){place(parseInt(e.key,10));e.preventDefault();}
+  else if(e.key==="ArrowUp"&&sel>3){cellMove(sel-4);e.preventDefault();}
+  else if(e.key==="ArrowDown"&&sel<12&&sel>=0){cellMove(sel+4);e.preventDefault();}
+  else if(e.key==="ArrowLeft"&&sel>0&&sel%4!==0){cellMove(sel-1);e.preventDefault();}
+  else if(e.key==="ArrowRight"&&sel>=0&&sel<15&&sel%4!==3){cellMove(sel+1);e.preventDefault();}
+  else if(e.key==="Backspace"&&sel>=0){cellTap(sel);e.preventDefault();}
+});
+function cellMove(i){
+  if(given[i]){sel=i;render();return;}
+  cellTap(i);
+}
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==="playing"){
+    if(!lastT)lastT=t;
+    elapsed+=Math.min(100,t-lastT);
+    elTime.textContent=fmtTime(elapsed);
+  }
+  lastT=t;
+}
+buildBoard();
+sol=genSol();
+grid=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+given=[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false];
+render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

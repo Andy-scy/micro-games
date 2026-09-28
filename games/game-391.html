@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>气球升空</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fda4af;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fda4af;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fda4af}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fda4af;color:#4c0d18;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>气球升空</h1>
+  <p class="hint">按住屏幕 / 空格 充气上浮,松手下沉 · 左右键或按住处左右移动 · 冲上 240m</p>
+  <div class="hud">
+    <span>高度 <b id="alt">0m</b></span>
+    <span>目标 <b>240m</b></span>
+    <span>最佳 <b id="best">0m</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">气球升空</h2>
+      <p id="ovDesc">按住屏幕给气球充气,浮力让它上升;松手气体泄漏便会下沉。左右方向键(或按住时的手指位置)控制横向。躲开旋转锯齿和墙壁尖刺,升到 240m 高空即胜利,碰一下就爆!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=16,WALL_L=50,WALL_R=430,TARGET=240;
+function $(id){return document.getElementById(id);}
+var elAlt=$("alt"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s391");
+var state,balloon,saws,stubs,lastY,alt,maxAlt,onGas,keyL,keyR,touchX,rot;
+function reset(){
+  balloon={x:W/2,y:0,vx:0,vy:0};
+  saws=[];stubs=[];lastY=-120;
+  alt=0;maxAlt=0;onGas=false;keyL=false;keyR=false;touchX=null;rot=0;
+  gen();
+  updateHud();
+}
+function gen(){
+  while(lastY>balloon.y-700){
+    lastY-=150+Math.random()*60;
+    saws.push({x:90+Math.random()*300,y:lastY,r:26});
+    if(Math.random()<0.4){
+      lastY-=110;
+      saws.push({x:90+Math.random()*300,y:lastY,r:26});
+    }
+    lastY-=90;
+    stubs.push({y:lastY,left:stubs.length%2===0});
+  }
+}
+function altM(){return Math.max(0,Math.floor(-balloon.y/5));}
+function updateHud(){
+  elAlt.textContent=maxAlt+"m";
+  elBest.textContent=best+"m";
+}
+function pop(reason){
+  state="over";
+  if(maxAlt>best){best=maxAlt;saveBest("mg_s391",best);}
+  ovT.textContent="砰!气球爆了";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="高度 "+maxAlt+"m · 最佳 "+best+"m";
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function win(){
+  state="over";
+  if(maxAlt>best){best=maxAlt;saveBest("mg_s391",best);}
+  ovT.textContent="登顶云霄!";
+  ovD.textContent="气球成功升至 240m 高空,气流大师!";
+  ovS.style.display="block";ovS.textContent="高度 "+maxAlt+"m · 最佳 "+best+"m";
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function gasOn(e){
+  if(state!=="playing")return;
+  onGas=true;
+  if(e&&e.touches){
+    var r=cv.getBoundingClientRect(),t=e.touches[0];
+    touchX=(t.clientX-r.left)*W/r.width;
+  }
+  if(e&&e.preventDefault)e.preventDefault();
+}
+function gasMove(e){
+  if(state!=="playing"||!onGas||!e.touches)return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchX=(t.clientX-r.left)*W/r.width;
+  e.preventDefault();
+}
+function gasOff(){onGas=false;touchX=null;}
+cv.addEventListener("mousedown",gasOn);
+window.addEventListener("mouseup",gasOff);
+cv.addEventListener("touchstart",gasOn,{passive:false});
+cv.addEventListener("touchmove",gasMove,{passive:false});
+cv.addEventListener("touchend",gasOff);
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){keyL=true;e.preventDefault();}
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){keyR=true;e.preventDefault();}
+  if(e.key===" "){
+    e.preventDefault();
+    if(state!=="playing")startGame();else onGas=true;
+  }
+  if(e.key==="Enter"&&state!=="playing")startGame();
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+  if(e.key===" ")onGas=false;
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  rot+=dt*0.006;
+  if(state==="playing"){
+    if(onGas)balloon.vy-=0.00075*dt;
+    else balloon.vy+=0.0005*dt;
+    if(balloon.vy<-0.32)balloon.vy=-0.32;
+    if(balloon.vy>0.3)balloon.vy=0.3;
+    var dir=(keyL?-1:0)+(keyR?1:0);
+    balloon.vx+=dir*0.0005*dt;
+    if(touchX!==null)balloon.vx+=(touchX-balloon.x)*0.0009*dt;
+    balloon.vx*=1-0.0015*dt;
+    balloon.x+=balloon.vx*dt;
+    balloon.y+=balloon.vy*dt;
+    if(balloon.x<WALL_L+BR){balloon.x=WALL_L+BR;balloon.vx=Math.abs(balloon.vx)*0.4;}
+    if(balloon.x>WALL_R-BR){balloon.x=WALL_R-BR;balloon.vx=-Math.abs(balloon.vx)*0.4;}
+    if(balloon.y>460-BR){balloon.y=460-BR;balloon.vy=Math.min(balloon.vy,0);}
+    gen();
+    var i,died=false;
+    for(i=0;i<saws.length&&!died;i++){
+      var s=saws[i];
+      var dx=s.x-balloon.x,dy=s.y-balloon.y;
+      if(dx*dx+dy*dy<(BR+s.r-4)*(BR+s.r-4))died=true;
+    }
+    for(i=0;i<stubs.length&&!died;i++){
+      var sb=stubs[i];
+      var rx=sb.left?WALL_L:WALL_R-70,ry=sb.y-8;
+      var nx=Math.max(rx,Math.min(balloon.x,rx+70)),ny=Math.max(ry,Math.min(balloon.y,ry+16));
+      var ddx=balloon.x-nx,ddy=balloon.y-ny;
+      if(ddx*ddx+ddy*ddy<(BR-2)*(BR-2))died=true;
+    }
+    if(died){pop("锯齿与尖刺是气球的天敌,换条缝隙再试!");}
+    else{
+      alt=altM();
+      if(alt>maxAlt){maxAlt=alt;updateHud();}
+      if(maxAlt>=TARGET)win();
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  var camY=balloon.y-300;
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#1a1030");g.addColorStop(1,"#0d1428");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#141a30";ctx.fillRect(0,0,WALL_L,H);
+  ctx.fillRect(WALL_R,0,W-WALL_R,H);
+  ctx.fillStyle="#232d4c";ctx.fillRect(WALL_L-4,0,4,H);
+  ctx.fillRect(WALL_R,0,4,H);
+  for(i=0;i<stubs.length;i++){
+    var sb=stubs[i],sy=sb.y-camY;
+    if(sy<-40||sy>H+40)continue;
+    var sx=sb.left?WALL_L:WALL_R-70;
+    ctx.fillStyle="#3b4a77";
+    ctx.fillRect(sx,sy,70,8);
+    ctx.fillStyle="#f87171";
+    var j;
+    for(j=0;j<5;j++){
+      var tx=sb.left?sx+j*14+4:sx+66-j*14;
+      ctx.beginPath();
+      ctx.moveTo(tx,sy);
+      ctx.lineTo(tx+(sb.left?5:-5),sy-9);
+      ctx.lineTo(tx+10,sy);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  for(i=0;i<saws.length;i++){
+    var s=saws[i],sy2=s.y-camY;
+    if(sy2<-50||sy2>H+50)continue;
+    ctx.save();
+    ctx.translate(s.x,sy2);
+    ctx.rotate(rot);
+    ctx.fillStyle="#94a3b8";
+    var k;
+    for(k=0;k<8;k++){
+      ctx.rotate(Math.PI/4);
+      ctx.beginPath();
+      ctx.moveTo(s.r-6,-4);ctx.lineTo(s.r+7,0);ctx.lineTo(s.r-6,4);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.fillStyle="#64748b";
+    ctx.beginPath();ctx.arc(0,0,s.r-4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#334155";
+    ctx.beginPath();ctx.arc(0,0,s.r*0.4,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  var by=balloon.y-camY;
+  ctx.strokeStyle="rgba(253,164,175,0.7)";ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(balloon.x,by+BR);ctx.quadraticCurveTo(balloon.x+6,by+BR+18,balloon.x,by+BR+34);ctx.stroke();
+  ctx.fillStyle="#fda4af";
+  ctx.shadowColor="#fda4af";ctx.shadowBlur=14;
+  ctx.beginPath();ctx.arc(balloon.x,by,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(255,255,255,0.55)";
+  ctx.beginPath();ctx.arc(balloon.x-5,by-5,4.5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=onGas?"#fda4af":"rgba(139,144,176,0.6)";
+  ctx.font="12px system-ui";ctx.textAlign="center";
+  ctx.fillText(onGas?"充气中…":"松开即下沉",balloon.x,by-BR-10);
+  ctx.textAlign="left";
+  var prog=camY;
+  ctx.fillStyle="rgba(199,203,232,0.7)";ctx.font="11px system-ui";
+  ctx.fillText(Math.floor(-prog/5)+"m",8,14);
+  var fy=460-camY;
+  if(fy<H){
+    ctx.fillStyle="#1c2547";ctx.fillRect(0,fy,W,H-fy);
+    ctx.fillStyle="#2b3663";ctx.fillRect(0,fy,W,3);
+  }
+  var ly=-TARGET*5-camY;
+  if(ly>-10&&ly<H+10){
+    ctx.strokeStyle="rgba(74,222,128,0.6)";ctx.setLineDash([6,6]);
+    ctx.beginPath();ctx.moveTo(WALL_L,ly);ctx.lineTo(WALL_R,ly);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="#4ade80";ctx.font="bold 12px system-ui";
+    ctx.fillText("终点 240m",WALL_L+8,ly-6);
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

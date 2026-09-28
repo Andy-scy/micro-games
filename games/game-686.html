@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蜜蜂来袭</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>蜜蜂来袭</h1>
+  <p class="tips">戳破上浮的泡泡得分,但蜜蜂混在里面乱飞!手滑点到蜜蜂会挨一针,蜜蜂撞到泡泡还会把蜜偷走。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+      <div class="stat"><div class="mut">被偷</div><div class="big" id="st">0</div></div>
+      <div class="stat"><div class="mut">时间</div><div class="big" id="tm">0 秒</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">蜜蜂来袭</h2><p id="ovp">玩法说明:<br>· 泡泡不断上浮,点击戳破得分,金泡泡价值 50 分<br>· 黄黑条纹的蜜蜂在旁边乱飞,千万别点到!<br>· 点到蜜蜂 -1 条生命,蜜蜂会立刻逃离<br>· 蜜蜂撞到泡泡会把它偷走,不计分<br>· 共 3 条生命,泡泡与蜜蜂都会越来越快</p><button class="btn" id="obtn">开始守蜜</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#4da3ff','#51d88a','#b07cff'];
+var bubbles=[],bees=[],parts=[],floats=[];
+var score=0,lives=3,stolen=0,elapsed=0;
+var bT=0,beeT=2.5,running=false,lastT=0,flashT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+  $i('st').textContent=stolen;
+  $i('tm').textContent=Math.floor(elapsed)+' 秒';
+}
+function reset(){
+  bubbles=[];bees=[];parts=[];floats=[];
+  score=0;lives=3;stolen=0;elapsed=0;bT=0;beeT=2.5;flashT=0;
+  upd();
+}
+function spawnBubble(){
+  var gold=Math.random()<0.08;
+  bubbles.push({x:rnd(34,W-34),y:H+26,r:gold?16:rnd(16,25),
+    vy:-(rnd(48,80)+elapsed*0.5),
+    sw:rnd(0,6.28),sp:rnd(1.1,2.4),amp:rnd(8,20),
+    gold:gold,c:gold?'#ffd166':COLORS[Math.floor(Math.random()*COLORS.length)]});
+}
+function spawnBee(){
+  bees.push({x:rnd(50,W-50),y:H+24,r:15,
+    vy:-(rnd(55,95)+elapsed*0.6),
+    wx:rnd(30,70),ws:rnd(2.5,4.5),ph:rnd(0,6.28),
+    bob:rnd(0,6.28)});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(50,170);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+function update(dt){
+  if(!running)return;
+  elapsed+=dt;
+  if(flashT>0)flashT-=dt;
+  bT-=dt;
+  if(bT<=0){spawnBubble();bT=Math.max(0.35,0.9-elapsed*0.008);}
+  beeT-=dt;
+  if(beeT<=0){spawnBee();beeT=Math.max(1.1,3.2-elapsed*0.02);}
+  var i,j;
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    b.y+=b.vy*dt;b.sw+=b.sp*dt;b.x+=Math.sin(b.sw)*b.amp*dt;
+    if(b.x<b.r)b.x=b.r;if(b.x>W-b.r)b.x=W-b.r;
+    if(b.y<-b.r-4)bubbles.splice(i,1);
+  }
+  for(i=bees.length-1;i>=0;i--){
+    var be=bees[i];
+    be.y+=be.vy*dt;be.ph+=be.ws*dt;be.bob+=6*dt;
+    be.x+=Math.sin(be.ph)*be.wx*dt;
+    if(be.x<be.r+4){be.x=be.r+4;be.ph=Math.PI-be.ph;}
+    if(be.x>W-be.r-4){be.x=W-be.r-4;be.ph=Math.PI-be.ph;}
+    if(be.y<-24){bees.splice(i,1);continue;}
+    for(j=bubbles.length-1;j>=0;j--){
+      var bb=bubbles[j];
+      var dx=be.x-bb.x,dy=be.y-bb.y;
+      if(dx*dx+dy*dy<(be.r+bb.r)*(be.r+bb.r)){
+        bubbles.splice(j,1);stolen++;
+        addFloat(bb.x,bb.y,'被偷走!','#ffa94d');
+        burst(bb.x,bb.y,bb.c,6);
+        upd();
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=150*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function hurt(msg){
+  lives--;flashT=0.35;
+  addFloat(W/2,120,msg,'#ff5c5c');
+  if(lives<=0){
+    lives=0;running=false;
+    $i('ovt').textContent='被蜇得落荒而逃!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>坚持时间:'+Math.floor(elapsed)+' 秒<br>被蜜蜂偷走:'+stolen+' 颗泡泡';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+  upd();
+}
+function drawBee(x,y){
+  ctx.save();ctx.translate(x,y);
+  ctx.fillStyle='rgba(255,255,255,.35)';
+  var w=Math.sin(Date.now()*0.03)*4;
+  ctx.beginPath();ctx.ellipse(-8,-8+w,8,4,-0.5,0,6.2832);ctx.fill();
+  ctx.beginPath();ctx.ellipse(8,-8-w,8,4,0.5,0,6.2832);ctx.fill();
+  ctx.beginPath();ctx.ellipse(0,0,13,9,0,0,6.2832);
+  ctx.fillStyle='#ffd166';ctx.fill();
+  ctx.fillStyle='#2b2b2b';
+  ctx.fillRect(-4,-9,4,18);ctx.fillRect(3,-8,4,16);
+  ctx.beginPath();ctx.moveTo(-13,0);ctx.lineTo(-22,3);ctx.lineTo(-13,5);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.arc(-5,-3,2,0,6.2832);ctx.arc(5,-3,2,0,6.2832);
+  ctx.fillStyle='#fff';ctx.fill();
+  ctx.beginPath();ctx.arc(-5,-3,1,0,6.2832);ctx.arc(5,-3,1,0,6.2832);
+  ctx.fillStyle='#000';ctx.fill();
+  ctx.restore();
+}
+function drawBubble(x,y,r,c){
+  ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fillStyle=c;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.35)';ctx.stroke();
+  ctx.beginPath();ctx.arc(x-r*0.32,y-r*0.32,r*0.26,0,6.2832);ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<bubbles.length;i++)drawBubble(bubbles[i].x,bubbles[i].y,bubbles[i].r,bubbles[i].c);
+  for(i=0;i<bees.length;i++)drawBee(bees[i].x,bees[i].y);
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  if(flashT>0){
+    ctx.globalAlpha=flashT*1.6;
+    ctx.fillStyle='#ff5c5c';ctx.fillRect(0,0,W,6);ctx.fillRect(0,H-6,W,6);
+    ctx.globalAlpha=1;
+  }
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),i;
+  for(i=bees.length-1;i>=0;i--){
+    var be=bees[i],dx=p.x-be.x,dy=p.y-be.y;
+    if(dx*dx+dy*dy<=(be.r+9)*(be.r+9)){
+      bees.splice(i,1);
+      addFloat(be.x,be.y-16,'哎呀!被蜇了!','#ff5c5c');
+      hurt('手滑点到蜜蜂!');
+      return;
+    }
+  }
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i],dx2=p.x-b.x,dy2=p.y-b.y;
+    if(dx2*dx2+dy2*dy2<=(b.r+6)*(b.r+6)){
+      bubbles.splice(i,1);
+      var gain=b.gold?50:10;
+      score+=gain;
+      addFloat(b.x,b.y,'+'+gain,b.gold?'#ffd166':'#51d88a');
+      burst(b.x,b.y,b.c,10);
+      upd();
+      return;
+    }
+  }
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

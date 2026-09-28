@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双球同心</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#2dd4bf;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#2dd4bf;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#2dd4bf;color:#04302a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双球同心</h1>
+  <p class="hint">左右键:A 球与 B 球镜像移动 · 空格/上键同时跳跃 · 触屏按住左右半边移动、快点的跳 · 两球同踩绿垫过关</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双球同心</h2>
+      <p id="ovDesc">左右两颗球由同一套按键镜像操控:按右,A 球向右而 B 球向左;跳跃则两球同时起跳。让两球同时站上各自的绿色同心垫即可过关。任一球坠落或碰到尖刺都会损失生命!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=9,PW2=236,GRAV=0.0011;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elLives=$("lives"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s392");
+var LEVELS=[
+ {A:{start:{x:30,y:420},plats:[{x:10,y:440,w:90},{x:120,y:380,w:90},{x:30,y:300,w:80},{x:140,y:300,w:70}],goal:{x:145,y:300,w:60},spikes:[]},
+  B:{start:{x:200,y:420},plats:[{x:150,y:440,w:80},{x:30,y:390,w:80},{x:140,y:330,w:70},{x:30,y:330,w:70}],goal:{x:35,y:330,w:60},spikes:[]}},
+ {A:{start:{x:20,y:430},plats:[{x:0,y:450,w:80},{x:110,y:400,w:60},{x:40,y:340,w:70},{x:150,y:280,w:70}],goal:{x:155,y:280,w:60},
+    spikes:[{x:150,y:392,w:20,h:8}]},
+  B:{start:{x:210,y:430},plats:[{x:150,y:450,w:80},{x:60,y:400,w:60},{x:180,y:340,w:50},{x:20,y:290,w:70}],goal:{x:25,y:290,w:60},
+    spikes:[{x:60,y:392,w:20,h:8}]}},
+ {A:{start:{x:20,y:430},plats:[{x:0,y:450,w:60},{x:90,y:410,w:50},{x:160,y:360,w:60},{x:20,y:310,w:60},{x:120,y:250,w:90}],goal:{x:140,y:250,w:60},
+    spikes:[{x:120,y:402,w:20,h:8},{x:200,y:352,w:20,h:8}]},
+  B:{start:{x:210,y:430},plats:[{x:170,y:450,w:60},{x:90,y:410,w:50},{x:10,y:360,w:60},{x:180,y:300,w:60},{x:20,y:250,w:90}],goal:{x:40,y:250,w:60},
+    spikes:[{x:110,y:402,w:20,h:8},{x:30,y:352,w:20,h:8}]}}
+];
+var state,lv,lives,score,ballA,ballB,data,jumpQ,msg,msgT;
+function reset(){lv=0;lives=3;score=0;loadLevel();updateHud();}
+function mkBall(s){return{x:s.x,y:s.y,vx:0,vy:0,onG:false,prevY:s.y};}
+function loadLevel(){
+  data=LEVELS[lv];
+  ballA=mkBall(data.A.start);
+  ballB=mkBall(data.B.start);
+  jumpQ=false;
+  elLv.textContent=lv+1;updateHud();
+}
+function updateHud(){
+  elLives.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+}
+function onGoal(b,g){
+  return b.onG&&Math.abs(b.y+BR-g.y)<5&&b.x>g.x-2&&b.x<g.x+g.w+2;
+}
+function fail(reason){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"双球失联…生命耗尽,再试一次!");return;}
+  msg=reason+"剩余生命 "+lives;msgT=1400;
+  loadLevel();
+}
+function clearLevel(){
+  score+=150;updateHud();
+  if(lv<LEVELS.length-1){
+    msg="同心达成!+150 · 下一关更难";msgT=1500;
+    lv++;state="transition";
+    window.setTimeout(function(){if(state==="transition"){loadLevel();state="playing";}},1000);
+  }else finish(true,"三关同心完成,默契大师!");
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s392",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function stepBall(b,ax,side){
+  var p=side==="A"?data.A:data.B;
+  b.vx+=ax*0.0006*dt;
+  b.vx*=1-0.002*dt;
+  if(b.vx>0.34)b.vx=0.34;
+  if(b.vx<-0.34)b.vx=-0.34;
+  b.vy+=GRAV*dt;
+  b.prevY=b.y;
+  b.x+=b.vx*dt;b.y+=b.vy*dt;
+  if(b.x<BR+4){b.x=BR+4;b.vx=0;}
+  if(b.x>PW2-BR-4){b.x=PW2-BR-4;b.vx=0;}
+  var i,wasG=false;
+  for(i=0;i<p.plats.length;i++){
+    var pl=p.plats[i];
+    if(b.vy>0&&b.prevY+BR<=pl.y+6&&b.y+BR>=pl.y&&b.x>pl.x-4&&b.x<pl.x+pl.w+4){
+      b.y=pl.y-BR;b.vy=0;b.onG=true;wasG=true;
+    }
+  }
+  if(!wasG)b.onG=b.onG&&b.vy===0;
+  if(!wasG&&b.vy!==0)b.onG=false;
+  if(jumpQ&&b.onG){b.vy=-0.46;b.onG=false;}
+  for(i=0;i<p.spikes.length;i++){
+    var sp=p.spikes[i];
+    var nx=Math.max(sp.x,Math.min(b.x,sp.x+sp.w)),ny=Math.max(sp.y,Math.min(b.y,sp.y+sp.h));
+    var dx=b.x-nx,dy=b.y-ny;
+    if(dx*dx+dy*dy<(BR-1)*(BR-1)){fail("撞上尖刺!");return false;}
+  }
+  if(b.y>H+30){fail("一球坠落深谷!");return false;}
+  return true;
+}
+var dt=16;
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")e.preventDefault();
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")e.preventDefault();
+  if(e.key===" "||e.key==="ArrowUp"||e.key==="Enter"){
+    e.preventDefault();
+    if(state==="menu"||state==="over")startGame();
+    else jumpQ=true;
+  }
+});
+var touchT=0;
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchX=(t.clientX-r.left)*W/r.width<W/2?-1:1;
+  touchT=Date.now();
+  e.preventDefault();
+},{passive:false});
+var touchX=0;
+cv.addEventListener("touchend",function(){
+  if(state!=="playing")return;
+  if(Date.now()-touchT<180)jumpQ=true;
+  touchX=0;
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0,keyL=false,keyR=false;
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=true;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=true;
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  dt=Math.min(40,t-lastT);lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    var dir=0;
+    if(keyL)dir-=1;
+    if(keyR)dir+=1;
+    if(touchX!==0)dir=touchX;
+    var okA=stepBall(ballA,dir,"A");
+    var okB=stepBall(ballB,-dir,"B");
+    jumpQ=false;
+    if(okA&&okB&&onGoal(ballA,data.A.goal)&&onGoal(ballB,data.B.goal))clearLevel();
+  }
+  draw();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawSide(d,off,label,color){
+  var i;
+  ctx.fillStyle=off===0?"#101830":"#0f1526";
+  ctx.fillRect(off,0,PW2,H);
+  for(i=0;i<d.plats.length;i++){
+    var p=d.plats[i];
+    ctx.fillStyle="#2e3a63";rr(off+p.x,p.y,p.w,10,4);ctx.fill();
+    ctx.fillStyle="#41518a";ctx.fillRect(off+p.x+3,p.y+2,p.w-6,3);
+  }
+  var g=d.goal,pu=2*Math.sin(Date.now()*0.005);
+  ctx.fillStyle="rgba(45,212,191,0.25)";
+  rr(off+g.x,g.y-4,g.w,6,3);ctx.fill();
+  ctx.strokeStyle="#2dd4bf";ctx.lineWidth=2;
+  ctx.shadowColor="#2dd4bf";ctx.shadowBlur=10;
+  ctx.strokeRect(off+g.x,g.y-5-pu,g.w,7+pu);
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#2dd4bf";ctx.font="bold 10px system-ui";ctx.textAlign="center";
+  ctx.fillText("同心垫",off+g.x+g.w/2,g.y-12-pu);
+  ctx.textAlign="left";
+  for(i=0;i<d.spikes.length;i++){
+    var sp=d.spikes[i],j;
+    ctx.fillStyle="#f87171";
+    for(j=0;j<sp.w/8;j++){
+      var sx=off+sp.x+j*8;
+      ctx.beginPath();
+      ctx.moveTo(sx,sp.y+sp.h);ctx.lineTo(sx+4,sp.y);ctx.lineTo(sx+8,sp.y+sp.h);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  ctx.fillStyle="rgba(139,144,176,0.5)";ctx.font="bold 13px system-ui";ctx.textAlign="center";
+  ctx.fillText(label,off+PW2/2,26);
+  ctx.textAlign="left";
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawSide(data.A,0,"A 球","#22d3ee");
+  drawSide(data.B,PW2+8,"B 球","#fb923c");
+  ctx.fillStyle="#2c3a5e";ctx.fillRect(PW2,0,8,H);
+  function ballDraw(b,off,color){
+    ctx.fillStyle=color;
+    ctx.shadowColor=color;ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(off+b.x,b.y,BR,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle="rgba(255,255,255,0.6)";
+    ctx.beginPath();ctx.arc(off+b.x-3,b.y-3,2.5,0,Math.PI*2);ctx.fill();
+  }
+  ballDraw(ballA,0,"#22d3ee");
+  ballDraw(ballB,PW2+8,"#fb923c");
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#fbbf24";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,150);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

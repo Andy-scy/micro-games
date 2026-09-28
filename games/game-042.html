@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多球混战</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;gap:10px}
+h1{margin:2px 0;font-size:22px;letter-spacing:4px;color:#fbbf24}
+#wrap{position:relative;width:min(96vw,860px)}
+canvas{display:block;width:100%;height:auto;border-radius:14px;background:#141830;box-shadow:0 0 0 1px #262b4a;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(10,12,26,.86);border-radius:14px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#msg{font-size:16px;line-height:2;white-space:pre-line}
+#row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.btn{background:#f59e0b;color:#1f2937;border:none;border-radius:10px;padding:10px 26px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:700}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>多球混战</h1>
+<div id="wrap">
+<canvas id="cv" width="800" height="500"></canvas>
+<div id="overlay"><div id="msg"></div><div id="row"></div></div>
+</div>
+<script>
+'use strict';
+var W=800,H=500,WIN=11,BASE=5.4,BALL_MAX=5;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var overlay=document.getElementById('overlay'),msg=document.getElementById('msg'),row=document.getElementById('row');
+var state='menu';
+var player={x:26,y:H/2-55,w:14,h:110};
+var ai={x:W-40,y:H/2-55,w:14,h:110};
+var balls=[],spawnT=0,respawnT=0,pendingDir=1;
+var sp=0,sa=0,keys={},mouseY=null,floats=[];
+
+function mkBtn(text,fn){
+  var b=document.createElement('button');
+  b.className='btn';b.textContent=text;
+  b.addEventListener('click',fn);
+  row.appendChild(b);
+  return b;
+}
+var bStart=mkBtn('开始游戏',function(){start();});
+function showMenu(){
+  state='menu';
+  msg.textContent='多球混战：场上最多 5 颗球齐飞，每隔一段时间补入新球。\n漏接一球对方得 1 分，先得 11 分者胜。\n操作：鼠标/触屏滑动，或 ↑↓（W/S）控制左侧挡板。';
+  bStart.textContent='开始游戏';
+  overlay.classList.remove('hide');
+}
+function start(){
+  sp=0;sa=0;balls=[];spawnT=0;respawnT=0;floats=[];keys={};mouseY=null;
+  pendingDir=Math.random()<0.5?1:-1;
+  player.y=H/2-player.h/2;ai.y=H/2-ai.h/2;
+  newBall(pendingDir);
+  state='play';
+  overlay.classList.add('hide');
+}
+function endGame(win){
+  state='end';
+  msg.textContent=(win?'胜利！你就是混战之王':'败北…球太多啦')+'\n最终比分 '+sp+' : '+sa;
+  bStart.textContent='再来一局';
+  overlay.classList.remove('hide');
+}
+function newBall(dir){
+  var a=Math.random()*0.7-0.35;
+  balls.push({x:W/2,y:H/2+(Math.random()*180-90),vx:0,vy:0,r:9,speed:BASE*(1+Math.random()*0.18),dir:dir,a:a,serve:42});
+}
+function flash(t){floats.push({t:t,x:W/2,y:H/2-64,life:70});}
+function hitPaddle(p,dir,b){
+  if(b.vx*dir>=0){return;}
+  if(b.x+b.r<p.x||b.x-b.r>p.x+p.w||b.y+b.r<p.y||b.y-b.r>p.y+p.h){return;}
+  var rel=(b.y-(p.y+p.h/2))/(p.h/2);
+  rel=Math.max(-1,Math.min(1,rel));
+  b.speed=Math.min(10.5,b.speed+0.18);
+  var ang=rel*0.95;
+  b.vx=Math.cos(ang)*b.speed*dir;
+  b.vy=Math.sin(ang)*b.speed;
+  b.x=dir>0?p.x+p.w+b.r:p.x-b.r;
+}
+function update(dt){
+  var pv=0;
+  if(keys.up){pv=-1;}else if(keys.down){pv=1;}
+  if(pv!==0){mouseY=null;player.y+=pv*7.2*dt;}
+  else if(mouseY!==null){player.y+=(mouseY-(player.y+player.h/2))*Math.min(1,0.3*dt);}
+  player.y=Math.max(6,Math.min(H-player.h-6,player.y));
+  var tb=null,i,b;
+  for(i=0;i<balls.length;i++){b=balls[i];if(b.vx>0&&(!tb||b.x>tb.x)){tb=b;}}
+  var tx=tb?tb.y:H/2;
+  var diff=tx-(ai.y+ai.h/2);
+  ai.y+=Math.max(-5*dt,Math.min(5*dt,diff*0.14));
+  ai.y=Math.max(6,Math.min(H-ai.h-6,ai.y));
+  spawnT+=dt;
+  if(balls.length>0&&balls.length<BALL_MAX&&spawnT>320){spawnT=0;newBall(Math.random()<0.5?1:-1);flash('新球加入！');}
+  if(balls.length===0){respawnT-=dt;if(respawnT<=0){newBall(pendingDir);}}
+  for(i=balls.length-1;i>=0;i--){
+    b=balls[i];
+    if(b.serve>0){
+      b.serve-=dt;
+      if(b.serve<=0){b.vx=Math.cos(b.a)*b.speed*b.dir;b.vy=Math.sin(b.a)*b.speed;}
+      continue;
+    }
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.y<b.r){b.y=b.r;b.vy=Math.abs(b.vy);}
+    if(b.y>H-b.r){b.y=H-b.r;b.vy=-Math.abs(b.vy);}
+    hitPaddle(player,1,b);hitPaddle(ai,-1,b);
+    if(b.x<-30){sa++;pendingDir=-1;balls.splice(i,1);flash('对方得分');if(balls.length===0){respawnT=55;}}
+    else if(b.x>W+30){sp++;pendingDir=1;balls.splice(i,1);flash('你得分');if(balls.length===0){respawnT=55;}}
+  }
+  for(i=floats.length-1;i>=0;i--){
+    floats[i].life-=dt;floats[i].y-=0.5*dt;
+    if(floats[i].life<=0){floats.splice(i,1);}
+  }
+  if(sp>=WIN||sa>=WIN){endGame(sp>=WIN);}
+}
+function pad(p,color){ctx.fillStyle=color;ctx.fillRect(p.x,p.y,p.w,p.h);}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(232,234,246,.14)';
+  ctx.lineWidth=3;ctx.setLineDash([10,14]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign='center';
+  ctx.font='bold 52px system-ui';
+  ctx.fillStyle='rgba(232,234,246,.85)';
+  ctx.fillText(sp,W/2-70,68);
+  ctx.fillText(sa,W/2+70,68);
+  ctx.font='13px system-ui';
+  ctx.fillStyle='#fbbf24';
+  ctx.fillText('场上球数 '+balls.length+' / '+BALL_MAX+' · 先得 11 分',W/2,H-14);
+  pad(player,'#38bdf8');pad(ai,'#f472b6');
+  var i,b;
+  for(i=0;i<balls.length;i++){
+    b=balls[i];
+    if(b.serve>0){ctx.globalAlpha=0.45;}
+    else{ctx.globalAlpha=1;}
+    ctx.fillStyle='#fde68a';
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+  ctx.font='16px system-ui';ctx.fillStyle='#f59e0b';
+  for(i=0;i<floats.length;i++){
+    ctx.globalAlpha=Math.min(1,floats[i].life/40);
+    ctx.fillText(floats[i].t,floats[i].x,floats[i].y);
+  }
+  ctx.globalAlpha=1;
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(2.5,Math.max(0.2,(t-last)/16.7));
+  last=t;
+  if(state==='play'){update(dt);}
+  draw();
+  requestAnimationFrame(loop);
+}
+window.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=true;e.preventDefault();}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=true;e.preventDefault();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W'){keys.up=false;}
+  else if(e.key==='ArrowDown'||e.key==='s'||e.key==='S'){keys.down=false;}
+});
+function ptrY(e){
+  var r=cv.getBoundingClientRect();
+  var cy=e.touches&&e.touches[0]?e.touches[0].clientY:e.clientY;
+  mouseY=(cy-r.top)*(H/r.height);
+}
+cv.addEventListener('mousemove',ptrY);
+cv.addEventListener('touchstart',function(e){e.preventDefault();ptrY(e);},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();ptrY(e);},{passive:false});
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

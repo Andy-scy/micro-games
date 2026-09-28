@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>古藤摆荡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>古藤摆荡</h1>
+  <p class="tips">空中按跳跃键抓住头顶垂下的古藤,像钟摆一样荡起来;再按一次松手飞出。借助一串古藤荡过深渊,共 2 段峡谷。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">状态</div><div class="big" id="gs">自由</div></div>
+    <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/2</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">抓/放</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">古藤摆荡</h2><p id="ovp">玩法说明:<br>· ←→ / A D 在空中轻推方向<br>· 空中按 空格 / ↑:抓住附近的古藤(顶上垂下的绿藤)<br>· 荡起来后再次按下:松手,沿切线方向飞出<br>· 抓得越低、荡得越满,飞得越远<br>· 坠入深渊 -1 生命,共 3 条生命<br>· 星屑 +50,过关 +200,共 2 段峡谷</p><button class="btn" id="obtn">出发</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var LEVELS=[
+{w:960,px:16,py:274,
+ plats:[[0,300,130,60],[440,330,60,30],[830,300,130,60]],
+ ropes:[[190,30,150],[420,70,160],[650,30,150]],
+ gems:[[230,190],[450,180],[670,190]],door:[880,248]},
+{w:960,px:16,py:274,
+ plats:[[0,300,120,60],[840,300,120,60]],
+ ropes:[[160,50,140],[380,20,170],[600,50,140],[780,90,120]],
+ gems:[[250,200],[480,150],[700,200]],door:[890,248]}
+];
+var lv=0,plats=[],ropes=[],worldW=960;
+var door={x:0,y:0,w:34,h:52};
+var px=16,py=274,vx=0,vy=0,pw=22,ph=26,onG=false,face=1;
+var camX=0,score=0,lives=3;
+var hang=-1,hangR=0,hangA=0,hangV=0;
+var running=false,lastT=0,bannerT=0,parts=[];
+var keys={L:false,R:false,J:false},jHeld=false;
+function loadLv(n){
+  var L=LEVELS[n],i;
+  plats=[];
+  for(i=0;i<L.plats.length;i++)plats.push({x:L.plats[i][0],y:L.plats[i][1],w:L.plats[i][2],h:L.plats[i][3]});
+  ropes=[];
+  for(i=0;i<L.ropes.length;i++)ropes.push({ax:L.ropes[i][0],ay:L.ropes[i][1],len:L.ropes[i][2]});
+  gems=[];
+  for(i=0;i<L.gems.length;i++)gems.push({x:L.gems[i][0],y:L.gems[i][1],got:false});
+  door.x=L.door[0];door.y=L.door[1];
+  worldW=L.w;px=L.px;py=L.py;vx=0;vy=0;camX=0;face=1;
+  hang=-1;bannerT=1.4;
+}
+function reset(){score=0;lives=3;lv=0;parts=[];loadLv(0);hud()}
+function hud(){
+  $i('gs').textContent=hang>=0?'抓住':'自由';
+  $i('lv').textContent=(lv+1)+'/2';
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function cx(){return px+pw/2}
+function cy(){return py+ph/2}
+function tryGrab(){
+  var best=-1,bd=1e9,i;
+  for(i=0;i<ropes.length;i++){var r=ropes[i];
+    var dx=cx()-r.ax,dy=cy()-r.ay;
+    var d=Math.sqrt(dx*dx+dy*dy);
+    if(dy>10&&d<=r.len+46&&d<bd){bd=d;best=i}
+  }
+  if(best<0)return false;
+  var r=ropes[best];
+  hang=best;
+  hangR=Math.max(60,Math.min(bd,r.len+10));
+  hangA=Math.atan2(cx()-r.ax,cy()-r.ay);
+  hangV=(vx*Math.cos(hangA)-vy*Math.sin(hangA))/hangR;
+  vx=0;vy=0;
+  burst(cx(),py,'#06d6a0',8);
+  return true;
+}
+function release(){
+  var r=ropes[hang];
+  vx=hangR*hangV*Math.cos(hangA)*1.15;
+  vy=-hangR*hangV*Math.sin(hangA)*1.15-70;
+  hang=-1;
+  burst(cx(),py,'#06d6a0',6);
+}
+function physics(dt){
+  var i,s;
+  if(hang>=0){
+    var r=ropes[hang];
+    hangV+=-(1500/hangR)*Math.sin(hangA)*dt;
+    hangV*=0.999;
+    hangA+=hangV*dt;
+    px=r.ax+hangR*Math.sin(hangA)-pw/2;
+    py=r.ay+hangR*Math.cos(hangA);
+    vx=hangR*hangV*Math.cos(hangA);
+    vy=-hangR*hangV*Math.sin(hangA);
+    if(px<0)px=0;if(px+pw>worldW)px=worldW-pw;
+    return;
+  }
+  var acc=900,mx=210;
+  if(keys.L){vx-=acc*dt;face=-1}
+  if(keys.R){vx+=acc*dt;face=1}
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,(onG?12:0.6)*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  vy+=1500*dt;if(vy>900)vy=900;
+  px+=vx*dt;
+  for(i=0;i<plats.length;i++){s=plats[i];
+    if(hitRect(s)){
+      if(vx>0)px=s.x-pw;else if(vx<0)px=s.x+s.w;
+      vx=0;
+    }}
+  if(px<0)px=0;if(px+pw>worldW)px=worldW-pw;
+  py+=vy*dt;onG=false;
+  for(i=0;i<plats.length;i++){s=plats[i];
+    if(hitRect(s)){
+      if(vy>0){py=s.y-ph;vy=0;onG=true}
+      else if(vy<0){py=s.y+s.h;vy=0}
+    }}
+}
+function onJumpEdge(){
+  if(hang>=0){release();return}
+  if(onG){vy=-560;onG=false;return}
+  tryGrab();
+}
+function hurt(){
+  if(!running)return;
+  lives--;hud();
+  burst(px+pw/2,H-6,'#ff5c5c',12);
+  if(lives<=0){lives=0;hud();endGame(false);return}
+  loadLv(lv);hud();
+}
+function endGame(win){
+  running=false;
+  if(win){score+=lives*100;hud();$i('ovt').textContent='丛林飞人!';$i('ovp').innerHTML='峡谷全靠一根根古藤荡过!<br>最终得分:<b>'+score+'</b>';}
+  else{$i('ovt').textContent='松手时机不对…';$i('ovp').innerHTML='荡到最高点再松手飞得最远!<br>最终得分:<b>'+score+'</b><br>止步于第 '+(lv+1)+' 段';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(bannerT>0)bannerT-=dt;
+  if(!running)return;
+  physics(dt);
+  var target=px-W/2;
+  if(target<0)target=0;if(target>worldW-W)target=worldW-W;
+  camX+=(target-camX)*Math.min(1,8*dt);
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    var dx=gm.x-cx(),dy=gm.y-cy();
+    if(dx*dx+dy*dy<26*26){gm.got=true;score+=50;burst(gm.x,gm.y,'#ffd166',8);hud()}
+  }
+  if(px+pw>door.x&&px<door.x+door.w&&py+ph>door.y&&py<door.y+door.h){
+    score+=200;hud();
+    if(lv>=LEVELS.length-1){endGame(true);return}
+    lv++;loadLv(lv);hud();return;
+  }
+  if(py>H+90&&hang<0)hurt();
+  hud();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#12291f');g.addColorStop(1,'#0c1026');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  ctx.save();ctx.translate(-Math.round(camX),0);
+  for(i=0;i<plats.length;i++){var s=plats[i];
+    ctx.fillStyle='#2e4a38';rr(s.x,s.y,s.w,s.h,4);ctx.fill();
+    ctx.fillStyle='#57a86b';ctx.fillRect(s.x+2,s.y,s.w-4,3);
+  }
+  for(i=0;i<ropes.length;i++){var r=ropes[i];
+    var ddx=cx()-r.ax,ddy=cy()-r.ay;
+    var dd=Math.sqrt(ddx*ddx+ddy*ddy);
+    var near=!onG&&hang<0&&ddy>10&&dd<=r.len+46;
+    if(hang===i){
+      ctx.strokeStyle='#8fd694';ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(r.ax,r.ay);ctx.lineTo(cx(),py);ctx.stroke();
+    }else{
+      var sway=Math.sin(Date.now()*0.002+i*2)*6;
+      ctx.strokeStyle=near?'#b7f7c0':'#3d5c46';ctx.lineWidth=near?3:2;
+      ctx.beginPath();ctx.moveTo(r.ax,r.ay);
+      ctx.quadraticCurveTo(r.ax+sway,r.ay+r.len*0.6,r.ax+sway*1.5,r.ay+r.len);
+      ctx.stroke();
+      if(near){
+        ctx.strokeStyle='rgba(6,214,160,.35)';
+        ctx.beginPath();ctx.arc(r.ax,r.ay,r.len,0,6.28);ctx.stroke();
+      }
+    }
+    ctx.fillStyle='#06d6a0';
+    ctx.beginPath();ctx.arc(r.ax,r.ay,6,0,6.28);ctx.fill();
+  }
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    ctx.save();ctx.translate(gm.x,gm.y+Math.sin(Date.now()*0.004+i)*3);ctx.rotate(0.785);
+    ctx.fillStyle='#ffd166';ctx.fillRect(-6,-6,12,12);
+    ctx.fillStyle='#fff3c4';ctx.fillRect(-3,-3,6,6);
+    ctx.restore();
+  }
+  ctx.fillStyle='#b388ff';
+  rr(door.x,door.y,door.w,door.h,6);ctx.fill();
+  ctx.fillStyle='#1a1f36';
+  ctx.beginPath();ctx.arc(door.x+door.w/2,door.y+door.h/2,7,0,6.28);ctx.fill();
+  ctx.fillStyle='#8fd3ff';
+  if(hang>=0){ctx.save();ctx.translate(cx(),py);ctx.rotate(hangA*0.5);ctx.translate(-cx(),-py)}
+  rr(px,py,pw,ph,6);ctx.fill();
+  ctx.fillStyle='#081226';
+  ctx.fillRect(px+pw*0.28,py+7,4,5);
+  ctx.fillRect(px+pw*0.62,py+7,4,5);
+  if(hang>=0)ctx.restore();
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  if(bannerT>0){
+    ctx.globalAlpha=Math.min(1,bannerT);
+    ctx.fillStyle='rgba(15,18,32,.55)';ctx.fillRect(0,H/2-34,W,68);
+    ctx.fillStyle='#ffd166';ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText('第 '+(lv+1)+' 段峡谷',W/2,H/2+9);
+    ctx.globalAlpha=1;
+  }
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=true;
+  if(e.code==='Space'||e.code==='ArrowUp')e.preventDefault();
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  if(keys.J&&!jHeld&&running)onJumpEdge();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

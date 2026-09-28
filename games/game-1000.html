@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>苔园禅语</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#bef264;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;gap:6px;justify-content:center;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 16px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{background:#bef264;color:#1a2e05;border-color:#bef264;font-weight:700}
+.scrl{background:#e8dfc8;color:#4a4030;border-radius:8px;padding:7px 12px;font-size:13px;text-align:center;margin-bottom:8px;min-height:34px;line-height:1.5}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#bef264}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#bef264;color:#1a2e05;border:none;border-radius:10px;padding:11px 26px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>苔园禅语</h1>
+  <p class="hint">选工具:耙理砂纹,或置石、铺苔、立灯 · 意境渐深,禅语自现 · 集齐六句圆满</p>
+  <div class="hud">
+    <span>意境 <b id="hZen">0</b></span>
+    <span>禅语 <b id="hQ">0</b>/6</span>
+  </div>
+  <div class="ctl" id="tools">
+    <button data-t="0" class="sel">耙</button>
+    <button data-t="1">置石</button>
+    <button data-t="2">铺苔</button>
+    <button data-t="3">石灯</button>
+    <button id="btnRe">重整庭园</button>
+  </div>
+  <div class="scrl" id="scrl">庭园静候,意境满二十,自现第一句禅语。</div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">苔园禅语</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">入园造景</button>
+      <button id="btnMore" style="display:none">再整庭园</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hZen=$("hZen"),hQ=$("hQ"),scrl=$("scrl");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=300;
+var off=document.createElement("canvas");off.width=W;off.height=H;
+var octx=off.getContext("2d");
+var QUOTES=["一沙一世界,一花一天堂。","心随万境转,转处实能幽。","苔花如米小,也学牡丹开。","行到水穷处,坐看云起时。","石不能言最可人。","本来无一物,何处惹尘埃。"];
+var THR=[20,45,75,110,150,195];
+var tool=0,items=[],rakeDist=0,itemPts=0,quotesGot=0,state="menu",goalDone=false;
+var pressing=false,lx=null,ly=null,pX=-99,pY=-99,time=0;
+function initSand(){
+  octx.fillStyle="#d8c9a8";octx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<1600;i++){
+    var x=Math.random()*W,y=Math.random()*H,a=Math.random();
+    octx.fillStyle=a<0.5?"rgba(120,100,70,.10)":"rgba(245,235,210,.10)";
+    octx.fillRect(x,y,1.4,1.4);
+  }
+}
+function zenVal(){
+  return Math.min(40,rakeDist*0.005)+itemPts;
+}
+var fxL=[];
+function addF(txt,col){fxL.push({txt:txt,col:col||"#bef264",t:1.4});}
+function reset(){
+  items=[];rakeDist=0;itemPts=0;quotesGot=0;goalDone=false;
+  initSand();
+  hZen.textContent="0";hQ.textContent="0";
+  scrl.textContent="庭园静候,意境满二十,自现第一句禅语。";
+}
+function step(){
+  var zv=zenVal();
+  hZen.textContent=Math.round(zv);
+  while(quotesGot<6&&zv>=THR[quotesGot]){
+    quotesGot++;
+    hQ.textContent=quotesGot;
+    scrl.textContent="「"+QUOTES[quotesGot-1]+"」 ("+quotesGot+"/6)";
+    addF("得禅语一句 · "+quotesGot+"/6","#fbbf24");
+    if(quotesGot>=6&&!goalDone){
+      goalDone=true;state="zen";
+      ovT.textContent="满园禅意";
+      ovD.textContent="六句禅语皆入笺中:\n"+QUOTES.join("\n");
+      btnMore.style.display="inline-block";
+      ov.classList.remove("hide");
+    }
+  }
+  for(var i=fxL.length-1;i>=0;i--){fxL[i].t-=1/120;
+    if(fxL[i].t<=0)fxL.splice(i,1);}
+}
+function rake(x0,y0,x1,y1){
+  var dx=x1-x0,dy=y1-y0,d=Math.sqrt(dx*dx+dy*dy);
+  if(d<1)return;
+  var nx=-dy/d,ny=dx/d,k;
+  octx.strokeStyle="rgba(150,125,88,.85)";octx.lineWidth=1.6;
+  for(k=-1;k<=1;k++){
+    octx.beginPath();
+    octx.moveTo(x0+nx*4*k,y0+ny*4*k);
+    octx.lineTo(x1+nx*4*k,y1+ny*4*k);
+    octx.stroke();
+  }
+  rakeDist+=d;
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(off,0,0);
+  var i;
+  for(i=0;i<items.length;i++){var it=items[i];
+    if(it.t===1){
+      ctx.fillStyle="#8b8f9c";
+      ctx.beginPath();ctx.ellipse(it.x,it.y,13,9,it.s,0,6.28318);ctx.fill();
+      ctx.fillStyle="#a9adb8";
+      ctx.beginPath();ctx.ellipse(it.x-3,it.y-3,7,5,it.s,0,6.28318);ctx.fill();
+    }else if(it.t===2){
+      ctx.fillStyle="rgba(110,160,80,.8)";
+      ctx.beginPath();ctx.arc(it.x-6,it.y+2,7,0,6.28318);ctx.fill();
+      ctx.beginPath();ctx.arc(it.x+5,it.y-3,6,0,6.28318);ctx.fill();
+      ctx.beginPath();ctx.arc(it.x+2,it.y+5,5,0,6.28318);ctx.fill();
+      ctx.fillStyle="rgba(150,200,110,.6)";
+      ctx.beginPath();ctx.arc(it.x,it.y,3,0,6.28318);ctx.fill();
+    }else if(it.t===3){
+      ctx.fillStyle="#6b7280";
+      ctx.fillRect(it.x-7,it.y-4,14,16);
+      ctx.fillStyle="#4b5563";
+      ctx.beginPath();ctx.moveTo(it.x-9,it.y-4);ctx.lineTo(it.x,it.y-13);ctx.lineTo(it.x+9,it.y-4);ctx.closePath();ctx.fill();
+      ctx.fillStyle="rgba(253,230,138,"+(0.5+0.3*Math.sin(time*2+i)).toFixed(2)+")";
+      ctx.fillRect(it.x-3,it.y+1,6,7);
+    }
+  }
+  ctx.strokeStyle="rgba(120,100,70,.25)";ctx.lineWidth=2;
+  ctx.strokeRect(1,1,W-2,H-2);
+  if(pX>=0&&tool===0){
+    ctx.strokeStyle="rgba(150,125,88,.6)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(pX,pY,10,0,6.28318);ctx.stroke();
+  }
+  if(fxL.length>0){
+    ctx.font="bold 14px system-ui";ctx.textAlign="center";
+    for(i=fxL.length-1;i>=0;i--){var f=fxL[i];
+      ctx.globalAlpha=Math.min(1,f.t);ctx.fillStyle=f.col;
+      ctx.fillText(f.txt,W/2,26);ctx.globalAlpha=1;}
+  }
+}
+function ptr(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return{x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};}
+function down(e){
+  if(state!=="play")return;
+  e.preventDefault();
+  pressing=true;
+  var p=ptr(e);
+  lx=p.x;ly=p.y;pX=p.x;pY=p.y;
+  if(tool>0)placeItem(p.x,p.y);
+  else rake(p.x-1,p.y,p.x+1,p.y);
+}
+function mv(e){
+  if(!pressing||state!=="play")return;
+  e.preventDefault();
+  var p=ptr(e);
+  pX=p.x;pY=p.y;
+  if(tool===0&&lx!==null){rake(lx,ly,p.x,p.y);lx=p.x;ly=p.y;}
+}
+function up(){pressing=false;lx=null;ly=null;}
+function placeItem(x,y){
+  if(items.length>=26){addF("庭园已满","#94a3b8");return;}
+  var pts=[0,8,6,12][tool];
+  items.push({t:tool,x:x,y:y,s:Math.random()*6.28318});
+  itemPts+=pts;
+  addF("+"+pts+" 意境","#bef264");
+}
+cv.addEventListener("mousedown",down);window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchmove",mv,{passive:false});cv.addEventListener("touchend",up);
+var tbs=document.querySelectorAll("[data-t]");
+var i;
+for(i=0;i<tbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    tool=parseInt(b.getAttribute("data-t"),10);
+    for(var k=0;k<tbs.length;k++)tbs[k].className="";
+    b.className="sel";
+  });
+})(tbs[i]);}
+$("btnRe").addEventListener("click",function(){if(state==="play")reset();});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step();
+  draw();
+}
+function showMenu(){
+  ovT.textContent="苔园禅语";
+  ovD.textContent="一方枯山水:选「耙」拖出砂纹,或点选置石、铺苔、石灯造景。\n耙砂与造物皆生意境;意境每进一阶,笺上自现一句禅语。\n集齐六句,满园禅意。\n「重整庭园」可从头再来。";
+  btnGo.textContent="入园造景";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){reset();state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){reset();state="play";ov.classList.add("hide");});
+initSand();
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

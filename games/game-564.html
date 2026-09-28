@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六骰冒险</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 18px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:46px;height:46px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:8px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.die.pick{cursor:pointer}
+.die.pick:hover{transform:translateY(-2px)}
+.die.sel{outline:3px solid #ffd166}
+.die.old{opacity:.45}
+.small{width:34px;height:34px;border-radius:7px}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.mut{color:#9aa3c0;font-size:13px}
+.sc{flex:1;text-align:center;min-width:150px}
+.nm{font-size:14px;color:#cdd6f4;margin-bottom:2px}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>六骰冒险</h1>
+  <p class="tips">掷 6 骰:1=100 分,5=50 分,三条=点数×100(三个 1=1000),四条×2、五条×4、六条×8,顺子或三对=1500。点选可计分的骰子「留骰」后再掷余骰,六骰用尽可重新开掷;掷出完全无分即「爆体」本轮清零!先到 3000 分胜。</p>
+  <div class="row">
+    <div class="card sc"><div class="nm">你</div><div class="big" id="t0">0</div></div>
+    <div class="card sc"><div class="nm">电脑</div><div class="big" id="t1">0</div></div>
+    <div class="card sc"><div class="nm">本轮池</div><div class="big" id="pot">0</div></div>
+  </div>
+  <div class="card">
+    <div class="mut" style="text-align:center;margin-bottom:6px">已留骰</div>
+    <div class="row" id="aside" style="min-height:38px"></div>
+    <div class="row" id="pool" style="margin-top:10px;min-height:50px"></div>
+    <div class="big" id="hint" style="margin-top:8px;font-size:16px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="keep">计分留骰</button>
+      <button class="btn sec" id="bank">落袋收分</button>
+    </div>
+  </div>
+  <div class="card log" id="log">轮到你,先掷六骰!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var GOAL=3000;
+var tot=[0,0],pot=0,turn=0,aside=[],pool=[],sel=[],over=false,busy=true;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v,small){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function mkDie(v,cls,small){
+  var d=document.createElement('div');
+  d.className='die'+(cls?' '+cls:'')+(small?' small':'');
+  setDie(d,v);return d;
+}
+function counts(a){var c=[0,0,0,0,0,0,0];for(var i=0;i<a.length;i++)c[a[i]]++;return c}
+function scoreSel(vals){
+  var n=vals.length;if(n===0)return -1;
+  var c=counts(vals),i;
+  if(n===6){
+    var diff=0,pairs=0;
+    for(i=1;i<=6;i++){if(c[i]===1)diff++;if(c[i]===2)pairs++}
+    if(diff===6)return 1500;
+    if(pairs===3)return 1500;
+  }
+  var sc=0;
+  for(i=1;i<=6;i++){
+    var k=c[i];
+    if(k>=3){var base=(i===1)?1000:i*100;var m=k===3?1:k===4?2:k===5?4:8;sc+=base*m}
+    else if(k>0){if(i===1)sc+=k*100;else if(i===5)sc+=k*50;else return -1}
+  }
+  return sc;
+}
+function anyScore(a){
+  var c=counts(a),i,diff=0,pairs=0;
+  for(i=1;i<=6;i++){if(c[i]>0)diff++;if(c[i]===2)pairs++;if(c[i]>=3)return true}
+  if(c[1]>0||c[5]>0)return true;
+  if(a.length===6&&(diff===6||pairs===3))return true;
+  return false;
+}
+function render(){
+  var A=$('aside');A.innerHTML='';
+  for(var i=0;i<aside.length;i++)A.appendChild(mkDie(aside[i],'old',true));
+  var P=$('pool');P.innerHTML='';
+  for(i=0;i<pool.length;i++){
+    var d=mkDie(pool[i],sel[i]?'sel':'pick',false);
+    (function(k){d.onclick=function(){
+      if(busy||turn!==0)return;
+      sel[k]=!sel[k];
+      var vals=[];
+      for(var j=0;j<pool.length;j++)if(sel[j])vals.push(pool[j]);
+      var sc=scoreSel(vals);
+      $('hint').textContent=sc<0?'(所选骰子无法全部计分)':'选中可得 '+sc+' 分';
+      render();
+    }})(i);
+    P.appendChild(d);
+  }
+  $('t0').textContent=tot[0];$('t1').textContent=tot[1];
+  $('pot').textContent=pot;
+  $('keep').disabled=busy||turn!==0;
+  $('bank').disabled=busy||turn!==0||pot===0;
+}
+function say(m){$('log').textContent=m}
+function animRoll(cb){
+  busy=true;render();
+  var n=6-aside.length,t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<600){
+      if(t-last>75){last=t;var box=$('pool');box.innerHTML='';
+        for(var i=0;i<n;i++)box.appendChild(mkDie(rnd(),'',false))}
+      requestAnimationFrame(step);
+    }else{
+      pool=[];for(var i=0;i<n;i++)pool.push(rnd());
+      sel=[];for(i=0;i<n;i++)sel.push(false);
+      busy=false;render();
+      cb();
+    }
+  }
+  requestAnimationFrame(step);
+}
+function farkle(who){
+  var name=who===0?'你':'电脑';
+  var lost=pot;pot=0;
+  endTurn(name+'掷出了无分组合,FARKLE!本轮 '+lost+' 分全部蒸发。');
+}
+function endTurn(msg){
+  pot=0;aside=[];pool=[];sel=[];
+  turn=1-turn;busy=(turn===1);render();
+  say(msg);
+  if(turn===1)setTimeout(aiStep,850);
+}
+function win(w){
+  over=true;render();
+  $('ovt').textContent=w===0?'你赢啦!':'电脑获胜';
+  $('ovp').innerHTML='终局比分 — 你 <b>'+tot[0]+'</b> : 电脑 <b>'+tot[1]+'</b><br>'+(w===0?'冒险与收敛的平衡拿捏得恰到好处!':'电脑先攒满 3000 分,下次胆子再大一点?');
+  $('overlay').classList.add('show');
+}
+function bankScore(who){
+  var name=who===0?'你':'电脑';
+  tot[who]+=pot;
+  var gain=pot;pot=0;aside=[];pool=[];sel=[];
+  if(tot[who]>=GOAL){render();win(who);return true}
+  turn=1-turn;busy=(turn===1);render();
+  say(name+'落袋 '+gain+' 分,总分 '+tot[who]+'。');
+  if(turn===1)setTimeout(aiStep,850);
+  return false;
+}
+$('keep').onclick=function(){
+  if(busy||turn!==0)return;
+  var vals=[];
+  for(var j=0;j<pool.length;j++)if(sel[j])vals.push(pool[j]);
+  var sc=scoreSel(vals);
+  if(sc<0){say('所选骰子里有不能计分的点数(2、3、4、6 单个无效)。');return}
+  pot+=sc;
+  aside=aside.concat(vals);
+  var hot=aside.length===6;
+  if(hot)aside=[];
+  render();
+  say(hot?'六骰全部留完,热骰重开!继续!':'留骰 +'+sc+' 分,本轮池 '+pot+' 分。');
+  animRoll(function(){
+    if(!anyScore(pool)){farkle(0);return}
+    say(hot?'热骰继续,再选可计分的骰子!':'余骰已掷出,继续选骰或落袋。');
+  });
+};
+$('bank').onclick=function(){
+  if(busy||turn!==0||pot===0)return;
+  bankScore(0);
+};
+function aiPick(){
+  var c=counts(pool),pick=[],i,k;
+  for(i=0;i<pool.length;i++){
+    var v=pool[i],take=false;
+    if(v===1&&c[1]<3)take=true;
+    if(v===5&&c[5]<3)take=true;
+    if(c[v]>=3)take=true;
+    if(take)pick.push(i);
+  }
+  return pick;
+}
+function aiStep(){
+  if(over)return;
+  animRoll(function(){
+    if(!anyScore(pool)){farkle(1);return}
+    var idx=aiPick(),vals=[];
+    for(var i=0;i<idx.length;i++)vals.push(pool[idx[i]]);
+    var sc=scoreSel(vals);
+    pot+=sc;aside=aside.concat(vals);
+    var hot=aside.length===6;
+    if(hot)aside=[];
+    render();
+    var decide=tot[1]+pot>=GOAL||pot>=280+Math.random()*160;
+    if(decide){ setTimeout(function(){bankScore(1)},650); }
+    else{ setTimeout(aiStep,750); }
+  });
+}
+$('again').onclick=function(){
+  tot=[0,0];pot=0;turn=0;aside=[];pool=[];sel=[];over=false;busy=false;
+  $('overlay').classList.remove('show');
+  render();say('新的一局,轮到你,先掷六骰!');
+  animRoll(function(){say('选骰计分,或运气爆棚一波流!')});
+};
+render();
+animRoll(function(){say('点选可计分的骰子(1、5、三条等),然后「计分留骰」。')});
+</script>
+</body>
+</html>

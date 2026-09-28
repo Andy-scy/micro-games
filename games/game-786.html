@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰湖洞钓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>冰湖洞钓</h1>
+<p class="tip">冰面下鱼影游动(半透明梭形)。看清哪条鱼游向哪个冰洞,点冰洞或按 1-6 键下钩——鱼影离洞 48 内才咬钩,空钩要罚 1.2 秒!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">75</b> 秒</span><span>目标 <b>500</b> 分</span></div>
+<canvas id="cv" width="480" height="600"></canvas>
+<div id="ov"><h2 id="ot">冰湖洞钓</h2><p id="op">千里冰封,六个凿好的钓洞冒着白气。<br>追踪冰下的鱼影,在它路过洞口的一瞬下钩。<br>金色鱼影是稀有的金鳟,一条 150 分!</p><button id="ob">踏上冰面</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var W=cv.width,H=cv.height;
+var holes=[[90,150],[240,120],[390,155],[110,340],[260,300],[400,360]];
+var fish=[],respawnQ=[],splashes=[],cracks=[];
+var state='ready',score=0,tl=75,msg='',cd=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function spawnFish(){
+  var side=Math.floor(Math.random()*4),x,y;
+  if(side===0){x=-20;y=rnd(30,H-30)}else if(side===1){x=W+20;y=rnd(30,H-30)}
+  else if(side===2){x=rnd(20,W-20);y=-20}else{x=rnd(20,W-20);y=H+20}
+  var a=Math.atan2(H/2-y,W/2-x)+rnd(-0.6,0.6);
+  var r=rnd(9,15),gold=Math.random()<0.1;
+  fish.push({x:x,y:y,a:a,sp:rnd(55,105),r:r,gold:gold,v:gold?150:Math.round(r*6)});
+}
+function makeCracks(){
+  cracks=[];
+  var i;
+  for(i=0;i<14;i++){
+    var x=rnd(0,W),y=rnd(0,H),a=rnd(0,6.28),l=rnd(30,90);
+    cracks.push([x,y,x+Math.cos(a)*l,y+Math.sin(a)*l]);
+  }
+}
+function tryCatch(hi){
+  if(state!=='play'||cd>0)return;
+  var h=holes[hi],best=-1,bd=48,i;
+  for(i=0;i<fish.length;i++){
+    var d=Math.sqrt((fish[i].x-h[0])*(fish[i].x-h[0])+(fish[i].y-h[1])*(fish[i].y-h[1]));
+    if(d<bd){bd=d;best=i}
+  }
+  splashes.push({x:h[0],y:h[1],t:0});
+  if(best>=0){
+    var f=fish[best];
+    score+=f.v;
+    msg=(f.gold?'金鳟!!+':'有鱼上钩!+')+f.v+' 分';
+    fish.splice(best,1);
+    respawnQ.push(rnd(1.5,3));
+  }else{
+    msg='空钩!鱼不在这洞附近…';
+    cd=1.2;
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再钓一场';
+  ot.textContent=win?'冰下丰收!':'冰封收场…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 500 分<br>'+(win?'今晚炖鱼汤,整村都闻香!':'追影还需更稳,别急着下空钩。');
+  ov.classList.remove('hide');
+}
+function start(){
+  fish=[];respawnQ=[];splashes=[];score=0;tl=75;msg='';cd=0;
+  var i;for(i=0;i<5;i++)spawnFish();
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  var i;
+  for(i=splashes.length-1;i>=0;i--){splashes[i].t+=dt;if(splashes[i].t>0.6)splashes.splice(i,1)}
+  if(state!=='play')return;
+  if(cd>0)cd-=dt;
+  tl-=dt;if(tl<=0){tl=0;finish(score>=500);return}
+  for(i=0;i<fish.length;i++){
+    var f=fish[i];
+    f.a+=rnd(-1.6,1.6)*dt*2;
+    f.x+=Math.cos(f.a)*f.sp*dt;
+    f.y+=Math.sin(f.a)*f.sp*dt;
+    if(f.x<24){f.x=24;f.a=Math.PI-f.a}
+    if(f.x>W-24){f.x=W-24;f.a=Math.PI-f.a}
+    if(f.y<24){f.y=24;f.a=-f.a}
+    if(f.y>H-24){f.y=H-24;f.a=-f.a}
+  }
+  for(i=respawnQ.length-1;i>=0;i--){
+    respawnQ[i]-=dt;
+    if(respawnQ[i]<=0){respawnQ.splice(i,1);spawnFish()}
+  }
+}
+function draw(){
+  X.fillStyle='#1e3158';X.fillRect(0,0,W,H);
+  var i;
+  X.strokeStyle='rgba(150,180,230,.14)';X.lineWidth=1.5;
+  for(i=0;i<cracks.length;i++){
+    X.beginPath();X.moveTo(cracks[i][0],cracks[i][1]);X.lineTo(cracks[i][2],cracks[i][3]);X.stroke();
+  }
+  X.fillStyle='rgba(230,240,255,.10)';
+  for(i=0;i<8;i++){
+    X.beginPath();X.ellipse((i*173)%W,(i*229)%H,26,12,0,0,7);X.fill();
+  }
+  for(i=0;i<fish.length;i++){
+    var f=fish[i];
+    X.save();
+    X.translate(f.x,f.y);X.rotate(f.a);
+    X.fillStyle=f.gold?'rgba(255,215,94,.55)':'rgba(150,190,235,.30)';
+    X.beginPath();X.ellipse(0,0,f.r*1.6,f.r*0.62,0,0,7);X.fill();
+    X.beginPath();X.moveTo(f.r*1.4,0);X.lineTo(f.r*2.3,-f.r*0.5);X.lineTo(f.r*2.3,f.r*0.5);X.closePath();X.fill();
+    X.restore();
+  }
+  for(i=0;i<holes.length;i++){
+    var h=holes[i];
+    X.fillStyle='#060d1c';
+    X.beginPath();X.ellipse(h[0],h[1],26,20,0,0,7);X.fill();
+    X.strokeStyle='rgba(127,212,255,.5)';X.lineWidth=2.5;
+    X.beginPath();X.ellipse(h[0],h[1],26,20,0,0,7);X.stroke();
+    X.fillStyle='rgba(200,225,255,.85)';X.font='bold 13px system-ui';X.textAlign='center';
+    X.fillText(String(i+1),h[0],h[1]+5);
+  }
+  for(i=0;i<splashes.length;i++){
+    var s=splashes[i],k=s.t/0.6;
+    X.strokeStyle='rgba(200,230,255,'+(0.7*(1-k)).toFixed(2)+')';X.lineWidth=2;
+    X.beginPath();X.ellipse(s.x,s.y,10+k*30,7+k*22,0,0,7);X.stroke();
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 17px system-ui';X.textAlign='center';
+  X.fillText(cd>0?'收线换洞中…':msg,W/2,32);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('点冰洞 或按 1-6 下钩',W/2,H-16);
+}
+makeCracks();
+cv.addEventListener('pointerdown',function(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width),my=(e.clientY-r.top)*(H/r.height);
+  var i;
+  for(i=0;i<holes.length;i++){
+    var dx=mx-holes[i][0],dy=my-holes[i][1];
+    if(dx*dx+dy*dy<42*42){tryCatch(i);return}
+  }
+});
+document.addEventListener('keydown',function(e){
+  if(state!=='play'){
+    if(e.key===' '||e.key==='Enter'){e.preventDefault();start()}
+    return;
+  }
+  if(e.key>='1'&&e.key<='6')tryCatch(parseInt(e.key,10)-1);
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

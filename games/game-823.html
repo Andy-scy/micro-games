@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一笔画大师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#67e8f9;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#67e8f9;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #164e63;background:#10141f;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:8px}
+.overlay{position:absolute;inset:0;background:rgba(8,12,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#67e8f9;color:#083344;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>一笔画大师</h1>
+  <p class="hint">从任意圆点<b style="color:#67e8f9">按住拖动</b>出发,把所有亮色线段<b style="color:#fde047">不重复、不抬手</b>地一笔走完!<br>中途松手就要从头再来。</p>
+  <div class="hud"><span>关卡 <b id="lv">1/3</b></span><span>剩余线段 <b id="left">0</b></span><span>失误 <b id="miss">0</b></span><span>得分 <b id="score">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="420"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">一笔画大师</h2>
+      <p id="ovP">经典欧拉路径谜题:每条线段只能走一次,终点要刚好落在最后一个奇点上。三张图,越往后越烧脑。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elLv=$("lv"),elLeft=$("left"),elMiss=$("miss"),elScore=$("score"),elMsg=$("msg");
+var LV=[
+ {pts:[[90,90],[390,90],[390,330],[90,330]],es:[[0,1],[1,2],[2,3],[3,0],[0,2]]},
+ {pts:[[240,60],[120,190],[360,190],[120,350],[360,350]],es:[[0,1],[0,2],[1,2],[1,3],[2,4],[3,4]]},
+ {pts:[[100,60],[240,60],[380,60],[100,210],[240,210],[380,210],[100,360],[240,360],[380,360]],
+  es:[[0,1],[1,2],[0,3],[1,4],[2,5],[3,4],[4,5],[3,6],[4,7],[5,8],[6,7],[7,8]]}
+];
+var state="menu",lv=0,used=[],cur=-1,miss=0,score=0,remain=0,isDown=false,mx=0,my=0,px=0,py=0,msgT=0;
+function loadLevel(){
+  used=[];var i;
+  for(i=0;i<LV[lv].es.length;i++)used.push(0);
+  remain=LV[lv].es.length;cur=-1;
+  elLv.textContent=(lv+1)+"/3";hud();
+}
+function hud(){
+  elLeft.textContent=remain;elMiss.textContent=miss;elScore.textContent=score;
+}
+function showMsg(t){elMsg.textContent=t;msgT=1.6;}
+function nearest(x,y,rad){
+  var pts=LV[lv].pts,i,b=-1,bd=rad*rad;
+  for(i=0;i<pts.length;i++){
+    var dx=pts[i][0]-x,dy=pts[i][1]-y,d=dx*dx+dy*dy;
+    if(d<bd){bd=d;b=i;}
+  }
+  return b;
+}
+function tryGo(from,to){
+  var es=LV[lv].es,i;
+  for(i=0;i<es.length;i++){
+    if(!used[i]&&((es[i][0]===from&&es[i][1]===to)||(es[i][0]===to&&es[i][1]===from))){
+      used[i]=1;remain--;cur=to;hud();
+      if(remain===0)levelClear();
+      return;
+    }
+  }
+}
+function levelClear(){
+  score+=Math.max(0,LV[lv].es.length*10-miss*5);
+  hud();
+  lv++;
+  if(lv>=3){finish();return;}
+  showMsg("第 "+lv+" 关完成!进入下一张图");
+  loadLevel();
+}
+function finish(){
+  state="over";
+  ovT.textContent="一笔画通关!";
+  ovP.textContent="三张谜图全部一笔走完,总计失误 "+miss+" 次。\n"+(miss===0?"零失误,欧拉听了都点头!":"每次松手都是从零开始,下次更稳一点。");
+  ovS.style.display="block";ovS.textContent="总分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){
+  if(state!=="playing")return;
+  var p=pos(e);isDown=true;px=p.x;py=p.y;
+  var n=nearest(p.x,p.y,30);
+  if(n<0)return;
+  if(cur<0){cur=n;}
+  else if(n!==cur){tryGo(cur,n);}
+}
+function moveP(e){
+  if(!isDown||state!=="playing"||cur<0)return;
+  var p=pos(e);px=p.x;py=p.y;
+  var n=nearest(p.x,p.y,26);
+  if(n>=0&&n!==cur)tryGo(cur,n);
+}
+function endP(){
+  isDown=false;
+  if(state==="playing"&&cur>=0&&remain>0){
+    miss++;hud();
+    showMsg("松手了!线段全部重置,再来");
+    var i;for(i=0;i<used.length;i++)used[i]=0;
+    remain=LV[lv].es.length;cur=-1;hud();
+  }
+}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+var tt=0;
+function draw(){
+  tt+=0.05;
+  var pts=LV[lv].pts,es=LV[lv].es,i;
+  ctx.fillStyle="#10141f";ctx.fillRect(0,0,480,420);
+  for(i=0;i<es.length;i++){
+    var a=pts[es[i][0]],b=pts[es[i][1]];
+    ctx.strokeStyle=used[i]?"#39406a":"#67e8f9";
+    ctx.lineWidth=used[i]?4:5;ctx.lineCap="round";
+    ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+  }
+  if(isDown&&cur>=0){
+    ctx.strokeStyle="rgba(253,224,71,0.6)";ctx.lineWidth=2;ctx.setLineDash([6,6]);
+    ctx.beginPath();ctx.moveTo(pts[cur][0],pts[cur][1]);ctx.lineTo(px,py);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for(i=0;i<pts.length;i++){
+    ctx.beginPath();ctx.arc(pts[i][0],pts[i][1],13,0,Math.PI*2);
+    ctx.fillStyle=i===cur?"#fde047":"#1b2340";
+    ctx.fill();
+    ctx.strokeStyle=i===cur?"#fde047":"#67e8f9";ctx.lineWidth=2;ctx.stroke();
+  }
+  var pulse=13+Math.sin(tt*4)*3;
+  if(cur>=0){
+    ctx.beginPath();ctx.arc(pts[cur][0],pts[cur][1],pulse,0,Math.PI*2);
+    ctx.strokeStyle="rgba(253,224,71,0.7)";ctx.lineWidth=2;ctx.stroke();
+  }
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(msgT>0){msgT-=0.016;if(msgT<=0)elMsg.textContent="";}
+  if(state==="playing")draw();
+}
+btnGo.addEventListener("click",function(){
+  lv=0;miss=0;score=0;state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  loadLevel();
+});
+loadLevel();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

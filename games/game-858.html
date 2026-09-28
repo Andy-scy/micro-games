@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雷区推理</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px;flex-wrap:wrap}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:10px;margin-bottom:10px;display:flex;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(6,44px);grid-auto-rows:44px;gap:2px;background:#0f1220;border:2px solid #3a4470;border-radius:6px;overflow:hidden}
+.mc{background:#232946;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;cursor:pointer;user-select:none}
+.mc:hover{background:#2a3157}
+.mc.open{background:#1a1f38;cursor:default}
+.mc.boom{background:#5a1e2c}
+.mc.flag{color:#ffd668}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btn.mode{background:#3d2a55;color:#d9b8ff}
+.btnrow{display:flex;justify-content:center;gap:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>雷区推理</h1>
+<p class="tip">6×6 雷区藏有 6 颗雷。数字表示周围 8 格的雷数,<br>推理排雷。首次点击必安全;切「插旗」模式或右键可标雷。</p>
+<div class="hud"><span id="hM">剩余雷 6</span><span id="hT">用时 0 秒</span></div>
+<div class="panel"><div id="board"></div></div>
+<div class="btnrow"><button class="btn mode" id="bMode">模式:挖雷</button><button class="btn pri" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const N=6,M=6;
+const NC=["","#60a5fa","#4ade80","#f87171","#a78bfa","#fbbf24","#22d3ee","#e8eaf6","#9aa0c3"];
+let mine=[],open=[],flag=[],started=false,over=false,opened=0,flags=0,mode="dig",sec=0,timer=null;
+const boardEl=document.getElementById("board");
+const cells=[];
+for(let i=0;i<N*N;i++){
+  const d=document.createElement("div");
+  d.className="mc";d.dataset.i=String(i);
+  boardEl.appendChild(d);cells.push(d);
+}
+boardEl.addEventListener("click",e=>{
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined)return;
+  tap(parseInt(t.dataset.i,10));
+});
+boardEl.addEventListener("contextmenu",e=>{
+  e.preventDefault();
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined)return;
+  toggleFlag(parseInt(t.dataset.i,10));
+});
+function neighbors(i){
+  const r=Math.floor(i/N),c=i%N,out=[];
+  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+    if(!dr&&!dc)continue;
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=N||nc<0||nc>=N)continue;
+    out.push(nr*N+nc);
+  }
+  return out;
+}
+function placeMines(safe){
+  mine=new Array(N*N).fill(false);
+  const banned=new Set([safe]);
+  for(const nb of neighbors(safe))banned.add(nb);
+  const pool=[];
+  for(let i=0;i<N*N;i++)if(!banned.has(i))pool.push(i);
+  for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=pool[i];pool[i]=pool[j];pool[j]=t;}
+  for(let k=0;k<M;k++)mine[pool[k]]=true;
+}
+function cnt(i){let s=0;for(const nb of neighbors(i))if(mine[nb])s++;return s;}
+function tap(i){
+  if(over)return;
+  if(mode==="flag"){toggleFlag(i);return;}
+  if(flag[i])return;
+  if(!started){
+    started=true;placeMines(i);
+    if(timer)clearInterval(timer);
+    timer=setInterval(()=>{sec++;document.getElementById("hT").textContent="用时 "+sec+" 秒";},1000);
+  }
+  if(mine[i]){
+    over=true;clearInterval(timer);
+    for(let k=0;k<N*N;k++)if(mine[k])cells[k].classList.add("boom");
+    cells[i].classList.add("boom");
+    show("轰!踩到地雷了","排雷失败,下次多用数字线索推理");
+    return;
+  }
+  reveal(i);
+  render();
+  if(opened===N*N-M){
+    over=true;clearInterval(timer);
+    show("排雷成功!","雷区清空 · 用时 "+sec+" 秒");
+  }
+}
+function reveal(start){
+  const st=[start];
+  while(st.length){
+    const i=st.pop();
+    if(open[i]||flag[i])continue;
+    open[i]=true;opened++;
+    if(cnt(i)===0){
+      for(const nb of neighbors(i))if(!open[nb]&&!mine[nb])st.push(nb);
+    }
+  }
+}
+function toggleFlag(i){
+  if(over||open[i])return;
+  flag[i]=!flag[i];
+  flags+=flag[i]?1:-1;
+  document.getElementById("hM").textContent="剩余雷 "+(M-flags);
+  render();
+}
+function render(){
+  for(let i=0;i<N*N;i++){
+    const d=cells[i];
+    d.classList.remove("open","flag");
+    if(open[i]){
+      d.classList.add("open");
+      const n=cnt(i);
+      d.textContent=n>0?String(n):"";
+      d.style.color=NC[n];
+    }else{
+      d.classList.toggle("flag",flag[i]);
+      d.textContent=flag[i]?"▲":"";
+      d.style.color="#ffd668";
+    }
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  mine=[];open=new Array(N*N).fill(false);flag=new Array(N*N).fill(false);
+  started=false;over=false;opened=0;flags=0;sec=0;
+  if(timer)clearInterval(timer);
+  document.getElementById("hM").textContent="剩余雷 "+M;
+  document.getElementById("hT").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+document.getElementById("bMode").addEventListener("click",function(){
+  mode=(mode==="dig")?"flag":"dig";
+  this.textContent="模式:"+(mode==="dig"?"挖雷":"插旗");
+});
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

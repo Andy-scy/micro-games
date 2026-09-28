@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>密码破译</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:440px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px dashed #262d52}
+.row:last-child{border-bottom:none}
+.slots{display:flex;gap:6px}
+.slot{width:34px;height:34px;border-radius:8px;background:#232946;border:2px solid #3a4470;cursor:pointer}
+.slot.cur{border-color:#4f6ef7}
+.fb{font-size:12px;color:#aab2dd;margin-left:auto;text-align:right;line-height:1.5}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:3px;vertical-align:-1px}
+.dot.hit{background:#fff}
+.dot.soft{border:2px solid #fff;width:7px;height:7px}
+#hist{max-height:238px;overflow-y:auto}
+#palette{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:4px}
+.pbtn{width:52px;padding:8px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;color:#0f1220;cursor:pointer;font-family:inherit}
+.pbtn:hover{filter:brightness(1.15)}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin:8px 0 0}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.9}
+.sec{display:inline-block;width:26px;height:26px;border-radius:7px;margin:0 3px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>密码破译</h1>
+<p class="tip">破译 4 格颜色密码(颜色不重复,共 6 种)。<br>每次提交后会提示:● 位置正确,○ 颜色对但位置错。限 10 次。</p>
+<div class="hud"><span id="hR">剩余 10 次</span></div>
+<div class="panel">
+  <div id="hist"></div>
+  <div class="row" style="border:none">
+    <div class="slots" id="cur"></div>
+    <div class="fb" id="curFb">点击下方颜色填入</div>
+  </div>
+  <div id="palette"></div>
+  <div id="msg"></div>
+</div>
+<div class="btnrow"><button class="btn" id="bClear">清空本行</button><button class="btn pri" id="bSub">提交</button><button class="btn" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const COLORS=[["红","#f87171"],["黄","#fbbf24"],["蓝","#60a5fa"],["绿","#4ade80"],["紫","#a78bfa"],["青","#22d3ee"]];
+let secret=[],guess=[-1,-1,-1,-1],row=0,over=false;
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+const histEl=document.getElementById("hist");
+const palEl=document.getElementById("palette");
+COLORS.forEach((c,i)=>{
+  const b=document.createElement("button");
+  b.className="pbtn";b.style.background=c[1];b.textContent=c[0];
+  b.addEventListener("click",()=>{
+    if(over)return;
+    const k=guess.indexOf(-1);
+    if(k<0){document.getElementById("msg").textContent="本行已满,可点击格子移除";return;}
+    guess[k]=i;document.getElementById("msg").textContent="";renderCur();
+  });
+  palEl.appendChild(b);
+});
+function dotHTML(hit,soft){
+  return '<span class="dot '+(hit?"hit":"soft")+'"></span>';
+}
+function feedback(g,sec){
+  let exact=0;
+  const cs=[0,0,0,0,0,0],cg=[0,0,0,0,0,0];
+  for(let i=0;i<4;i++){
+    if(g[i]===sec[i])exact++;
+    cs[sec[i]]++;cg[g[i]]++;
+  }
+  let common=0;
+  for(let i=0;i<6;i++)common+=Math.min(cs[i],cg[i]);
+  return {exact:exact,partial:common-exact};
+}
+function renderCur(){
+  const el=document.getElementById("cur");
+  el.innerHTML="";
+  for(let i=0;i<4;i++){
+    const d=document.createElement("div");
+    d.className="slot"+(guess[i]>=0?"":" cur");
+    if(guess[i]>=0)d.style.background=COLORS[guess[i]][1];
+    d.addEventListener("click",()=>{if(!over){guess[i]=-1;renderCur();}});
+    el.appendChild(d);
+  }
+}
+function submit(){
+  if(over)return;
+  if(guess.indexOf(-1)>=0){document.getElementById("msg").textContent="还有空位未填";return;}
+  const fb=feedback(guess,secret);
+  const line=document.createElement("div");
+  line.className="row";
+  let dotsHTML='<div class="slots">';
+  for(let i=0;i<4;i++)dotsHTML+='<div class="slot" style="background:'+COLORS[guess[i]][1]+';cursor:default"></div>';
+  dotsHTML+="</div>";
+  let fbHTML="";
+  for(let i=0;i<fb.exact;i++)fbHTML+=dotHTML(true,false);
+  for(let i=0;i<fb.partial;i++)fbHTML+=dotHTML(false,true);
+  fbHTML+="<br>位对 "+fb.exact+" · 色对 "+fb.partial;
+  line.innerHTML=dotsHTML+'<div class="fb">'+fbHTML+"</div>";
+  histEl.appendChild(line);
+  histEl.scrollTop=histEl.scrollHeight;
+  row++;
+  guess=[-1,-1,-1,-1];
+  document.getElementById("hR").textContent="剩余 "+(10-row)+" 次";
+  renderCur();
+  if(fb.exact===4){over=true;show("破译成功!","你用了 "+row+" 次尝试锁定密码");}
+  else if(row>=10){
+    over=true;
+    let s="正确密码:";
+    for(let i=0;i<4;i++)s+='<span class="sec" style="background:'+COLORS[secret[i]][1]+'"></span>';
+    show("次数用尽",s);
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").innerHTML=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  secret=shuffle([0,1,2,3,4,5]).slice(0,4);
+  guess=[-1,-1,-1,-1];row=0;over=false;
+  histEl.innerHTML="";
+  document.getElementById("msg").textContent="";
+  document.getElementById("hR").textContent="剩余 10 次";
+  document.getElementById("ov").classList.add("hide");
+  renderCur();
+}
+document.getElementById("bClear").addEventListener("click",()=>{if(!over){guess=[-1,-1,-1,-1];renderCur();}});
+document.getElementById("bSub").addEventListener("click",submit);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

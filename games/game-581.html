@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>谜词救援</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,430px)}
+.card{background:#151a30;border-radius:14px;padding:12px;margin-bottom:10px}
+#stage{display:flex;gap:10px;align-items:center}
+canvas{background:#10142a;border-radius:10px;flex:0 0 auto}
+#side{flex:1;text-align:center}
+#hint{font-size:14px;color:#8ecae6;min-height:20px}
+#slots{font-size:24px;letter-spacing:7px;font-weight:bold;margin:12px 0;color:#fff;min-height:34px;font-family:Consolas,monospace}
+#miss{font-size:14px;color:#ff6b8a}
+#keys{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;background:#151a30;border-radius:14px;padding:10px}
+#keys button{padding:12px 0;font-size:15px;border:none;border-radius:8px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit;font-weight:bold}
+#keys button:disabled{opacity:.2;cursor:default}
+#keys button.hit{background:#2ec27e;color:#08131c}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+#toast{position:absolute;left:0;right:0;top:38%;text-align:center;font-size:22px;font-weight:bold;color:#2ec27e;opacity:0;transition:opacity .3s;pointer-events:none;z-index:4}
+</style>
+</head>
+<body>
+<h1>谜词救援</h1>
+<p id="tip">根据中文释义点击字母猜单词 · 猜错一次小人靠近危险一步,错满 6 次救援失败 · 看你能连救多少个</p>
+<div id="wrap">
+<div class="card" id="stage">
+<canvas id="cv" width="170" height="190"></canvas>
+<div id="side">
+<div id="hint">释义:…</div>
+<div id="slots"></div>
+<div id="miss"></div>
+</div>
+</div>
+<div id="keys"></div>
+<div id="toast"></div>
+<div id="ov"><h2 id="ovT">谜词救援</h2><p id="ovP">小人被谜题困住了!
+每猜对一个字母就点亮一格
+拼出完整单词即可救援成功</p><button id="ovB">开始救援</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = [
+  {w:"apple",z:"苹果"},{w:"tiger",z:"老虎"},{w:"house",z:"房子"},{w:"water",z:"水"},
+  {w:"music",z:"音乐"},{w:"smile",z:"微笑"},{w:"bread",z:"面包"},{w:"cloud",z:"云"},
+  {w:"dance",z:"跳舞"},{w:"dream",z:"梦想"},{w:"eagle",z:"老鹰"},{w:"field",z:"田野"},
+  {w:"grape",z:"葡萄"},{w:"heart",z:"心脏"},{w:"juice",z:"果汁"},{w:"light",z:"光"},
+  {w:"money",z:"钱"},{w:"night",z:"夜晚"},{w:"ocean",z:"海洋"},{w:"party",z:"派对"},
+  {w:"piano",z:"钢琴"},{w:"queen",z:"女王"},{w:"river",z:"河流"},{w:"snake",z:"蛇"},
+  {w:"sugar",z:"糖"},{w:"table",z:"桌子"},{w:"voice",z:"声音"},{w:"whale",z:"鲸鱼"},
+  {w:"zebra",z:"斑马"},{w:"beach",z:"海滩"},{w:"brush",z:"刷子"},{w:"chair",z:"椅子"},
+  {w:"clock",z:"时钟"},{w:"drink",z:"饮料"},{w:"fresh",z:"新鲜的"},{w:"ghost",z:"幽灵"},
+  {w:"lemon",z:"柠檬"},{w:"mouse",z:"老鼠"},{w:"plant",z:"植物"},{w:"storm",z:"风暴"},
+  {w:"sweet",z:"甜的"},{w:"world",z:"世界"}
+];
+var MAXMISS = 6;
+var cv = document.getElementById("cv");
+var ctx = cv.getContext("2d");
+var hintEl = document.getElementById("hint");
+var slotsEl = document.getElementById("slots");
+var missEl = document.getElementById("miss");
+var keysEl = document.getElementById("keys");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var toastEl = document.getElementById("toast");
+var word = "", zh = "", found = [], miss = 0, streak = 0, best = 0;
+var playing = false, over = false, nextTimer = null;
+var usedBtn = {};
+
+function drawGallows() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#8ecae6";
+  ctx.beginPath();
+  ctx.moveTo(18, 172); ctx.lineTo(118, 172);
+  ctx.moveTo(58, 172); ctx.lineTo(58, 18);
+  ctx.lineTo(126, 18); ctx.lineTo(126, 38);
+  ctx.stroke();
+  ctx.strokeStyle = "#ffd166";
+  if (miss >= 1) { ctx.beginPath(); ctx.arc(126, 54, 15, 0, Math.PI * 2); ctx.stroke(); }
+  if (miss >= 2) { ctx.beginPath(); ctx.moveTo(126, 69); ctx.lineTo(126, 116); ctx.stroke(); }
+  if (miss >= 3) { ctx.beginPath(); ctx.moveTo(126, 80); ctx.lineTo(106, 100); ctx.stroke(); }
+  if (miss >= 4) { ctx.beginPath(); ctx.moveTo(126, 80); ctx.lineTo(146, 100); ctx.stroke(); }
+  if (miss >= 5) { ctx.beginPath(); ctx.moveTo(126, 116); ctx.lineTo(110, 150); ctx.stroke(); }
+  if (miss >= 6) { ctx.beginPath(); ctx.moveTo(126, 116); ctx.lineTo(142, 150); ctx.stroke(); }
+}
+
+function renderSlots() {
+  var s = "";
+  for (var i = 0; i < word.length; i++) {
+    s += (found[i] ? word[i] : "_");
+  }
+  slotsEl.textContent = s.split("").join(" ");
+}
+
+function renderMiss() {
+  var s = "";
+  for (var i = 0; i < MAXMISS; i++) s += (i < MAXMISS - miss ? "♥" : "·");
+  missEl.textContent = "剩余机会 " + s;
+}
+
+function newWord() {
+  if (nextTimer) { clearTimeout(nextTimer); nextTimer = null; }
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  word = pick.w; zh = pick.z;
+  found = []; miss = 0; usedBtn = {};
+  hintEl.textContent = "释义:" + zh;
+  missEl.textContent = "";
+  var btns = keysEl.getElementsByTagName("button");
+  for (var i = 0; i < btns.length; i++) { btns[i].disabled = false; btns[i].className = ""; }
+  drawGallows();
+  renderSlots();
+  playing = true;
+}
+
+function toast(msg, color) {
+  toastEl.textContent = msg;
+  toastEl.style.color = color || "#2ec27e";
+  toastEl.style.opacity = "1";
+  nextTimer = setTimeout(function () { toastEl.style.opacity = "0"; }, 900);
+}
+
+function guess(c) {
+  if (!playing || over || usedBtn[c]) return;
+  usedBtn[c] = true;
+  var btn = document.getElementById("k" + c);
+  btn.disabled = true;
+  if (word.indexOf(c) >= 0) {
+    btn.className = "hit";
+    for (var i = 0; i < word.length; i++) if (word[i] === c) found[i] = true;
+    renderSlots();
+    if (found.length === word.length) {
+      playing = false;
+      streak++;
+      if (streak > best) best = streak;
+      drawGallows();
+      toast("救援成功!连胜 " + streak, "#2ec27e");
+      nextTimer = setTimeout(newWord, 1300);
+    }
+  } else {
+    miss++;
+    drawGallows();
+    renderMiss();
+    if (miss >= MAXMISS) {
+      playing = false;
+      over = true;
+      ovT.textContent = "救援失败";
+      ovP.textContent = "单词是 " + word.toUpperCase() + "(" + zh + ")\n本局连胜 " + streak + " · 历史最佳 " + best;
+      ovB.textContent = "再来一局";
+      ov.classList.remove("hide");
+    }
+  }
+}
+
+function startGame() {
+  streak = 0; over = false;
+  ov.classList.add("hide");
+  newWord();
+}
+
+(function buildKeys() {
+  for (var i = 0; i < 26; i++) {
+    (function () {
+      var c = String.fromCharCode(97 + i);
+      var b = document.createElement("button");
+      b.id = "k" + c;
+      b.textContent = c.toUpperCase();
+      b.onclick = function () { guess(c); };
+      keysEl.appendChild(b);
+    })();
+  }
+})();
+
+document.addEventListener("keydown", function (e) {
+  var k = e.key.toLowerCase();
+  if (k >= "a" && k <= "z" && !over) guess(k);
+});
+
+ovB.onclick = startGame;
+drawGallows();
+</script>
+</body>
+</html>

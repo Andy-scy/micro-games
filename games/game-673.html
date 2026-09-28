@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>能量不休</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.tbarWrap{flex:2;height:12px;background:#232a48;border-radius:6px;overflow:hidden}
+#enbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>能量不休</h1>
+  <p class="tips">能量持续流失,接住能量球才能续命!← → 或 A/D 移篮,触屏拖动。球越落越快,没有生命没有终点——能量见底的那一刻才是你的成绩单。</p>
+  <div class="card">
+    <div class="tbarWrap"><div id="enbar"></div></div>
+    <div class="stat"><div class="mut">存活</div><div class="big" id="tm">0s</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">能量不休</h2><p id="ovp">玩法:能量即生命,速度无上限。<br>· 能量条每秒 -1,归零即结束<br>· 每接一颗能量球 +10 分、能量 +1.8<br>· 漏球不扣,但能量不会等你<br>· 球速随存活时间不断攀升<br>· 最终得分 = 接球得分 + 存活秒数×2</p><button class="btn" id="obtn">开始续航</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var best=0;
+try{best=parseInt(localStorage.getItem('mg673')||'0',10)||0}catch(e){best=0}
+var S=null;
+function reset(){S={on:false,score:0,en:20,maxEn:26,t:0,st:0.5,orbs:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('tm').textContent='0s';$('enbar').style.width='100%';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.8})}
+function update(dt){
+  S.t+=dt;
+  S.en-=dt;
+  $('tm').textContent=Math.floor(S.t)+'s';
+  $('enbar').style.width=Math.max(0,S.en/S.maxEn*100)+'%';
+  if(S.en<=0){gameOver();return}
+  var sp=360,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.3,0.55-S.t*0.004)*(0.8+Math.random()*0.4);
+    S.orbs.push({x:26+Math.random()*(W-52),y:-14,v:175+Math.min(340,S.t*6.5)+Math.random()*50,ph:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.orbs.length-1;i>=0;i--){
+    var o=S.orbs[i];
+    o.y+=o.v*dt;
+    if(o.y>=by-16&&o.y<=by+10&&Math.abs(o.x-S.bx)<S.bw/2+8){
+      S.score+=10;$('sc').textContent=S.score;
+      S.en=Math.min(S.maxEn,S.en+1.8);
+      $('enbar').style.width=(S.en/S.maxEn*100)+'%';
+      pop(o.x,by-28,'+10 能量+1.8','#4cc9f0');
+      S.orbs.splice(i,1);continue;
+    }
+    if(o.y>H+14)S.orbs.splice(i,1);
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  var total=S.score+Math.floor(S.t)*2;
+  var nb=total>best;
+  if(nb){best=total;try{localStorage.setItem('mg673',String(best))}catch(e){}}
+  $('ovt').textContent='能量耗尽';
+  $('ovp').innerHTML='存活 <b>'+Math.floor(S.t)+'</b> 秒,接球 <b>'+S.score+'</b> 分<br>最终得分 <b>'+total+'</b>'+(nb?'<br>新纪录!':'<br>历史最佳 <b>'+best+'</b>')+'<br>球速会一直涨,手稳才能不休!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  for(var i=0;i<S.orbs.length;i++){
+    var o=S.orbs[i];
+    ctx.fillStyle='rgba(76,201,240,.18)';
+    ctx.beginPath();ctx.arc(o.x,o.y,16,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#4cc9f0';
+    ctx.beginPath();ctx.arc(o.x,o.y,8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#e8fbff';
+    ctx.beginPath();ctx.arc(o.x-2,o.y-2,3,0,Math.PI*2);ctx.fill();
+  }
+  var by=H-46;
+  ctx.fillStyle='#3d4470';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#4cc9f0';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#4cc9f0';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('能量篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+  if(S.en<5){
+    ctx.fillStyle='rgba(255,80,80,'+(0.25+0.15*Math.sin(S.t*8))+')';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#ff6b6b';ctx.font='bold 20px system-ui';
+    ctx.fillText('能量告急!',W/2,90);
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

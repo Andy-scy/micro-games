@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大货车盲区</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>大货车盲区</h1>
+  <p class="tips">你开着重卡送货:车两侧后方全是看不见的盲区!按住空格看后视镜,但看镜时就顾不上前面了。安全跑完 2500 米!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">路程</div><div class="big" id="sd">0/2500</div></div>
+    <div class="stat"><div class="mut">车况</div><div class="big" id="sh">♥♥♥</div></div>
+    <div class="stat"><div class="mut">后视镜</div><div class="big" id="sm">未看</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">大货车盲区</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 变道(触屏点画面左右)<br>· <b>按住空格</b>(或按住画面中央)看后视镜<br>· 看镜时:盲区里的车显形,但<b>前方变暗</b><br>· 后方快车会钻进你侧后盲区,直接变道=碰撞<br>· 车况 3 颗心,撞完即失败;跑完 2500 米送达</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=420,H=560,TOTAL=2500,LANES=3;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var LW=W/LANES;
+var truckLane,truckX,speed,dist,hearts,running,stripe,spawnAT,spawnBT,invuln,mirror;
+var ahead=[],behind=[];
+var keys={};
+var PY=H-150;
+function $i(id){return document.getElementById(id)}
+function laneCx(l){return LW*l+LW/2}
+function reset(){
+  truckLane=1;truckX=laneCx(1);speed=350;dist=0;hearts=3;stripe=0;
+  spawnAT=0.7;spawnBT=1.6;invuln=0;mirror=false;
+  ahead.length=0;behind.length=0;
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/2500';
+  var h='';
+  var i;
+  for(i=0;i<hearts;i++)h+='♥';
+  $i('sh').textContent=h||'爆';
+  $i('sm').textContent=mirror?'看镜中':'未看';
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawnAhead(){
+  var l=Math.floor(Math.random()*LANES),i;
+  for(i=0;i<ahead.length;i++){
+    if(ahead[i].lane===l&&ahead[i].y<170)return;
+  }
+  ahead.push({lane:l,x:laneCx(l),y:-95,spd:200+Math.random()*40,
+    c:['#4da3ff','#51d88a','#b07cff'][Math.floor(Math.random()*3)]});
+}
+function spawnBehind(){
+  var l=Math.floor(Math.random()*LANES),i;
+  if(l===truckLane)return;
+  for(i=0;i<behind.length;i++){
+    if(behind[i].lane===l&&behind[i].y>PY)return;
+  }
+  behind.push({lane:l,x:laneCx(l),y:H+110,spd:410+Math.random()*55,
+    c:['#ff9f43','#e0e6ff'][Math.floor(Math.random()*2)]});
+}
+function hidden(c){
+  return Math.abs(c.lane-truckLane)===1&&c.y>PY-150&&c.y<PY+40;
+}
+function update(dt){
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%70;
+  var target=mirror?320:350;
+  speed+=(target-speed)*Math.min(1,dt*1.2);
+  if(invuln>0)invuln-=dt;
+  spawnAT-=dt;spawnBT-=dt;
+  if(spawnAT<=0){spawnAhead();spawnAT=1.0+Math.random()*0.7;}
+  if(spawnBT<=0){spawnBehind();spawnBT=2.2+Math.random()*1.6;}
+  truckX+=(laneCx(truckLane)-truckX)*Math.min(1,dt*7);
+  var i,c,hit=false;
+  for(i=ahead.length-1;i>=0;i--){
+    c=ahead[i];
+    c.y+=(speed-c.spd)*dt;
+    if(c.y>H+100){ahead.splice(i,1);continue;}
+    if(Math.abs(c.x-truckX)<46&&Math.abs(c.y-PY)<92)hit=true;
+  }
+  for(i=behind.length-1;i>=0;i--){
+    c=behind[i];
+    c.y-=(c.spd-speed)*dt;
+    if(c.y<-110){behind.splice(i,1);continue;}
+    if(Math.abs(c.x-truckX)<46&&Math.abs(c.y-PY)<92)hit=true;
+  }
+  if(hit&&invuln<=0){
+    hearts--;invuln=1.7;speed=250;
+    if(hearts<=0){
+      endRun('货车报废!','跑了 '+Math.floor(dist)+' m / 2500 m<br>盲区里看不清,就别贸然变道——看一眼后视镜!');
+      return;
+    }
+  }
+  if(dist>=TOTAL){
+    endRun('安全送达!','全程 2500 m,剩余车况 '+hearts+' 颗心<br>老司机的第一课:盲区不赌命。');
+    return;
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c,dim){
+  ctx.globalAlpha=dim?0.22:1;
+  ctx.fillStyle=c;rr(x-19,y-33,38,66,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-14,y-19,28,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-14,y+5,28,17,5);ctx.fill();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(14,0,W-28,H);
+  ctx.strokeStyle='rgba(255,255,255,.75)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(16,0);ctx.lineTo(16,H);ctx.moveTo(W-16,0);ctx.lineTo(W-16,H);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=3;
+  ctx.setLineDash([26,32]);ctx.lineDashOffset=-stripe;
+  var l;
+  for(l=1;l<LANES;l++){
+    ctx.beginPath();ctx.moveTo(LW*l,0);ctx.lineTo(LW*l,H);ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,60,60,.07)';
+  ctx.fillRect(truckX-160,PY-150,60,190);
+  ctx.fillRect(truckX+100,PY-150,60,190);
+  ctx.strokeStyle='rgba(255,90,90,.35)';ctx.setLineDash([6,6]);
+  ctx.strokeRect(truckX-160,PY-150,60,190);
+  ctx.strokeRect(truckX+100,PY-150,60,190);
+  ctx.setLineDash([]);
+  var i;
+  for(i=0;i<ahead.length;i++)drawCar(ahead[i].x,ahead[i].y,ahead[i].c,mirror);
+  for(i=0;i<behind.length;i++){
+    var hid=hidden(behind[i])&&!mirror;
+    if(hid)continue;
+    drawCar(behind[i].x,behind[i].y,behind[i].c,false);
+  }
+  if(!(invuln>0&&Math.floor(Date.now()/100)%2===0)){
+    ctx.fillStyle='#dfe6ff';
+    rr(truckX-27,PY-72,54,32,6);ctx.fill();
+    ctx.fillStyle='#3d4a8f';
+    rr(truckX-27,PY-38,54,104,4);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.15)';
+    for(var s2=0;s2<3;s2++)ctx.fillRect(truckX-23,PY-32+s2*34,46,26);
+    ctx.fillStyle='#ffe08a';
+    ctx.fillRect(truckX-24,PY+58,10,6);ctx.fillRect(truckX+14,PY+58,10,6);
+  }
+  if(mirror){
+    ctx.fillStyle='rgba(80,200,255,.9)';
+    ctx.font='bold 16px system-ui';ctx.textAlign='center';
+    ctx.fillText('后视镜',W/2,44);
+    ctx.fillStyle='rgba(0,0,20,.35)';
+    ctx.fillRect(0,0,W,PY-160);
+  }
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(running&&!mirror){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){if(truckLane>0)truckLane--;}
+    else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D'){if(truckLane<LANES-1)truckLane++;}
+  }
+  mirror=keys[' ']===true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){
+  keys[e.key]=false;
+  mirror=keys[' ']===true;
+});
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var rect=cv.getBoundingClientRect();
+  var x=(e.clientX-rect.left)*W/rect.width;
+  if(x<W*0.35){if(truckLane>0)truckLane--;}
+  else if(x>W*0.65){if(truckLane<LANES-1)truckLane++;}
+  else mirror=true;
+});
+window.addEventListener('pointerup',function(){mirror=keys[' ']===true;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞驰炮车</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:560px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#facc15;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#facc15}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#facc15;color:#332804;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>飞驰炮车</h1>
+  <p class="hint">←→ 开炮车 · ↑↓ 调角度 · 空格蓄力发射 · 行进间开炮有惯性加成</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>炮弹 <b id="ammo">12</b></span>
+    <span>残靶 <b id="left">8</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">飞驰炮车</h2>
+      <p id="ovDesc">这次大炮装在了能开动的炮车上!
+←→ 驾驶战车抢占射界,↑↓ 调角度,空格蓄力开炮。
+行车方向和速度会叠加到炮弹初速上,顺风开炮打得远!
+12 发炮弹清除全部 8 个靶环即获胜。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,GY=322,G=0.21;
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elAmmo=$("ammo"),elLeft=$("left"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var PIV=GY-26;
+var best=loadBest("mg_s476");
+var state="menu",ang=45,pow=55,charging=false,cd=1;
+var ball=null,trail=[],ammo=12,score=0,cart={x:120,vx:0},wheel=0,targets=[],parts=[],kl=false,kr=false,settle=0;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function spd(p){return 1+p*0.105;}
+function rad(d){return d*Math.PI/180;}
+function muzzle(){var a=rad(ang);return{x:cart.x+Math.cos(a)*30,y:PIV-Math.sin(a)*30};}
+function newTargets(){
+  targets=[];
+  var st=[0,40,80,120];
+  for(var i=0;i<8;i++)targets.push({x:90+i*50+rnd(-10,10),stand:st[(Math.random()*4)|0],dead:false});
+}
+function tcy(t){return GY-t.stand-24;}
+function leftCount(){
+  var n=0;
+  for(var i=0;i<targets.length;i++)if(!targets[i].dead)n++;
+  return n;
+}
+function reset(){
+  score=0;ammo=12;ball=null;trail=[];parts=[];settle=0;
+  cart={x:120,vx:0};wheel=0;kl=false;kr=false;
+  newTargets();ang=45;pow=55;charging=false;hud();
+}
+function hud(){elScore.textContent=score;elAmmo.textContent=ammo;elLeft.textContent=leftCount();elBest.textContent=best;}
+function canFire(){return state==="playing"&&!ball&&ammo>0;}
+function fire(){
+  if(!canFire())return;
+  ammo--;charging=false;
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  ball={x:m.x,y:m.y,vx:Math.cos(a)*v+cart.vx*0.75,vy:-Math.sin(a)*v,t:0};
+  trail=[];hud();
+}
+function boom(x,y,col,n){
+  for(var i=0;i<n;i++)parts.push({x:x,y:y,vx:rnd(-2,2),vy:rnd(-3,0.5),l:rnd(18,38),c:col});
+}
+function tick(){
+  var i,t;
+  if(kl)cart.vx-=0.22;
+  if(kr)cart.vx+=0.22;
+  cart.vx*=0.92;
+  if(Math.abs(cart.vx)<0.01)cart.vx=0;
+  cart.x+=cart.vx;
+  if(cart.x<26){cart.x=26;cart.vx=0;}
+  if(cart.x>420){cart.x=420;cart.vx=0;}
+  wheel+=cart.vx*0.15;
+  if(charging&&canFire()){pow+=cd*1.9;if(pow>=100){pow=100;cd=-1;}if(pow<=18){pow=18;cd=1;}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.l--;if(p.l<=0)parts.splice(i,1);}
+  if(ball){
+    for(var s=0;s<2;s++){
+      ball.t++;ball.vy+=G;ball.x+=ball.vx;ball.y+=ball.vy;
+      for(i=0;i<targets.length;i++){
+        t=targets[i];
+        if(t.dead)continue;
+        var d=Math.hypot(ball.x-t.x,ball.y-tcy(t));
+        if(d<25){
+          var pts=d<8?100:(d<16?60:30);
+          score+=pts;t.dead=true;
+          boom(t.x,tcy(t),"#facc15",14);
+          ball=null;hud();break;
+        }
+      }
+      if(!ball)break;
+      trail.push({x:ball.x,y:ball.y});if(trail.length>18)trail.shift();
+      if(ball.y>=GY-3){boom(ball.x,GY-4,"#8b93c8",7);ball=null;break;}
+      if(ball.x>W+40||ball.x<-40||ball.t>700){ball=null;break;}
+    }
+  }
+  if(state==="playing"&&!ball){
+    if(leftCount()===0){settle++;if(settle>40)finish(true);}
+    else if(ammo<=0){settle++;if(settle>40)finish(false);}
+    else settle=0;
+  }
+}
+function finish(win){
+  state="over";
+  var bonus=win?ammo*100:0;
+  score+=bonus;
+  if(score>best){best=score;saveBest("mg_s476",best);}
+  ovTitle.textContent=win?"靶场清空!":"炮弹用尽";
+  ovDesc.textContent=win?("全部靶环摧毁,剩余炮弹奖励 "+bonus+" 分!"):"还剩 "+leftCount()+" 个靶环。记住:向右行驶时开炮,炮弹会飞得更远。";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  hud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function ring(x,y,r,col){ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();}
+function drawCart(){
+  ctx.fillStyle="#39406b";rr(cart.x-30,GY-18,60,12,4);ctx.fill();
+  ctx.save();ctx.translate(cart.x,PIV);ctx.rotate(-rad(ang));
+  ctx.fillStyle="#8b93c8";rr(-8,-6,34,12,5);ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="#6a74ad";ctx.beginPath();ctx.arc(cart.x,PIV,10,Math.PI,0);ctx.fill();
+  var ws=[cart.x-20,cart.x+20];
+  for(var i=0;i<2;i++){
+    ctx.fillStyle="#20263f";ctx.beginPath();ctx.arc(ws[i],GY-7,8,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#facc15";ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(ws[i]+Math.cos(wheel)*5,GY-7+Math.sin(wheel)*5);
+    ctx.lineTo(ws[i]-Math.cos(wheel)*5,GY-7-Math.sin(wheel)*5);
+    ctx.stroke();
+  }
+  if(charging){
+    ctx.fillStyle="#20263f";rr(cart.x-46,PIV-92,10,80,5);ctx.fill();
+    ctx.fillStyle=pow>80?"#f87171":"#facc15";
+    var bh=80*(pow-18)/82;
+    rr(cart.x-46,PIV-12-bh,10,bh,4);ctx.fill();
+  }
+}
+function preview(){
+  var m=muzzle(),a=rad(ang),v=spd(pow);
+  var x=m.x,y=m.y,vx=Math.cos(a)*v+cart.vx*0.75,vy=-Math.sin(a)*v;
+  ctx.fillStyle="rgba(232,234,246,0.35)";
+  for(var i=0;i<80;i++){
+    vy+=G;x+=vx;y+=vy;
+    if(y>GY)break;
+    if(i%3===0)ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function draw(){
+  var i,t;
+  ctx.fillStyle="#10142a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1b2138";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2a3154";ctx.fillRect(0,GY,W,3);
+  for(i=0;i<targets.length;i++){
+    t=targets[i];var cy=tcy(t);
+    if(t.stand>0){ctx.strokeStyle="#3a4270";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(t.x,GY);ctx.lineTo(t.x,cy+22);ctx.stroke();}
+    if(t.dead){
+      ctx.globalAlpha=0.18;
+      ring(t.x,cy,24,"#e8eaf6");
+      ctx.globalAlpha=1;
+    }else{
+      ring(t.x,cy,24,"#e8eaf6");ring(t.x,cy,16,"#f87171");ring(t.x,cy,7,"#fbbf24");
+    }
+  }
+  if(canFire())preview();
+  drawCart();
+  for(i=0;i<trail.length;i++){ctx.fillStyle="rgba(139,147,200,"+(i/trail.length*0.5)+")";ctx.fillRect(trail[i].x-1.5,trail[i].y-1.5,3,3);}
+  if(ball){ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(ball.x,ball.y,5,0,Math.PI*2);ctx.fill();}
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.min(1,p.l/20);ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);}
+  ctx.globalAlpha=1;
+}
+var lastT=0,acc=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing"){acc+=dt;var n=0;while(acc>=16.6&&n<4){acc-=16.6;n++;tick();}if(n===4)acc=0;}
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}return;}
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){kl=true;e.preventDefault();}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){kr=true;e.preventDefault();}
+  else if(e.key==="ArrowUp"){ang=Math.min(85,ang+2);e.preventDefault();}
+  else if(e.key==="ArrowDown"){ang=Math.max(8,ang-2);e.preventDefault();}
+  else if(e.key===" "){e.preventDefault();if(!charging&&canFire()){charging=true;pow=18;cd=1;}}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")kl=false;
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")kr=false;
+  else if(e.key===" "&&state==="playing"&&charging)fire();
+});
+var drag=false,dragMoved=false;
+function pos(e){var r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function aimAt(p){
+  var dx=p.x-cart.x,dy=PIV-p.y;
+  if(dy<6||dx<-30)return;
+  ang=Math.max(8,Math.min(85,Math.atan2(dy,Math.max(2,dx))*180/Math.PI));
+  pow=Math.max(18,Math.min(100,Math.hypot(dx,dy)/2.2));
+  dragMoved=true;
+}
+cv.addEventListener("mousedown",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e));e.preventDefault();});
+window.addEventListener("mousemove",function(e){if(drag)aimAt(pos(e));});
+window.addEventListener("mouseup",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}});
+cv.addEventListener("touchstart",function(e){if(state!=="playing")return;drag=true;dragMoved=false;aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){if(drag)aimAt(pos(e.changedTouches[0]));e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){if(drag){drag=false;if(dragMoved&&canFire())fire();}e.preventDefault();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

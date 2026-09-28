@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拍点接糖</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#facc15;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#facc15;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#facc15}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#facc15;color:#2b2303;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>拍点接糖</h1>
+  <p class="hint">移动挡板接住糖果 · 糖在拍点到达虚线,接得越准分越高 · 鼠标 / 触屏 / 左右键</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">5</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">拍点接糖</h2>
+      <p id="ovDesc">糖果随节拍从天而降,恰好在节拍点穿过虚线。
+左右移动挡板,在糖经过的瞬间接住它:
+糖心与拍点重合时接住=完美高分,偏早偏晚也有分。
+金糖双倍!漏 5 颗糖游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,JY=500,PADW=116,PADY=516;
+var BPM0=84;
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sCatch(per){tone("triangle",per?880:640,per?1240:640,0.12,0.22);}
+function sMiss(){tone("sawtooth",200,100,0.22,0.18);}
+function sTick(){noiseHit(0.04,0.05,7000);}
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g371");
+
+var state="menu",bpm,candies,pops,score,combo,life,maxCombo,caught,schedBeat,tickBeat,count,px,vx,keyL,keyR;
+function beatInt(){return 60000/bpm;}
+function reset(){
+  bpm=BPM0;candies=[];pops=[];
+  score=0;combo=0;life=5;maxCombo=0;caught=0;count=0;
+  px=W/2;vx=0;keyL=false;keyR=false;
+  schedBeat=performance.now()+1600;
+  tickBeat=schedBeat;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g371",best);}
+  upd();
+  ovTitle.textContent="糖罐打翻";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="接住 "+caught+" 颗糖 · 最高连击 "+maxCombo+"\n对准拍点,再来一局!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  if(schedBeat-now>4000)schedBeat=now+2000;
+  while(schedBeat-now<beatInt*2+200){
+    count++;
+    if(count%2===0){
+      candies.push({
+        x:44+Math.random()*(W-88),
+        t:schedBeat+beatInt*2,
+        golden:count%12===0,
+        state:0,
+        vy:(JY+30)/(beatInt*2)
+      });
+    }
+    schedBeat+=beatInt;
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTick();tickBeat+=beatInt;}
+}
+function update(now){
+  var i,c,y,vy;
+  if(keyL)vx=-0.9;
+  else if(keyR)vx=0.9;
+  else vx=0;
+  px+=vx;
+  if(px<PADW/2)px=PADW/2;
+  if(px>W-PADW/2)px=W-PADW/2;
+  for(i=candies.length-1;i>=0;i--){
+    c=candies[i];
+    vy=c.vy;
+    y=JY-(c.t-now)*vy;
+    if(c.state===0&&y>JY-24&&y<JY+26&&Math.abs(c.x-px)<=PADW/2+12){
+      c.state=1;
+      caught++;
+      var dt=Math.abs(now-c.t);
+      var base;
+      if(dt<=130){combo++;base=250;}
+      else if(dt<=320){combo++;base=100;}
+      else{base=40;}
+      if(combo>maxCombo)maxCombo=combo;
+      var gain=(base+combo*8)*(c.golden?2:1);
+      score+=gain;
+      if(dt<=130){addPop(c.x,JY-40,"完美 +"+gain,"#fbbf24");sCatch(true);}
+      else if(dt<=320){addPop(c.x,JY-40,"接住 +"+gain,"#facc15");sCatch(false);}
+      else{addPop(c.x,JY-40,"磕到 +"+gain,"#8b90b0");sCatch(false);}
+      if(caught%10===0&&bpm<130){bpm+=3;addPop(W/2,120,"加速!"+Math.round(bpm)+" BPM","#facc15");}
+      upd();
+      candies.splice(i,1);
+      continue;
+    }
+    if(y>H+30){
+      candies.splice(i,1);
+      combo=0;life--;sMiss();
+      addPop(c.x,JY-20,"漏糖!","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>600)pops.splice(i,1);}
+}
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(now){
+  var i,c,y;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.setLineDash([8,8]);
+  ctx.strokeStyle="rgba(250,204,21,0.45)";
+  ctx.beginPath();ctx.moveTo(0,JY);ctx.lineTo(W,JY);ctx.stroke();
+  ctx.setLineDash([]);
+  for(i=0;i<candies.length;i++){
+    c=candies[i];
+    y=JY-(c.t-now)*c.vy;
+    if(y<-30)continue;
+    if(c.golden){
+      ctx.strokeStyle="rgba(251,191,36,0.7)";
+      ctx.beginPath();ctx.arc(c.x,y,20,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle="#fbbf24";
+    }else{
+      ctx.fillStyle="#f472b6";
+    }
+    ctx.beginPath();ctx.arc(c.x,y,14,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.55)";
+    ctx.beginPath();ctx.arc(c.x-4,y-5,4.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="rgba(250,204,21,0.2)";
+  rrect(px-PADW/2,PADY,PADW,18,9);ctx.fill();
+  ctx.fillStyle="#facc15";
+  rrect(px-PADW/2+4,PADY+3,PADW-8,12,6);ctx.fill();
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/600;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y-pr*26);
+    ctx.globalAlpha=1;
+  }
+}
+function toX(cx){
+  var rect=cv.getBoundingClientRect();
+  return (cx-rect.left)*W/rect.width;
+}
+function setX(cx){px=toX(cx);if(px<PADW/2)px=PADW/2;if(px>W-PADW/2)px=W-PADW/2;}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();setX(e.clientX);});
+  cv.addEventListener("pointermove",function(e){if(e.buttons>0||e.pointerType==="touch")setX(e.clientX);});
+}else{
+  cv.addEventListener("mousedown",function(e){setX(e.clientX);});
+  cv.addEventListener("mousemove",function(e){if(e.buttons>0)setX(e.clientX);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();setX(e.changedTouches[0].clientX);},{passive:false});
+  cv.addEventListener("touchmove",function(e){e.preventDefault();setX(e.changedTouches[0].clientX);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.code==="ArrowLeft"||e.code==="KeyA"){keyL=true;e.preventDefault();}
+  else if(e.code==="ArrowRight"||e.code==="KeyD"){keyR=true;e.preventDefault();}
+});
+window.addEventListener("keyup",function(e){
+  if(e.code==="ArrowLeft"||e.code==="KeyA")keyL=false;
+  else if(e.code==="ArrowRight"||e.code==="KeyD")keyR=false;
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>沙包打罐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ff8a65;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ff8a65;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ff8a65;color:#3e1910;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>沙包打罐</h1>
+<p class="tip">按住向后下方拖拽瞄准，松手甩出沙包 · 击倒罐子可连锁撞倒同伴 · 10 个沙包内击倒全部 10 罐获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,PLATY=470,G=1300,CW=30,CH=44;
+var bags,cansDown,bag,drag,cans,phase,resT,msg,flees;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function buildCans(){
+  cans=[];
+  var rows=[4,3,2,1];
+  for(var r=0;r<rows.length;r++){
+    var n=rows[r],y=PLATY-CH/2-r*(CH+2);
+    for(var i=0;i<n;i++){
+      var x=240+(i-(n-1)/2)*(CW+3);
+      cans.push({x:x,y:y,down:false,vx:0,vy:0,rot:0,vr:0,rest:false});
+    }
+  }
+}
+function reset(){
+  bags=10;cansDown=0;bag=null;drag=null;phase='aim';resT=0;msg='';flees=[];
+  buildCans();
+}
+function throwBag(dx,dy){
+  var sp=Math.hypot(dx,dy)*4.4;
+  if(sp<120)return;
+  if(sp>950)sp=950;
+  bag={x:240,y:576,vx:dx*4.4,vy:dy*4.4,still:0};
+  bags--;phase='fly';
+}
+function hitRect(cx,cy,r,bx,by,bw,bh){
+  var px=Math.max(bx,Math.min(cx,bx+bw)),py=Math.max(by,Math.min(cy,by+bh));
+  return (cx-px)*(cx-px)+(cy-py)*(cy-py)<r*r;
+}
+function knock(c,vx,vy){
+  c.down=true;cansDown++;
+  c.vx=vx*0.45+rnd(-50,50);c.vy=Math.min(vy*0.3,-120)+rnd(-60,0);c.vr=rnd(-7,7);
+  msg='倒！';
+}
+function update(dt){
+  var i,j;
+  for(i=flees.length-1;i>=0;i--){flees[i].t-=dt;if(flees[i].t<=0)flees.splice(i,1);}
+  if(phase==='fly'&&bag){
+    var steps=Math.max(1,Math.ceil(dt/0.006)),sd=dt/steps;
+    for(var s=0;s<steps;s++){
+      bag.vy+=G*sd;bag.x+=bag.vx*sd;bag.y+=bag.vy*sd;
+      for(i=0;i<cans.length;i++){
+        var c=cans[i];
+        if(c.down)continue;
+        if(hitRect(bag.x,bag.y,11,c.x-CW/2,c.y-CH/2,CW,CH)){knock(c,bag.vx,bag.vy);bag.vx*=0.4;bag.vy*=0.5;}
+      }
+      if(bag.y>H+40){bag=null;break;}
+    }
+    if(bag&&Math.hypot(bag.vx,bag.vy)<40&&bag.y>PLATY-14){bag.still+=dt;if(bag.still>0.4){bag=null;}}
+  }
+  for(i=0;i<cans.length;i++){
+    var cc=cans[i];
+    if(!cc.down||cc.rest)continue;
+    cc.vy+=G*dt;cc.x+=cc.vx*dt;cc.y+=cc.vy*dt;cc.rot+=cc.vr*dt;cc.vr*=0.99;
+    var ground=(cc.x>110&&cc.x<370)?PLATY:614;
+    if(cc.y>ground-CH/2){
+      cc.y=ground-CH/2;
+      if(Math.abs(cc.vy)>90){cc.vy*=-0.35;cc.vx*=0.75;}
+      else{cc.vy=0;cc.vx*=0.8;if(Math.abs(cc.vx)<12){cc.vx=0;cc.rest=true;}}
+    }
+    if(cc.x<-30||cc.x>W+30){cc.rest=true;cc.vx=0;}
+    for(j=0;j<cans.length;j++){
+      var o=cans[j];
+      if(o.down||Math.abs(cc.x-o.x)>34||Math.abs(cc.y-o.y)>46)continue;
+      if(Math.hypot(cc.x-o.x,cc.y-o.y)<26){knock(o,cc.vx,cc.vy*0.8);flees.push({x:o.x,y:o.y,t:0.7,txt:'连锁！'});}
+    }
+  }
+  if(phase==='fly'&&!bag){
+    phase='res';resT=0;
+    if(cansDown>=10){end(true);return;}
+    if(bags<=0){end(false);return;}
+  }
+  if(phase==='res'){resT+=dt;if(resT>0.55){phase='aim';msg='';}}
+}
+function end(win){
+  phase='over';
+  var bonus=win?bags*20:0;
+  ovT.textContent=win?'全部击倒！':'沙包用完了';
+  ovX.textContent='击倒 '+cansDown+' / 10 罐'+(win?' · 剩余沙包奖励 +'+bonus+' 分，神投手！':'（还剩 '+bags+' 个沙包没机会了）。往后下方拖得越远，甩得越有力。');
+  ov.classList.remove('hidden');
+}
+function drawCan(c){
+  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.rot);
+  ctx.fillStyle=c.down?'#8d6e63':'#ef5350';
+  ctx.fillRect(-CW/2,-CH/2,CW,CH);
+  ctx.fillStyle=c.down?'#6d4c41':'#ffcdd2';
+  ctx.fillRect(-CW/2,-CH/2+7,CW,9);
+  ctx.fillRect(-CW/2,CH/2-8,CW,5);
+  ctx.strokeStyle='#3e2723';ctx.lineWidth=1.5;ctx.strokeRect(-CW/2,-CH/2,CW,CH);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#3e2723';ctx.fillRect(110,PLATY,260,10);
+  ctx.fillStyle='#5d4037';ctx.fillRect(110,PLATY+10,260,6);
+  ctx.fillStyle='#232946';ctx.fillRect(0,614,W,H-614);
+  ctx.fillStyle='#2e3a68';ctx.fillRect(0,610,W,6);
+  ctx.fillStyle='#ffb74d';ctx.beginPath();ctx.arc(240,600,14,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#ff8a65';ctx.beginPath();ctx.arc(240,576,11,0,7);ctx.fill();
+  ctx.strokeStyle='#bf360c';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(240,576,11,0,7);ctx.stroke();
+  var i;
+  for(i=0;i<cans.length;i++)drawCan(cans[i]);
+  if(phase==='aim'&&drag){
+    var dx=drag.sx-drag.cx,dy=drag.sy-drag.cy;
+    var sp=Math.hypot(dx,dy)*4.4;if(sp>950)sp=950;
+    var k=sp/Math.max(1,Math.hypot(dx,dy));
+    var vx=dx*k,vy=dy*k,px=240,py=576;
+    ctx.fillStyle='rgba(255,183,77,.55)';
+    for(i=0;i<20;i++){
+      vy+=G*0.028;px+=vx*0.028;py+=vy*0.028;
+      if(py>H)break;
+      ctx.beginPath();ctx.arc(px,py,3.5-i*0.12,0,7);ctx.fill();
+    }
+    ctx.strokeStyle='rgba(255,138,101,.7)';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(drag.sx,drag.sy);ctx.lineTo(drag.cx,drag.cy);ctx.stroke();
+  }
+  if(bag){
+    ctx.fillStyle='#ff8a65';ctx.beginPath();ctx.arc(bag.x,bag.y,11,0,7);ctx.fill();
+    ctx.strokeStyle='#bf360c';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(bag.x,bag.y,11,0,7);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(bag.x-8,bag.y-4);ctx.lineTo(bag.x+8,bag.y+4);ctx.moveTo(bag.x-8,bag.y+4);ctx.lineTo(bag.x+8,bag.y-4);ctx.stroke();
+  }
+  for(i=0;i<flees.length;i++){
+    ctx.fillStyle='rgba(255,213,79,'+flees[i].t+')';ctx.font='16px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText(flees[i].txt,flees[i].x,flees[i].y-30-(0.7-flees[i].t)*40);
+  }
+  if(msg&&phase==='res'){ctx.fillStyle='#ffd54f';ctx.font='20px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText(msg,W/2,120);}
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('击倒 '+cansDown+' / 10',14,28);
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';
+  ctx.fillText('沙包 ×'+bags,14,50);
+  if(phase==='aim'&&!drag){ctx.textAlign='center';ctx.fillText('按住画布，向后下方拖拽后松手',W/2,622);}
+  if(phase==='res'){ctx.textAlign='center';ctx.fillStyle='#9fa8da';ctx.fillText('准备下一个沙包…',W/2,622);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  if(phase!=='aim')return;
+  var r=cv.getBoundingClientRect();
+  drag={sx:(e.clientX-r.left)*(W/r.width),sy:(e.clientY-r.top)*(H/r.height),cx:0,cy:0};
+  drag.cx=drag.sx;drag.cy=drag.sy;
+});
+cv.addEventListener('pointermove',function(e){
+  if(!drag)return;
+  var r=cv.getBoundingClientRect();
+  drag.cx=(e.clientX-r.left)*(W/r.width);drag.cy=(e.clientY-r.top)*(H/r.height);
+});
+window.addEventListener('pointerup',function(){
+  if(!drag)return;
+  if(phase==='aim')throwBag(drag.sx-drag.cx,drag.sy-drag.cy);
+  drag=null;
+});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

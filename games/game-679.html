@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三振救援</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>三振救援</h1>
+  <p class="tips">失误板上有三个空格:水果漏接一次填一个 ✗,三振出局!金色的橡皮擦能擦掉一个失误。← → 或 A/D 移篮,触屏拖动;稳住节奏,失误也有救。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">失误板</div><div class="big" id="sb">○○○</div></div>
+    <div class="stat"><div class="mut">救援次数</div><div class="big" id="rs">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">三振救援</h2><p id="ovp">玩法:失误可擦,逆转常在。<br>· 红苹果 +10、橙子 +15,漏接记 1 次失误<br>· 失误板 3 个 ✗ = 三振出局<br>· 金橡皮擦偶尔降落:接住擦掉 1 个 ✗ +20<br>· 橡皮擦落地不罚,普通水果落地必罚<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始救援</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,strikes:0,resc:0,st:0.72,t:0,items:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('sb').textContent='○○○';$('rs').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function boardStr(){
+  var s='';
+  for(var i=0;i<3;i++)s+=i<S.strikes?'✗':'○';
+  return s;
+}
+function update(dt){
+  S.t+=dt;
+  var sp=345,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.66+Math.random()*0.36;
+    var r2=Math.random();
+    var kind=r2<0.6?0:(r2<0.9?1:2);
+    S.items.push({k:kind,x:30+Math.random()*(W-60),y:-18,v:190+S.t*3+Math.random()*60,rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.items.length-1;i>=0;i--){
+    var it=S.items[i];
+    it.y+=it.v*dt;it.rot+=dt*3;
+    if(it.y>=by-18&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+10){
+      if(it.k===2){
+        S.score+=20;$('sc').textContent=S.score;
+        if(S.strikes>0){
+          S.strikes--;S.resc++;$('sb').textContent=boardStr();$('rs').textContent=S.resc;
+          pop(it.x,by-32,'失误擦除!+20','#ffd166');
+        }else{
+          pop(it.x,by-32,'+20 无失误可擦','#ffd166');
+        }
+      }else{
+        var pts=it.k===0?10:15;
+        S.score+=pts;$('sc').textContent=S.score;
+        pop(it.x,by-32,'+'+pts,'#51d88a');
+      }
+      S.items.splice(i,1);continue;
+    }
+    if(it.y>H+18){
+      S.items.splice(i,1);
+      if(it.k<2){
+        S.strikes++;$('sb').textContent=boardStr();
+        pop(it.x,H-100,(it.k===0?'苹果':'橙子')+'漏接!失误+1','#ff6b6b');
+        if(S.strikes>=3)gameOver();
+      }
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='三振出局';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>橡皮救援 <b>'+S.resc+'</b> 次<br>失误不致命,擦掉就能翻盘!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='rgba(255,255,255,.07)';rr(W-150,12,138,40,10);ctx.fill();
+  ctx.fillStyle='#9aa3c0';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('失误板',W-81,28);
+  for(var b=0;b<3;b++){
+    var bx=W-122+b*41;
+    ctx.strokeStyle=S.strikes>b?'#ff6b6b':'rgba(255,255,255,.4)';
+    ctx.lineWidth=2;
+    rr(bx,34,30,14,4);ctx.stroke();
+    if(S.strikes>b){
+      ctx.fillStyle='#ff6b6b';ctx.font='bold 11px system-ui';
+      ctx.fillText('✗',bx+15,45);
+    }
+  }
+  for(var i=0;i<S.items.length;i++){
+    var it=S.items[i];
+    ctx.save();ctx.translate(it.x,it.y);ctx.rotate(Math.sin(it.rot)*0.3);
+    if(it.k===2){
+      ctx.fillStyle='#fff3d6';rr(-13,-9,26,18,4);ctx.fill();
+      ctx.strokeStyle='#c9a15a';ctx.lineWidth=2;rr(-13,-9,26,18,4);ctx.stroke();
+      ctx.fillStyle='#b8860b';ctx.font='bold 11px system-ui';ctx.textAlign='center';
+      ctx.fillText('擦',0,4);
+      ctx.strokeStyle='#ffd166';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(0,0,19,0,Math.PI*2);ctx.stroke();
+    }else{
+      ctx.fillStyle=it.k===0?'#ff5c5c':'#ffa94d';
+      ctx.beginPath();ctx.arc(0,0,13,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.35)';
+      ctx.beginPath();ctx.arc(-4,-4,4,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#51d88a';ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(0,-12);ctx.quadraticCurveTo(5,-20,12,-17);ctx.stroke();
+    }
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';
+  ctx.fillText('救援篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

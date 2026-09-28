@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>十字消除阵</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>十字消除阵</h1>
+  <p class="tips">点击一个泡泡,它和上下左右四个邻居会一起消失!用有限的步数清空整座泡泡阵,每关阵型更大,考验你的规划。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">剩余步数</div><div class="big" id="mv">0</div></div>
+      <div class="stat"><div class="mut">剩余泡泡</div><div class="big" id="rm">0</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">十字消除阵</h2><p id="ovp">玩法说明:<br>· 点击任意泡泡,消除它自己和上、下、左、右 4 个邻居<br>· 消除与颜色无关,位置规划才是关键<br>· 每关步数 = 最优解 + 少量余量,要精打细算<br>· 阵型从 5×5 一路涨到 8×9<br>· 步数用完仍有残留即失败;清空全盘进入下一关<br>· 小技巧:每隔 3 格点一个中心,十字正好铺满!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff','#b07cff'];
+var SZ=[[5,5],[6,6],[7,7],[8,8],[7,9],[8,9]];
+var rows=5,cols=5,grid=[],level=1,score=0,moves=0,left=0;
+var parts=[],floats=[],state='idle',lastT=0;
+var ox=0,oy=0,CS=48;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function layout(){
+  CS=Math.floor(Math.min(384/cols,420/rows));
+  if(CS>52)CS=52;
+  ox=Math.floor((W-CS*cols)/2);
+  oy=Math.floor((H-36-CS*rows)/2)+24;
+}
+function newBoard(){
+  var s=SZ[(level-1)%SZ.length];
+  if(level>SZ.length){rows=8;cols=9;}else{rows=s[0];cols=s[1];}
+  grid=[];
+  for(var r=0;r<rows;r++){
+    var a=[];
+    for(var c=0;c<cols;c++)a.push(Math.floor(Math.random()*COLORS.length));
+    grid.push(a);
+  }
+  left=rows*cols;
+  moves=Math.ceil(rows/3)*Math.ceil(cols/3)+2;
+  layout();upd();
+}
+function resetGame(){
+  level=1;score=0;parts=[];floats=[];
+  newBoard();
+}
+function upd(){
+  $i('lv').textContent=level;
+  $i('sc').textContent=score;
+  $i('mv').textContent=moves;
+  $i('rm').textContent=left;
+}
+function cross(r0,c0){
+  var dirs=[[0,0],[-1,0],[1,0],[0,-1],[0,1]];
+  var n=0;
+  for(var i=0;i<dirs.length;i++){
+    var r=r0+dirs[i][0],c=c0+dirs[i][1];
+    if(r<0||c<0||r>=rows||c>=cols)continue;
+    if(grid[r][c]<0)continue;
+    var col=COLORS[grid[r][c]];
+    grid[r][c]=-1;n++;left--;
+    var x=ox+c*CS+CS/2,y=oy+r*CS+CS/2;
+    floats.push({x:x,y:y,txt:'+10',c:col,life:0.7});
+    for(var k=0;k<6;k++){var a=rnd(0,6.28),s=rnd(40,140);
+      parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,4),c:col,life:rnd(0.3,0.5)});}
+  }
+  return n;
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(state!=='play'||moves<=0)return;
+  var p=pt(e);
+  var c=Math.floor((p.x-ox)/CS),r=Math.floor((p.y-oy)/CS);
+  if(r<0||c<0||r>=rows||c>=cols)return;
+  if(grid[r][c]<0){
+    floats.push({x:p.x,y:p.y,txt:'点在泡泡上!',c:'#9aa3c0',life:0.7});
+    return;
+  }
+  moves--;
+  var n=cross(r,c);
+  score+=n*10;
+  upd();
+  if(left===0){
+    score+=100+moves*20;level++;
+    floats.push({x:W/2,y:H/2,txt:'过关!+'+(100+(moves)*20),c:'#ffd166',life:1.2});
+    newBoard();
+  }else if(moves<=0){
+    state='over';
+    $i('ovt').textContent='步数用完!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达关卡:第 '+level+' 关<br>还剩 '+left+' 个泡泡没清掉';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+});
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=160*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=36*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var r,c;
+  for(r=0;r<rows;r++)for(c=0;c<cols;c++){
+    var x=ox+c*CS,y=oy+r*CS;
+    ctx.fillStyle='rgba(255,255,255,.04)';
+    ctx.fillRect(x+2,y+2,CS-4,CS-4);
+    if(grid[r][c]>=0){
+      var rad=CS*0.38;
+      ctx.beginPath();ctx.arc(x+CS/2,y+CS/2,rad,0,6.2832);
+      ctx.fillStyle=COLORS[grid[r][c]];ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.25)';ctx.stroke();
+      ctx.beginPath();ctx.arc(x+CS*0.4,y+CS*0.4,rad*0.24,0,6.2832);
+      ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+    }
+  }
+  var i;
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 14px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  ctx.font='13px system-ui';ctx.fillStyle='#9aa3c0';
+  ctx.fillText('点击消除十字五连 · 清空全盘过关',W/2,H-10);
+}
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  resetGame();state='play';
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

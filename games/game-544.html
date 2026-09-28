@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>战争翻翻乐 比大小吃牌</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:9px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:700px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.deckrow{display:flex;gap:24px;align-items:center;justify-content:center}
+.stack{position:relative;width:58px;height:84px}
+.mini{position:absolute;width:58px;height:84px;border-radius:9px;background:linear-gradient(135deg,#2c4a8a,#1a2f63);box-shadow:0 2px 5px rgba(0,0,0,.5)}
+#arena{display:flex;gap:30px;align-items:center;justify-content:center;min-height:120px}
+.card{width:64px;height:92px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .25s ease}
+@keyframes pop{from{transform:scale(.6);opacity:.3}to{transform:scale(1);opacity:1}}
+.card.red{color:#d62839}
+.card .r{font-size:20px;font-weight:800}
+.card .s{font-size:32px;line-height:1.05}
+.side{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:13px;color:#bcd0c4}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px}
+#prog{width:100%;max-width:420px;height:10px;border-radius:6px;background:#0a0d18;overflow:hidden}
+#fill{height:100%;width:50%;background:linear-gradient(90deg,#4cc9f0,#ffd166)}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>战争翻翻乐 · 比大小吃牌</h1>
+<p id="how">你与 AI 各持 26 张牌，每轮各翻一张，大者全收；点数相同触发「战争」，再翻一张定胜负。牌收到底部继续翻，把对方的牌全部吃光即胜利。可随时暂停。</p>
+<div id="bar"><span>你的牌 <b id="pc">26</b></span><span>AI 的牌 <b id="ac">26</b></span><span>轮数 <b id="rd">0</b></span></div>
+<div id="table">
+  <div class="deckrow">
+    <div class="side"><div class="stack" id="astack"></div><span>AI 牌堆</span></div>
+    <div id="arena"></div>
+    <div class="side"><div class="stack" id="pstack"></div><span>你的牌堆</span></div>
+  </div>
+  <div id="prog"><div id="fill"></div></div>
+  <div id="msg"></div>
+  <div id="btns"><button id="pause" class="acc">暂停</button><button id="step2">单步翻牌</button></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+var pDeck=[],aDeck=[],table=[],paused=false,round=0,wait=0,phase='run',timer=null,raf=null;
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+2;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){var d=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});shuffle(d);pDeck=d.slice(0,26);aDeck=d.slice(26);}
+function cardHTML(c){var red=(c.s==='♥'||c.s==='♦')?' red':'';return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';}
+function render(pcard,acard){
+  $('pc').textContent=pDeck.length;$('ac').textContent=aDeck.length;$('rd').textContent=round;
+  var fill=Math.round(pDeck.length/(pDeck.length+aDeck.length||1)*100);
+  $('fill').style.width=fill+'%';
+  var h='';for(var i=0;i<Math.min(4,pDeck.length);i++){h+='<div class="mini" style="left:'+(i*4)+'px;top:'+(i*-4)+'px"></div>';}
+  $('pstack').innerHTML=h||'<div class="mini" style="opacity:.15"></div>';
+  h='';for(var k=0;k<Math.min(4,aDeck.length);k++){h+='<div class="mini" style="left:'+(k*4)+'px;top:'+(k*-4)+'px"></div>';}
+  $('astack').innerHTML=h||'<div class="mini" style="opacity:.15"></div>';
+  var arena='';
+  if(pcard)arena+='<div class="side">'+cardHTML(pcard)+'<span>你</span></div>';
+  if(acard)arena+='<div class="side">'+cardHTML(acard)+'<span>AI</span></div>';
+  if(table.length>0)arena+='<div class="side"><div style="font-size:12px;color:#9aa3c0">台面 '+table.length+' 张</div></div>';
+  $('arena').innerHTML=arena;
+}
+function msg(s){$('msg').textContent=s;}
+function take(winner){
+  shuffle(table);
+  if(winner==='p')pDeck=pDeck.concat(table);else aDeck=aDeck.concat(table);
+  table=[];
+}
+function doRound(){
+  if(pDeck.length===0||aDeck.length===0){finish();return;}
+  if(table.length>0){
+    var p2=pDeck.shift(),a2=aDeck.shift();
+    table.push(p2);table.push(a2);round++;
+    render(p2,a2);
+    if(vi(p2.r)>vi(a2.r)){msg('战争获胜！你收走台面 '+table.length+' 张');take('p');wait=1000;return;}
+    if(vi(p2.r)<vi(a2.r)){msg('战争落败，AI 收走台面 '+table.length+' 张');take('a');wait=1000;return;}
+    msg('又平了！台面积累到 '+table.length+' 张，继续翻牌');wait=900;return;
+  }
+  var pc=pDeck.shift(),ac=aDeck.shift();
+  table.push(pc);table.push(ac);round++;
+  render(pc,ac);
+  if(vi(pc.r)>vi(ac.r)){msg('你的 '+pc.r+' 更大，收 '+table.length+' 张');take('p');wait=800;}
+  else if(vi(pc.r)<vi(ac.r)){msg('AI 的 '+ac.r+' 更大，收 '+table.length+' 张');take('a');wait=800;}
+  else{msg('同点！战争！再翻一张定胜负');wait=800;}
+  if(round>=300){finish();return;}
+}
+function finish(){
+  phase='over';
+  if(table.length>0){if(pDeck.length>=aDeck.length)pDeck=pDeck.concat(table);else aDeck=aDeck.concat(table);table=[];}
+  render(null,null);
+  var win=pDeck.length>aDeck.length;
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=(win?'AI 的牌被吃光！':'你的牌被吃光了。')+' 共 '+round+' 轮，你手握 '+pDeck.length+' 张';
+  $('over').classList.remove('hide');
+}
+function master(){
+  raf=requestAnimationFrame(master);
+  if(phase!=='run')return;
+  if(paused)return;
+  if(wait>0){wait-=16;return;}
+  doRound();
+}
+function togglePause(){
+  if(phase!=='run')return;
+  paused=!paused;$('pause').textContent=paused?'继续':'暂停';
+}
+function stepOnce(){
+  if(phase!=='run'||!paused)return;
+  wait=0;doRound();
+}
+function newGame(){
+  if(raf)cancelAnimationFrame(raf);
+  refill();table=[];round=0;paused=false;phase='run';wait=400;
+  $('pause').textContent='暂停';$('over').classList.add('hide');
+  msg('自动对战开始，可暂停或单步观察');render(null,null);
+  raf=requestAnimationFrame(master);
+}
+$('pause').onclick=togglePause;
+$('step2').onclick=stepOnce;
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

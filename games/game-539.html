@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅境合一</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#cdb4db;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#cdb4db;font-size:15px}
+.dex{display:flex;justify-content:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.dex span{width:22px;height:22px;border-radius:6px;background:#232849;color:#555b80;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.dex span.on{background:#cdb4db;color:#2c1a33;box-shadow:0 0 8px rgba(205,180,219,.6)}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#cdb4db}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#cdb4db;color:#2c1a33;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>禅境合一</h1>
+  <p class="hint">拖动方块:放到同级方块上合一,放到空格上移动<br>此局无败,静心集齐 11 种禅物即功德圆满</p>
+  <div class="hud">
+    <span>禅值 <b id="score">0</b></span>
+    <span>图鉴 <b id="dexN">0</b>/11</span>
+  </div>
+  <div class="dex" id="dex"></div>
+  <div class="stage">
+    <canvas id="cv" width="366" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">禅境合一</h2>
+      <p id="ovP">露珠 · 嫩芽 · 青叶 · 花苞 · 莲花\n翠竹 · 松果 · 明月 · 流云 · 远山 · 禅心\n拖动它们,渐入佳境</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开始静修</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=8,ROWS=6,CELL=44,BX=7,BY=8;
+var NAME=['','露珠','嫩芽','青叶','花苞','莲花','翠竹','松果','明月','流云','远山','禅心'];
+var CCOL=['','#9bb8d3','#8ac926','#5aa9e6','#f9d71c','#ff8fab','#38b000','#c9a15f','#ffd166','#9bf6ff','#cdb4db','#fbbf24'];
+var grid=[],score=0,state='ready',drag=null,flashes=[];
+var dex=[],dexDone=false;
+function addScore(n){score+=n;$('score').textContent=score;}
+function newGrid(){
+  var g=[],r,c;
+  for(r=0;r<ROWS;r++){g.push([]);for(c=0;c<COLS;c++)g[r].push(0);}
+  var placed=0,guard=0;
+  while(placed<16&&guard<300){
+    guard++;
+    var rr=Math.floor(Math.random()*ROWS),cc=Math.floor(Math.random()*COLS);
+    if(g[rr][cc]===0){g[rr][cc]=Math.random()<0.7?1:2;placed++;}
+  }
+  return g;
+}
+function buildDex(){
+  var i,el=$('dex');
+  el.innerHTML='';
+  dex=[];
+  for(i=1;i<=11;i++){
+    var s=document.createElement('span');
+    s.textContent=String(i);
+    el.appendChild(s);
+    dex.push(false);
+  }
+  $('dexN').textContent='0';
+}
+function discover(e){
+  if(e>11||dex[e-1])return;
+  dex[e-1]=true;
+  var kids=$('dex').children;
+  kids[e-1].className='on';
+  kids[e-1].textContent=NAME[e].slice(0,1);
+  $('dexN').textContent=String(dex.filter(function(x){return x;}).length);
+  var all=true,i;
+  for(i=0;i<11;i++)if(!dex[i])all=false;
+  if(all&&!dexDone){
+    dexDone=true;
+    $('ovT').textContent='功德圆满';
+    $('ovP').textContent='十一禅物尽数合一,心如止水\n可继续静修,也可以重新开始';
+    $('ovS').textContent='禅值 '+score;
+    $('btn').textContent='继续静修';
+    $('ov').classList.remove('hide');
+    state='between';
+  }
+}
+function cellOf(x,y){
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=ROWS||c<0||c>=COLS)return null;
+  return {r:r,c:c};
+}
+function posOf(e){
+  var t=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  var rc=cv.getBoundingClientRect();
+  return {x:(t.clientX-rc.left)*366/rc.width,y:(t.clientY-rc.top)*300/rc.height};
+}
+function onDown(e){
+  if(state!=='play')return;
+  var p=posOf(e),cl=cellOf(p.x,p.y);
+  if(cl&&grid[cl.r][cl.c]>0)drag={r:cl.r,c:cl.c,x:p.x,y:p.y};
+  e.preventDefault();
+}
+function onMove(e){
+  if(state!=='play'||!drag)return;
+  var p=posOf(e);
+  drag.x=p.x;drag.y=p.y;
+  if(e.type!=='mousemove')e.preventDefault();
+}
+function onUp(e){
+  if(state!=='play'){drag=null;return;}
+  if(drag){
+    var p=posOf(e),cl=cellOf(p.x,p.y);
+    if(cl&&!(cl.r===drag.r&&cl.c===drag.c)){
+      var e1=grid[drag.r][drag.c];
+      if(grid[cl.r][cl.c]===e1){
+        grid[drag.r][drag.c]=0;
+        grid[cl.r][cl.c]=Math.min(11,e1+1);
+        flashes.push({r:cl.r,c:cl.c,t:0,e:e1+1});
+        addScore((e1+1)*10);
+        discover(e1+1);
+      }else if(grid[cl.r][cl.c]===0){
+        grid[cl.r][cl.c]=e1;
+        grid[drag.r][drag.c]=0;
+      }
+    }
+    drag=null;
+  }
+  if(e.type!=='mousemove')e.preventDefault();
+}
+cv.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('touchstart',onDown,{passive:false});
+cv.addEventListener('touchmove',onMove,{passive:false});
+cv.addEventListener('touchend',onUp,{passive:false});
+function start(){
+  grid=newGrid();score=0;flashes=[];drag=null;dexDone=false;
+  buildDex();
+  $('score').textContent='0';
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',function(){
+  if(state==='between'){$('ov').classList.add('hide');state='play';}
+  else start();
+});
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,366,300);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,366,300);
+  var r,c,i;
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    ctx.strokeStyle='rgba(255,255,255,.05)';
+    ctx.strokeRect(BX+c*CELL+0.5,BY+r*CELL+0.5,CELL-1,CELL-1);
+    var e=grid.length?grid[r][c]:0;
+    var isDrag=drag&&drag.r===r&&drag.c===c;
+    if(e>0&&!(isDrag&&state==='play')){
+      ctx.fillStyle=CCOL[Math.min(e,11)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,9);ctx.fill();
+      ctx.fillStyle='rgba(20,16,30,.8)';
+      ctx.font='700 11px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(NAME[e],BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  if(drag&&state==='play'){
+    var e2=grid[drag.r][drag.c];
+    ctx.save();ctx.globalAlpha=0.92;
+    ctx.fillStyle=CCOL[Math.min(e2,11)];
+    roundRect(drag.x-CELL/2+3,drag.y-CELL/2+3,CELL-6,CELL-6,9);ctx.fill();
+    ctx.fillStyle='rgba(20,16,30,.8)';
+    ctx.font='700 11px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(NAME[e2],drag.x,drag.y+1);
+    ctx.restore();
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.45;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle=CCOL[Math.min(f.e,11)];ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*7,BY+f.r*CELL+3-pr*7,CELL-6+pr*14,CELL-6+pr*14,9);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'&&!drag){
+    ctx.fillStyle='rgba(205,180,219,.55)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('按住一块,拖到同级块上合一 · 拖到空格上移动',183,292);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  var i,k=[];
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.45)k.push(flashes[i]);
+  flashes=k;
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>约分大师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#2dd4bf;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:14px}
+.hud b{color:#2dd4bf;font-size:16px}
+.main{display:flex;align-items:center;gap:18px;justify-content:center;margin-bottom:14px}
+.pie{width:110px;height:110px;border-radius:50%;border:3px solid #2a3054;background:conic-gradient(#2dd4bf 0 120deg,#1c2138 120deg 360deg);flex:none}
+.frac{text-align:center}
+.frac .f{font-size:42px;font-weight:800;line-height:1.1}
+.frac .bar{width:80px;height:4px;background:#2dd4bf;border-radius:2px;margin:2px auto}
+.inp{display:flex;flex-direction:column;align-items:center;gap:2px}
+.inp .box{width:76px;text-align:center;font-size:26px;font-weight:800;color:#2dd4bf;background:#0b0e1a;border:2px solid #2a3054;border-radius:10px;padding:6px 0;cursor:pointer;min-height:46px}
+.inp .box.focus{border-color:#2dd4bf}
+.kp{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kp button{background:#232949;color:#e8eaf6;border:none;border-radius:10px;padding:12px 0;font-size:19px;font-weight:700;cursor:pointer;font-family:inherit}
+.kp button:active{transform:scale(.95)}
+.kp .ok{background:#2dd4bf;color:#03302b}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:10px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.93);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#2dd4bf;color:#03302b;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>约分大师</h1>
+  <p class="hint">把分数约到最简 · 点框切换分子/分母,键盘数字也可输入 · 共 10 题,答错扣一颗心</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/10 题</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="combo">0</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+  </div>
+  <div class="stage">
+    <div class="main">
+      <div class="pie" id="pie"></div>
+      <div class="frac">
+        <div class="f" id="fTop">18</div>
+        <div class="bar"></div>
+        <div class="f" id="fBot">24</div>
+      </div>
+      <div class="inp">
+        <div class="box focus" id="boxT">?</div>
+        <div class="box" id="boxB">?</div>
+      </div>
+    </div>
+    <div class="kp" id="kp">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="sw">↕</button><button data-k="0">0</button><button data-k="ok" class="ok">确认</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">约分大师</h2>
+      <p id="ovD">圆盘显示分数的大小,请输入约到最简后的分子和分母(如 18/24 约成 3/4)。↕ 键或点框切换分子分母,答对越多连击奖励越高!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始约分</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elScore=$("score"),elCombo=$("combo"),elLives=$("lives");
+var pie=$("pie"),fTop=$("fTop"),fBot=$("fBot"),boxT=$("boxT"),boxB=$("boxB");
+var kp=$("kp"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var state,score,combo,lives,no,cur,focusTop,vT,vB,lock;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function gcd(a,b){while(b){var t=a%b;a=b;b=t;}return a;}
+function updHud(){
+  elNo.textContent=no;elScore.textContent=score;elCombo.textContent=combo;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function drawBoxes(){
+  boxT.textContent=vT===""?"?":vT;
+  boxB.textContent=vB===""?"?":vB;
+  boxT.className="box"+(focusTop?" focus":"");
+  boxB.className="box"+(focusTop?"":" focus");
+}
+function gen(){
+  var q=rnd(2,12),p,t;
+  do{p=rnd(1,q-1);}while(gcd(p,q)!==1);
+  var k=rnd(2,4);
+  cur={a:p*k,b:q*k,p:p,q:q};
+  fTop.textContent=cur.a;
+  fBot.textContent=cur.b;
+  var deg=Math.round(cur.a/cur.b*360);
+  pie.style.background="conic-gradient(#2dd4bf 0 "+deg+"deg,#1c2138 "+deg+"deg 360deg)";
+  vT="";vB="";focusTop=true;
+  drawBoxes();
+  setMsg("把 "+cur.a+"/"+cur.b+" 约成最简分数","");
+}
+function submit(){
+  if(state!=="playing"||lock)return;
+  if(vT===""||vB===""){setMsg("分子分母都要填","badc");return;}
+  var n=parseInt(vT,10),d=parseInt(vB,10);
+  if(n===cur.p&&d===cur.q){
+    lock=true;
+    score+=10+combo*2;combo++;
+    setMsg("正确!"+cur.a+"/"+cur.b+" = "+cur.p+"/"+cur.q,"good");
+    updHud();
+    no++;
+    setTimeout(next,800);
+  }else{
+    combo=0;lives--;
+    setMsg("不对,最简形式是 "+cur.p+"/"+cur.q+" · 生命 -1","badc");
+    updHud();
+    if(lives<=0)setTimeout(gameOverLose,1100);
+    else{lock=true;no++;setTimeout(next,1100);}
+  }
+}
+function next(){
+  lock=false;
+  if(lives<=0)return;
+  if(no>10){gameOverWin();return;}
+  gen();
+}
+function press(k){
+  if(state!=="playing")return;
+  if(k==="sw"){focusTop=!focusTop;drawBoxes();return;}
+  if(k==="ok"){submit();return;}
+  var cur2=focusTop?vT:vB;
+  if(k==="del"){cur2=cur2.slice(0,-1);}
+  else if(cur2.length<2)cur2+=k;
+  if(focusTop)vT=cur2;else vB=cur2;
+  drawBoxes();
+}
+function gameOverWin(){
+  state="over";
+  ovT.textContent="约分大师!";
+  ovD.textContent="十道分数全部约到最简,数感一流!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function gameOverLose(){
+  state="over";
+  ovT.textContent="心已用完…";
+  ovD.textContent="小提示:分子分母同时除以它们的最大公因数,就是最简分数。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;combo=0;lives=3;no=1;lock=false;
+  ovS.style.display="none";
+  gen();updHud();
+  ov.classList.add("hide");
+}
+kp.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute("data-k"))press(t.getAttribute("data-k"));
+});
+boxT.addEventListener("click",function(){if(state==="playing"){focusTop=true;drawBoxes();}});
+boxB.addEventListener("click",function(){if(state==="playing"){focusTop=false;drawBoxes();}});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key>="0"&&e.key<="9"){press(e.key);e.preventDefault();}
+  else if(e.key==="Backspace"){press("del");e.preventDefault();}
+  else if(e.key==="Enter"){submit();e.preventDefault();}
+  else if(e.key==="Tab"||e.key==="_"){press("sw");e.preventDefault();}
+});
+})();
+</script>
+</body>
+</html>

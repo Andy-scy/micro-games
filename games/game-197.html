@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渐暗残影</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;user-select:none;-webkit-user-select:none}
+h1{font-size:22px;margin:10px 0 4px;color:#ffd166;letter-spacing:2px}
+.hint{font-size:13px;color:#9aa3c0;text-align:center;margin-bottom:10px;line-height:1.6;padding:0 8px}
+.bar{display:flex;gap:14px;font-size:14px;color:#cdd3ea;margin-bottom:12px;flex-wrap:wrap;justify-content:center;min-height:20px}
+.bar b{color:#7ee0a3}
+#stage{position:relative;width:100%;max-width:420px}
+#board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+.card{position:relative;aspect-ratio:1/1;cursor:pointer;perspective:700px}
+.inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s}
+.card.open .inner,.card.done .inner,.card.peek .inner{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;border-radius:10px;display:flex;align-items:center;justify-content:center;backface-visibility:hidden;-webkit-backface-visibility:hidden;font-size:clamp(20px,7vw,32px)}
+.bk{background:linear-gradient(145deg,#28325f,#1c2447);border:2px solid #46508c;color:#6a76c9;font-weight:bold}
+.ft{background:linear-gradient(145deg,#34407c,#2b3568);border:2px solid #7b8cff;transform:rotateY(180deg)}
+.card.done{cursor:default;animation:pop .35s}
+.card.done .ft{border-color:#7ee0a3;background:linear-gradient(145deg,#1f5b41,#1a4a34)}
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+#overlay{position:absolute;inset:0;background:rgba(7,9,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:16px;opacity:0;pointer-events:none;transition:opacity .35s;z-index:9;text-align:center;padding:16px}
+#overlay.show{opacity:1;pointer-events:auto}
+#ovTitle{font-size:26px;color:#ffd166}
+#ovDesc{font-size:14px;color:#cdd3ea;line-height:1.8}
+button{font-family:inherit;font-size:15px;padding:10px 24px;border:none;border-radius:10px;background:#ffd166;color:#22284a;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>渐暗残影</h1>
+<div class="hint">残影会渐渐消散!开局有 6 秒记忆时间;此后每配对成功一次,全场剩余卡牌会闪现一次「残影」,而且一次比一次短。抓紧每一次余光!</div>
+<div class="bar"><span>步数 <b id="stMoves">0</b></span><span>已配对 <b id="stPairs">0/8</b></span><span>用时 <b id="stTime">0.0</b> 秒</span><span id="stTip">记忆中…</span></div>
+<div id="stage">
+  <div id="board"></div>
+  <div id="overlay"><div id="ovTitle"></div><div id="ovDesc"></div><button id="btnAgain">再来一局</button></div>
+</div>
+<script>
+(function(){
+var SYMS=['🍎','🍋','🍉','🍇','🍓','🐶','🐱','🦊'];
+var MEMO=6,FLASH0=1.4,FLASH_MIN=0.25;
+var board=document.getElementById('board');
+var overlay=document.getElementById('overlay');
+var ovTitle=document.getElementById('ovTitle');
+var ovDesc=document.getElementById('ovDesc');
+var elMoves=document.getElementById('stMoves');
+var elPairs=document.getElementById('stPairs');
+var elTime=document.getElementById('stTime');
+var elTip=document.getElementById('stTip');
+var btnAgain=document.getElementById('btnAgain');
+var cards=[],lock=true,first=null,phase='memo',moves=0,pairs=0,flashes=0,flashDur=FLASH0,startMemo=0,startAt=0,running=false,over=false;
+var timers=[];
+function later(fn,ms){var id=setTimeout(fn,ms);timers.push(id);return id;}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeCard(sym){
+  var el=document.createElement('div');el.className='card';
+  var inner=document.createElement('div');inner.className='inner';
+  var bk=document.createElement('div');bk.className='face bk';bk.textContent='❓';
+  var ft=document.createElement('div');ft.className='face ft';ft.textContent=sym;
+  inner.appendChild(bk);inner.appendChild(ft);el.appendChild(inner);el.sym=sym;
+  board.appendChild(el);return el;
+}
+function closeAll(){
+  for(var i=0;i<cards.length;i++)cards[i].classList.remove('open');
+}
+function newGame(){
+  clearTimers();board.innerHTML='';cards=[];
+  lock=true;first=null;phase='memo';moves=0;pairs=0;flashes=0;flashDur=FLASH0;running=false;over=false;
+  elMoves.textContent='0';elPairs.textContent='0/8';elTime.textContent='0.0';
+  elTip.textContent='记忆中…';
+  overlay.classList.remove('show');
+  var syms=shuffle(SYMS.concat(SYMS));
+  for(var i=0;i<syms.length;i++){
+    var el=makeCard(syms[i]);
+    el.classList.add('open');
+    cards.push(el);
+  }
+  startMemo=performance.now();
+}
+function flash(){
+  lock=true;flashes++;
+  var hidden=[];
+  for(var i=0;i<cards.length;i++){
+    var el=cards[i];
+    if(!el.classList.contains('done')){el.classList.add('peek');hidden.push(el);}
+  }
+  later(function(){
+    for(var j=0;j<hidden.length;j++)hidden[j].classList.remove('peek');
+    lock=false;
+  },Math.round(flashDur*1000));
+  flashDur=Math.max(FLASH_MIN,flashDur*0.75);
+  elTip.textContent='残影 '+flashDur.toFixed(2)+' 秒/次';
+}
+function onCard(el){
+  if(phase!=='play'||lock||over)return;
+  if(el.classList.contains('open')||el.classList.contains('done'))return;
+  el.classList.add('open');
+  if(!first){first=el;return;}
+  moves++;elMoves.textContent=String(moves);
+  var a=first,b=el;first=null;
+  if(a.sym===b.sym){
+    pairs++;elPairs.textContent=pairs+'/8';
+    a.classList.remove('open');b.classList.remove('open');
+    a.classList.add('done');b.classList.add('done');
+    if(pairs===SYMS.length)finish();
+    else flash();
+  }else{
+    lock=true;
+    later(function(){a.classList.remove('open');b.classList.remove('open');lock=false;},700);
+  }
+}
+function finish(){
+  over=true;running=false;
+  var sec=(performance.now()-startAt)/1000;
+  var score=Math.max(100,1200-moves*25-flashes*30);
+  var grade=flashes<=3?'★★★ 一瞥永恒':(flashes<=6?'★★☆ 余光大师':'★☆☆ 完成挑战');
+  ovTitle.textContent='残影封印!';
+  ovDesc.innerHTML='用时 '+sec.toFixed(1)+' 秒 · 步数 '+moves+'<br>残影闪现 '+flashes+' 次<br>得分 <b style="color:#ffd166">'+score+'</b><br>'+grade;
+  overlay.classList.add('show');
+}
+board.addEventListener('click',function(e){
+  var el=e.target.closest('.card');
+  if(el)onCard(el);
+});
+btnAgain.addEventListener('click',newGame);
+var tick=function(){
+  var now=performance.now();
+  if(phase==='memo'&&!over){
+    var left=MEMO-(now-startMemo)/1000;
+    if(left<=0){
+      closeAll();
+      phase='play';lock=false;running=true;
+      startAt=now;
+      elTip.textContent='残影即将出现';
+    }else{
+      elTip.textContent='记忆 '+left.toFixed(1)+' 秒';
+    }
+  }else if(running&&!over){
+    elTime.textContent=((now-startAt)/1000).toFixed(1);
+  }
+  requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+newGame();
+})();
+</script>
+</body>
+</html>

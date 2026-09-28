@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右开弓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>左右开弓</h1>
+<p class="tip">一竿在手,好钓;两竿齐下,考验!A/← 提左竿,D/→ 提右竿(或点左/右半屏)。看准哪边浮标猛沉就提哪边,两边接连中鱼有「双竿齐收」+60!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>时间 <b id="s2">60</b> 秒</span><span>目标 <b>500</b> 分</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">左右开弓</h2><p id="op">左手一竿,右手一竿。<br>浮标轻点是试探,猛沉才是真咬钩;<br>提错一边会把那边的鱼吓跑。<br>60 秒 500 分,双竿齐收有奖励!</p><button id="ob">双竿下水</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var W=cv.width,H=cv.height,WL=200;
+var state='ready',tl=60,score=0,msg='';
+var rods=[
+ {x:130,st:'idle',t:1.5,dip:0},
+ {x:350,st:'idle',t:2.2,dip:0}];
+var justT=[0,0],names=['左','右'];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function rollV(){var r=Math.random();if(r<0.5)return 40;if(r<0.8)return 80;return 120}
+function pull(side){
+  if(state!=='play')return;
+  var r=rods[side];
+  if(r.st==='bite'){
+    var v=rollV(),bonus=0,other=1-side;
+    if(justT[other]>0)bonus=60;
+    score+=v+bonus;
+    justT[side]=1.5;
+    msg=bonus>0?'双竿齐收!!+'+(v+bonus)+' 分':names[side]+'竿中鱼!+'+v+' 分';
+    r.st='idle';r.t=rnd(1.4,2.8);
+  }else{
+    msg=names[side]+'竿空提,鱼被吓跑了…';
+    r.st='idle';r.t=rnd(1.6,3)+1;
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再来一局';
+  ot.textContent=win?'双手齐飞!':'手忙脚乱…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 500 分<br>'+(win?'你是天生的多线操作手!':'盯一边放一边,才是双竿的诀窍。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=60;score=0;msg='';
+  rods=[{x:130,st:'idle',t:1.5,dip:0},{x:350,st:'idle',t:2.2,dip:0}];
+  justT=[0,0];
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  var i;
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(score>=500);return}
+  for(i=0;i<2;i++){
+    if(justT[i]>0)justT[i]-=dt;
+    var r=rods[i];
+    if(r.st==='idle'){
+      r.t-=dt;
+      if(r.t<=0){r.st='nibble';r.t=rnd(0.7,1.3)}
+    }else if(r.st==='nibble'){
+      r.t-=dt;
+      if(r.t<=0){r.st='bite';r.t=0.65}
+    }else if(r.st==='bite'){
+      r.t-=dt;
+      if(r.t<=0){
+        msg=names[i]+'竿脱钩了,鱼跑了…';
+        r.st='idle';r.t=rnd(1.2,2.5);
+      }
+    }
+    var dipT=r.st==='bite'?16:(r.st==='nibble'?7:0);
+    r.dip+=(dipT-r.dip)*Math.min(1,dt*14);
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,WL);g.addColorStop(0,'#151c36');g.addColorStop(1,'#2b3157');X.fillStyle=g;X.fillRect(0,0,W,WL);
+  var g2=X.createLinearGradient(0,WL,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#091631');X.fillStyle=g2;X.fillRect(0,WL,W,H-WL);
+  var t=Date.now()*0.001,i,xx,yy;
+  X.strokeStyle='rgba(127,212,255,.16)';X.lineWidth=2;
+  for(i=0;i<4;i++){X.beginPath();for(xx=0;xx<=W;xx+=16){yy=WL+34+i*52+Math.sin(xx*0.05+t*(1+i*0.25))*4;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke()}
+  X.fillStyle='#dfe6f2';X.fillRect(20,24,8,52);X.fillRect(452,24,8,52);
+  for(i=0;i<2;i++){
+    var r=rods[i],tipX=i===0?26:454,byy=WL-10+r.dip;
+    X.strokeStyle='rgba(230,238,246,.6)';X.lineWidth=1.5;
+    X.beginPath();X.moveTo(tipX,30);X.quadraticCurveTo((tipX+r.x)/2,80,r.x,byy-8);X.stroke();
+    X.fillStyle='#ff5f5f';X.beginPath();X.arc(r.x,byy,8,Math.PI,Math.PI*2);X.fill();
+    X.fillStyle='#eef3fa';X.beginPath();X.arc(r.x,byy,8,0,Math.PI);X.fill();
+    if(r.st==='bite'){
+      X.fillStyle='#ffd75e';X.font='bold 26px system-ui';X.textAlign='center';
+      X.fillText('提!',r.x,byy-30);
+    }
+    X.fillStyle='rgba(200,215,235,.85)';X.font='bold 14px system-ui';X.textAlign='center';
+    X.fillText(i===0?'A / ← 左竿':'右竿 D / →',r.x,WL+42);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,60);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('也可点左 / 右半屏提竿',W/2,H-14);
+}
+function tap(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width);
+  pull(mx<W/2?0:1);
+}
+cv.addEventListener('pointerdown',tap);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();
+    return;
+  }
+  if(state!=='play')return;
+  if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft')pull(0);
+  if(e.key==='d'||e.key==='D'||e.key==='ArrowRight')pull(1);
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

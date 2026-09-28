@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹球打靶</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0a2350;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹球打靶</h1>
+  <p class="hint">移动鼠标 / 触屏拖动 / 方向键 操控挡板 · 点击或空格发射 · 打碎全部靶块</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>备用球 <b id="balls">3</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹球打靶</h2>
+      <p id="ovDesc">经典弹球打靶:操纵底部挡板让弹球不停反弹,击碎靶墙上所有靶块即可过关。深色靶块需要击打两次。漏接弹球将消耗一个备用球,备用球耗尽则失败!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=7,PW=86,PH=12,PY=486,SPD=0.42;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elBalls=$("balls"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s389");
+var state,lv,balls,score,paddle,ball,bricks,keyL,keyR,msg,msgT;
+function reset(){lv=0;balls=3;score=0;loadLevel();updateHud();}
+function loadLevel(){
+  paddle={x:W/2-PW/2};
+  bricks=[];
+  var rows=4+lv,cols=8,bw=52,bh=18,i,j;
+  for(i=0;i<rows;i++){
+    for(j=0;j<cols;j++){
+      bricks.push({
+        x:18+j*(bw+4),y:70+i*22,w:bw,h:bh,
+        hp:(lv>0&&i<lv)?2:1,c:i
+      });
+    }
+  }
+  stickBall();
+  elLv.textContent=lv+1;updateHud();
+}
+function stickBall(){
+  ball={x:paddle.x+PW/2,y:PY-BR-1,vx:0,vy:0,stuck:true};
+}
+function launch(){
+  if(!ball.stuck)return;
+  ball.stuck=false;
+  var a=-Math.PI/2+(Math.random()*0.6-0.3);
+  ball.vx=Math.cos(a)*(0.26+lv*0.02)*1.35;
+  ball.vy=Math.sin(a)*(0.26+lv*0.02)*1.35;
+}
+function updateHud(){
+  elBalls.textContent=balls;elSc.textContent=score;elBest.textContent=best;
+}
+function loseBall(){
+  balls--;updateHud();
+  if(balls<=0){finish(false,"备用球耗尽,靶墙还立在眼前…");return;}
+  msg="漏接!剩余备用球 "+balls;msgT=1200;
+  stickBall();
+}
+function clearLevel(){
+  score+=100;updateHud();
+  if(lv<2){
+    msg="靶墙清空!下一关弹速更快 +100";msgT=1500;
+    lv++;state="transition";
+    window.setTimeout(function(){if(state==="transition"){loadLevel();state="playing";}},1100);
+  }else finish(true,"三面靶墙全部击碎,神射手!");
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s389",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function ptOf(e){
+  var r=cv.getBoundingClientRect(),p=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  return(p.clientX-r.left)*W/r.width;
+}
+function setPaddle(px){paddle.x=Math.max(0,Math.min(W-PW,px-PW/2));}
+cv.addEventListener("mousemove",function(e){if(state==="playing")setPaddle(ptOf(e));});
+cv.addEventListener("mousedown",function(e){
+  if(state!=="playing")return;
+  setPaddle(ptOf(e));launch();
+});
+cv.addEventListener("touchmove",function(e){if(state==="playing"){setPaddle(ptOf(e));e.preventDefault();}},{passive:false});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  setPaddle(ptOf(e));launch();e.preventDefault();
+},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){keyL=true;e.preventDefault();}
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){keyR=true;e.preventDefault();}
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else launch();
+  }
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    if(keyL)paddle.x-=0.42*dt;
+    if(keyR)paddle.x+=0.42*dt;
+    paddle.x=Math.max(0,Math.min(W-PW,paddle.x));
+    if(ball.stuck){
+      ball.x=paddle.x+PW/2;ball.y=PY-BR-1;
+    }else{
+      var sub=2,i,left=0;
+      for(i=0;i<sub;i++){
+        ball.x+=ball.vx*dt/sub;ball.y+=ball.vy*dt/sub;
+        if(ball.x<BR){ball.x=BR;ball.vx=Math.abs(ball.vx);}
+        if(ball.x>W-BR){ball.x=W-BR;ball.vx=-Math.abs(ball.vx);}
+        if(ball.y<BR){ball.y=BR;ball.vy=Math.abs(ball.vy);}
+        if(ball.vy>0&&ball.y+BR>=PY&&ball.y+BR<=PY+PH+10&&ball.x>paddle.x-BR&&ball.x<paddle.x+PW+BR){
+          ball.y=PY-BR;
+          var off=(ball.x-(paddle.x+PW/2))/(PW/2);
+          var sp=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy);
+          ball.vy=-Math.sqrt(Math.max(0.2,sp*sp-off*off*0.09));
+          ball.vx=off*0.34;
+        }
+        var j,hit=false;
+        for(j=0;j<bricks.length;j++){
+          var b=bricks[j];
+          if(b.hp<=0)continue;
+          var nx=Math.max(b.x,Math.min(ball.x,b.x+b.w)),ny=Math.max(b.y,Math.min(ball.y,b.y+b.h));
+          var dx=ball.x-nx,dy=ball.y-ny;
+          if(dx*dx+dy*dy<BR*BR){
+            if(Math.abs(dx)>Math.abs(dy))ball.vx=dx>0?Math.abs(ball.vx):-Math.abs(ball.vx);
+            else ball.vy=dy>0?Math.abs(ball.vy):-Math.abs(ball.vy);
+            b.hp--;
+            score+=b.hp<=0?10:5;
+            updateHud();
+            hit=true;break;
+          }
+        }
+        if(hit)break;
+      }
+      for(i=0;i<bricks.length;i++)if(bricks[i].hp>0)left++;
+      if(left===0)clearLevel();
+      else if(ball.y>H+BR)loseBall();
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  var colors=["#60a5fa","#818cf8","#a78bfa","#f472b6","#fb923c","#facc15"];
+  for(i=0;i<bricks.length;i++){
+    var b=bricks[i];
+    if(b.hp<=0)continue;
+    ctx.fillStyle=b.hp>1?"#334155":colors[b.c%colors.length];
+    ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(b.x,b.y,b.w,b.h,5);else ctx.rect(b.x,b.y,b.w,b.h);
+    ctx.fill();
+    if(b.hp>1){ctx.strokeStyle="#64748b";ctx.lineWidth=2;ctx.stroke();}
+  }
+  ctx.fillStyle="#60a5fa";
+  ctx.beginPath();
+  if(ctx.roundRect)ctx.roundRect(paddle.x,PY,PW,PH,6);else ctx.rect(paddle.x,PY,PW,PH);
+  ctx.fill();
+  ctx.fillStyle="#dbeafe";
+  ctx.fillRect(paddle.x+PW/2-14,PY+3,28,4);
+  ctx.fillStyle="#fbbf24";
+  ctx.shadowColor="#fbbf24";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(ball.stuck&&state==="playing"){
+    ctx.fillStyle="rgba(139,144,176,0.9)";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击 / 空格 发射",W/2,440);
+    ctx.textAlign="left";
+  }
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#4ade80";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,360);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

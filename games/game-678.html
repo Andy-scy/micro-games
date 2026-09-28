@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雪球堆堆乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>雪球堆堆乐</h1>
+  <p class="tips">雪球左右摇摆地飘下来,接住堆雪人:底 5 个、身 4 个、头 3 个!← → 或 A/D 移篮,触屏拖动;冰锥直坠砸篮 -1 生命,共 3 条;每堆成一个雪人 +120!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">堆成雪人</div><div class="big" id="mn">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">雪球堆堆乐</h2><p id="ovp">玩法:摆动雪球,堆出雪人。<br>· 雪球下落时左右摆荡,落点难测<br>· 堆雪人:底座 5 球 → 身子 4 球 → 脑袋 3 球<br>· 每接 +10,堆完一段 +40,成雪人 +120<br>· 冰锥直直坠落,砸中篮子 -1 生命<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始堆雪</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var NEED=[5,4,3];
+var S=null;
+function reset(){S={on:false,score:0,lives:3,parts:[0,0,0],pi:0,mn:0,st:0.68,ist:2.8,t:0,balls:[],ices:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('mn').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:1})}
+function update(dt){
+  S.t+=dt;
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.62+Math.random()*0.34;
+    S.balls.push({x0:60+Math.random()*(W-120),y:-14,v:150+Math.random()*55,amp:26+Math.random()*20,fq:2.6+Math.random()*1.6,ph:Math.random()*6,age:0,x:0});
+  }
+  S.ist-=dt;
+  if(S.ist<=0){
+    S.ist=2.6+Math.random()*1.2;
+    S.ices.push({x:30+Math.random()*(W-60),y:-22,v:330+Math.random()*70});
+  }
+  var by=H-46;
+  for(var i=S.balls.length-1;i>=0;i--){
+    var b=S.balls[i];
+    b.age+=dt;
+    b.x=b.x0+Math.sin(b.age*b.fq+b.ph)*b.amp;
+    b.y+=b.v*dt;
+    if(b.y>=by-16&&b.y<=by+10&&Math.abs(b.x-S.bx)<S.bw/2+10){
+      S.score+=10;$('sc').textContent=S.score;
+      S.parts[S.pi]++;
+      if(S.parts[S.pi]>=NEED[S.pi]){
+        S.score+=40;$('sc').textContent=S.score;
+        pop(W/2,H-160,'堆好一段!+40','#4cc9f0');
+        S.pi++;
+        if(S.pi>=3){
+          S.score+=120;S.mn++;$('sc').textContent=S.score;$('mn').textContent=S.mn;
+          pop(W/2,H-190,'雪人完成!+120','#ffd166');
+          S.parts=[0,0,0];S.pi=0;
+        }
+      }
+      S.balls.splice(i,1);continue;
+    }
+    if(b.y>H+16)S.balls.splice(i,1);
+  }
+  for(var k=S.ices.length-1;k>=0;k--){
+    var ic=S.ices[k];
+    ic.y+=ic.v*dt;
+    if(ic.y>=by-20&&ic.y<=by+12&&Math.abs(ic.x-S.bx)<S.bw/2+6){
+      S.ices.splice(k,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(S.bx,by-36,'被冰锥砸中!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+      continue;
+    }
+    if(ic.y>H+24)S.ices.splice(k,1);
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='冰锥太狠了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>堆成 <b>'+S.mn+'</b> 个雪人<br>摆荡雪球要预判中点,再来!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function drawSnowman(){
+  var x=52,r1=22,r2=16,r3=11;
+  var y1=H-56,y2=y1-r1-r2+6,y3=y2-r2-r3+4;
+  var cols=['#e8f4ff','#dceeff','#ffffff'];
+  for(var i=0;i<3;i++){
+    var yy=i===0?y1:(i===1?y2:y3);
+    var rr2=i===0?r1:(i===1?r2:r3);
+    if(i<S.pi||(S.pi===3)){
+      ctx.fillStyle=cols[i];
+      ctx.beginPath();ctx.arc(x,yy,rr2,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.strokeStyle='rgba(232,244,255,.4)';ctx.lineWidth=2;ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.arc(x,yy,rr2,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+    }
+  }
+  if(S.pi<3){
+    ctx.fillStyle='#9aa3c0';ctx.font='11px system-ui';ctx.textAlign='center';
+    ctx.fillText(S.parts[S.pi]+'/'+NEED[S.pi],x,y1+18);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  drawSnowman();
+  for(var i=0;i<S.balls.length;i++){
+    var b=S.balls[i];
+    ctx.fillStyle='#eef6ff';
+    ctx.beginPath();ctx.arc(b.x,b.y,11,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(140,180,220,.4)';
+    ctx.beginPath();ctx.arc(b.x+3,b.y+3,4,0,Math.PI*2);ctx.fill();
+  }
+  for(var k=0;k<S.ices.length;k++){
+    var ic=S.ices[k];
+    ctx.fillStyle='#a8e4ff';
+    ctx.beginPath();ctx.moveTo(ic.x,ic.y+14);ctx.lineTo(ic.x-6,ic.y-8);ctx.lineTo(ic.x+6,ic.y-8);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='#d9f4ff';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(ic.x,ic.y+14);ctx.lineTo(ic.x,ic.y-8);ctx.stroke();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('装雪篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数织小画</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:430px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px;flex-wrap:wrap}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:12px;display:flex;justify-content:center}
+#grid{display:grid;grid-template-columns:auto repeat(5,44px);grid-auto-rows:minmax(44px,auto);gap:2px;user-select:none}
+.clue{display:flex;align-items:center;justify-content:center;gap:5px;font-size:13px;color:#aab2dd;font-weight:600}
+.clue.colc{flex-direction:column;gap:1px;padding:2px 0}
+.clue.ok{color:#4ade80}
+.clue.err{color:#ff7b8a}
+.corner{background:transparent}
+.gc{background:#232946;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#56608f}
+.gc.f{background:#4f6ef7;color:#0f1220}
+.gc.x{background:#1c2240;color:#7a84b8}
+.ghost .gc{opacity:.45;pointer-events:none}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+#msg{text-align:center;min-height:20px;font-size:14px;color:#fbbf24;margin-bottom:6px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 34px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>数织小画</h1>
+<p class="tip">行列数字表示该行/列中连续涂格的长度,推理并涂出隐藏图案。<br>点击涂格,「标记」模式或右键可打 × 作排除记号。</p>
+<div class="hud"><span id="hLvl">第 1/5 图</span><span id="hLife">机会 3</span><span id="hTime">用时 0 秒</span></div>
+<div class="panel"><div id="grid"></div></div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn" id="bMode">模式:涂格</button><button class="btn pri" id="bDone">完成拼图</button><button class="btn" id="bNew">重开一局</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const S=5;
+const PATS=[
+ {name:"心形",rows:["01110","11111","11111","01110","00100"]},
+ {name:"十字",rows:["00100","00100","11111","00100","00100"]},
+ {name:"阶梯",rows:["10000","11000","11100","11110","11111"]},
+ {name:"棋盘",rows:["10101","01010","10101","01010","10101"]},
+ {name:"菱形",rows:["00100","01110","11111","01110","00100"]}
+];
+let lvl=0,state=[],rowClue=[],colClue=[],mode="paint",mistakes=0,sec=0,timer=null,over=false,lock=false;
+let rowEls=[],colEls=[],cellEls=[];
+function runs(arr){
+  const out=[];let n=0;
+  for(const v of arr){if(v>0)n++;else if(n>0){out.push(n);n=0;}}
+  if(n>0)out.push(n);
+  return out.length?out:[0];
+}
+function calcClues(pat){
+  rowClue=[];colClue=[];
+  for(let r=0;r<S;r++){rowClue.push(runs(pat.rows[r].split("").map(Number)));}
+  for(let c=0;c<S;c++){
+    const arr=[];
+    for(let r=0;r<S;r++)arr.push(Number(pat.rows[r][c]));
+    colClue.push(runs(arr));
+  }
+}
+const grid=document.getElementById("grid");
+function buildGrid(){
+  grid.innerHTML="";rowEls=[];colEls=[];cellEls=[];
+  const corner=document.createElement("div");corner.className="corner";grid.appendChild(corner);
+  for(let c=0;c<S;c++){
+    const d=document.createElement("div");d.className="clue colc";grid.appendChild(d);colEls.push(d);
+  }
+  for(let r=0;r<S;r++){
+    const d=document.createElement("div");d.className="clue";grid.appendChild(d);rowEls.push(d);
+    for(let c=0;c<S;c++){
+      const cell=document.createElement("div");
+      cell.className="gc";cell.dataset.i=String(r*S+c);
+      grid.appendChild(cell);cellEls.push(cell);
+    }
+  }
+}
+function lineOk(getter,clue){const a=[];for(let i=0;i<S;i++)a.push(getter(i));const rr=runs(a);if(rr.length!==clue.length)return false;for(let i=0;i<rr.length;i++)if(rr[i]!==clue[i])return false;return true;}
+function rowOk(r){return lineOk(i=>state[r][i],rowClue[r]);}
+function colOk(c){return lineOk(i=>state[i][c],colClue[c]);}
+function render(){
+  for(let i=0;i<S*S;i++){
+    const r=Math.floor(i/S),c=i%S,v=state[r][c],d=cellEls[i];
+    d.classList.toggle("f",v===1);
+    d.classList.toggle("x",v===2);
+    d.textContent=v===2?"×":"";
+  }
+  for(let r=0;r<S;r++){rowEls[r].classList.toggle("ok",rowOk(r));rowEls[r].classList.remove("err");}
+  for(let c=0;c<S;c++){colEls[c].classList.toggle("ok",colOk(c));colEls[c].classList.remove("err");}
+}
+function allOk(){
+  for(let i=0;i<S;i++){if(!rowOk(i)||!colOk(i))return false;}
+  return true;
+}
+function loadLevel(){
+  state=Array.from({length:S},()=>new Array(S).fill(0));
+  calcClues(PATS[lvl]);
+  buildGrid();render();
+  grid.classList.remove("ghost");
+  document.getElementById("hLvl").textContent="第 "+(lvl+1)+"/"+PATS.length+" 图";
+  document.getElementById("msg").textContent="";
+}
+function flashErr(){
+  const msg=document.getElementById("msg");
+  let bad=0;
+  for(let r=0;r<S;r++)if(!rowOk(r)){rowEls[r].classList.add("err");bad++;}
+  for(let c=0;c<S;c++)if(!colOk(c)){colEls[c].classList.add("err");bad++;}
+  msg.textContent="还有 "+bad+" 组行列数字未满足";
+}
+function done(){
+  if(over||lock)return;
+  if(allOk()){
+    lock=true;
+    document.getElementById("msg").textContent="正确!这是「"+PATS[lvl].name+"」";
+    setTimeout(()=>{
+      lock=false;
+      lvl++;
+      if(lvl>=PATS.length){
+        over=true;clearInterval(timer);
+        show("全部拼出!","5 幅图案全部完成 · 用时 "+sec+" 秒 · 失误 "+mistakes+" 次");
+      }else{loadLevel();}
+    },900);
+  }else{
+    mistakes++;flashErr();
+    document.getElementById("hLife").textContent="机会 "+(3-mistakes);
+    if(mistakes>=3){
+      over=true;clearInterval(timer);
+      const pat=PATS[lvl];
+      for(let r=0;r<S;r++)for(let c=0;c<S;c++)state[r][c]=Number(pat.rows[r][c]);
+      grid.classList.add("ghost");render();
+      show("挑战失败","正确图案已半透明显示在棋盘上,再接再厉!");
+    }
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function toggleCell(i,forceMark){
+  if(over||lock)return;
+  const r=Math.floor(i/S),c=i%S;
+  let v=state[r][c];
+  if(forceMark||mode==="mark"){v=(v===2)?0:2;}
+  else{v=(v===1)?0:1;}
+  state[r][c]=v;render();
+}
+grid.addEventListener("click",e=>{
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined)return;
+  toggleCell(parseInt(t.dataset.i,10),false);
+});
+grid.addEventListener("contextmenu",e=>{
+  e.preventDefault();
+  const t=e.target;
+  if(!t.dataset||t.dataset.i===undefined)return;
+  toggleCell(parseInt(t.dataset.i,10),true);
+});
+document.getElementById("bMode").addEventListener("click",function(){
+  mode=(mode==="paint")?"mark":"paint";
+  this.textContent="模式:"+(mode==="paint"?"涂格":"标记");
+});
+document.getElementById("bDone").addEventListener("click",done);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+function startTimer(){
+  if(timer)clearInterval(timer);
+  timer=setInterval(()=>{sec++;document.getElementById("hTime").textContent="用时 "+sec+" 秒";},1000);
+}
+function init(){
+  over=false;lock=false;lvl=0;mistakes=0;sec=0;mode="paint";
+  document.getElementById("bMode").textContent="模式:涂格";
+  document.getElementById("hLife").textContent="机会 3";
+  document.getElementById("hTime").textContent="用时 0 秒";
+  document.getElementById("ov").classList.add("hide");
+  loadLevel();startTimer();
+}
+init();
+</script>
+</body>
+</html>

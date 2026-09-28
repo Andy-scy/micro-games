@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>土豆大亨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd76a;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#7dd3fc;font-size:13px;margin-bottom:6px}
+#hoeArea{background:#131728;border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:8px}
+#hoe{width:180px;height:110px;border:none;border-radius:14px;cursor:pointer;font-family:inherit;font-size:16px;font-weight:800;color:#3b2408;background:radial-gradient(circle at 35% 30%,#d9a05b,#a5672b 60%,#6e3f14);box-shadow:0 8px 20px rgba(0,0,0,.5);transition:transform .06s}
+#hoe:active{transform:scale(.93)}
+#rebirthBar{width:100%;height:14px;background:#0b0e1a;border-radius:7px;overflow:hidden;border:1px solid #2e3554}
+#rbFill{height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#fde68a)}
+#rbTxt{font-size:12px;color:#8b90b0}
+.pop{position:absolute;font-size:14px;font-weight:700;color:#fde68a;pointer-events:none;animation:rise .7s ease-out forwards;z-index:2}
+@keyframes rise{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-44px)}}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.rainbow{background:linear-gradient(90deg,#f59e0b,#ef4444,#a855f7);color:#fff;border:none;font-weight:700}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>土豆大亨</h1>
+  <p class="hint">疯狂锄地收土豆,买拖拉机挂机产出 · 攒够 <b>4000</b> 可「转生」:清零换星星,全局产量 x4 · 完成三次转生获胜</p>
+  <div class="hud">
+    <span>土豆 <b id="hPot">0</b></span>
+    <span>每秒 <b id="hAps">0</b></span>
+    <span>全局倍率 <b id="hMult">x1</b></span>
+    <span>转生星 <b id="hStar">0</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="hoeArea">
+    <button id="hoe">🥔 锄地!</button>
+    <div id="rebirthBar"><div id="rbFill"></div></div>
+    <div id="rbTxt">转生进度 0 / 4000</div>
+  </div>
+  <div class="acts">
+    <button class="btn rainbow" id="btnRb" disabled>转生 (需 4000 土豆)</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">土豆大亨</h2>
+    <p id="ovDesc">从一亩薄田起步:狂点锄头收土豆,攒钱买锄头升级与自动拖拉机。攒到 4000 土豆就可以「转生」——清空土豆与装备,换一颗转生星,下次开局全局产量 x4!完成三次转生,你就是星河土豆之主。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">下地干活</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elPot=$("hPot"),elAps=$("hAps"),elMult=$("hMult"),elStar=$("hStar"),elMsg=$("msg");
+var hoe=$("hoe"),rbFill=$("rbFill"),rbTxt=$("rbTxt"),hoeArea=$("hoeArea"),btnRb=$("btnRb");
+var shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var RB=4000;
+var ups=[
+ {nm:"玄铁锄头",ds:"每次锄地 +3",base:25,mult:2,max:12},
+ {nm:"自动拖拉机",ds:"每秒 +2 土豆",base:90,mult:2.1,max:10},
+ {nm:"神奇肥料",ds:"全局产量 +30%",base:260,mult:2.6,max:4}
+];
+var pot,stars,upLv,state,msgT,rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function mult(){return Math.pow(4,stars)*(1+0.3*upLv[2]);}
+function clickGain(){return (1+3*upLv[0])*mult();}
+function autoGain(){return 2*upLv[1]*mult();}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function say(t){elMsg.textContent=t;msgT=2.6;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该项已升满!");return;}
+  var c=upCost(i);
+  if(pot<c){say("土豆不够!");return;}
+  pot-=c;upLv[i]++;say(ups[i].nm+" 升到 Lv"+upLv[i]+"!");
+}
+function dig(e){
+  if(state!=="play")return;
+  var g=clickGain();
+  pot+=g;
+  var r=hoeArea.getBoundingClientRect();
+  var p=document.createElement("div");
+  p.className="pop";p.textContent="+"+fmt(g);
+  p.style.left=(e.clientX-r.left-16)+"px";
+  p.style.top=(e.clientY-r.top-34)+"px";
+  hoeArea.appendChild(p);
+  setTimeout(function(){if(p.parentNode)p.parentNode.removeChild(p);},750);
+}
+hoe.addEventListener("click",dig);
+btnRb.addEventListener("click",function(){
+  if(state!=="play"||pot<RB)return;
+  stars++;pot=0;upLv=[0,0,0];
+  if(stars>=3){
+    state="over";
+    showOv("星河土豆之主!","三次转生功成身退,你的土豆传说在星海流传!","达成三颗转生星");
+    return;
+  }
+  say("转生成功!获得第 "+stars+" 颗星,全局产量 x"+Math.pow(4,stars)+"!");
+});
+document.addEventListener("keydown",function(e){
+  if(state==="play"&&e.key===" "){e.preventDefault();pot+=clickGain();}
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function startGame(){
+  pot=0;stars=0;upLv=[0,0,0];msgT=0;
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+function render(){
+  elPot.textContent=fmt(pot);elAps.textContent=fmt(autoGain());
+  elMult.textContent="x"+fmt(mult());elStar.textContent=stars;
+  rbFill.style.width=Math.min(100,pot/RB*100)+"%";
+  rbTxt.textContent=stars>=3?"已是传说":"转生进度 "+fmt(pot)+" / "+RB;
+  btnRb.disabled=pot<RB;
+  btnRb.textContent=pot<RB?"转生 (需 4000 土豆)":"转生!换星 x"+Math.pow(4,stars+1);
+  var i;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent="Lv"+upLv[i]+"/"+ups[i].max;
+    rows[i].el.classList.toggle("off",full||pot<c);
+  }
+}
+function showOv(t2,d,s){
+  ovT.textContent=t2;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  pot+=autoGain()*ds;
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+}
+pot=0;stars=0;upLv=[0,0,0];state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

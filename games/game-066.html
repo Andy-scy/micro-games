@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金币航线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>金币航线</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 拍翅膀 · 吃金币 +2,连吃 3 枚起每枚再 +1!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="streak">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">金币航线</h2>
+      <p id="ovDesc">这是一条散落金币的航线:管道缝隙很宽,真正的得分靠沿途金币!每枚金币 +2,连续吃到 3 枚起进入连击,每枚额外 +1;漏掉一枚连击清零。撞管或坠地即结束,贪财但要稳!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=70,GAP=192,SPACE=300,GRAV=1480,FLAP=-380,BX=110,BR=13;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),elStreak=$("streak"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,pipes,coins,popups,score,best=0,tick,streak,lastY;
+function newPipe(x){return{x:x,gy:70+Math.random()*(GROUND-140-GAP),passed:false};}
+function reset(){
+  bird={y:270,vy:0,fl:0};
+  pipes=[newPipe(W+150)];
+  coins=[];popups=[];
+  score=0;tick=0;streak=0;lastY=270;
+  spawnCoins(pipes[0]);
+  elScore.textContent="0";
+  elStreak.textContent="0";
+}
+function spawnCoins(p){
+  var i,n=3+((Math.random()*2)|0),x=p.x+PW+60;
+  for(i=0;i<n;i++){
+    lastY=Math.max(110,Math.min(GROUND-120,lastY+(Math.random()*130-65)));
+    coins.push({x:x+i*48,y:lastY,got:false,ph:Math.random()*6.28});
+  }
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,p,c;
+  tick+=dt;
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("为了金币飞得太低,坠地了!");return;}
+  for(i=0;i<pipes.length;i++)pipes[i].x-=140*dt;
+  if(pipes[pipes.length-1].x<W-SPACE){
+    var np=newPipe(W+24);
+    pipes.push(np);
+    spawnCoins(np);
+  }
+  if(pipes[0].x<-PW-12)pipes.shift();
+  for(i=0;i<pipes.length;i++){
+    p=pipes[i];
+    if(!p.passed&&p.x+PW<BX-BR){
+      p.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    if(circleRect(BX,bird.y,BR,p.x,0,PW,p.gy)||circleRect(BX,bird.y,BR,p.x,p.gy+GAP,PW,GROUND-p.gy-GAP)){
+      die("撞上了管道,金币撒了一地!");return;
+    }
+  }
+  for(i=coins.length-1;i>=0;i--){
+    c=coins[i];
+    c.x-=140*dt;
+    var dx=BX-c.x,dy=bird.y-(c.y+Math.sin(tick*3+c.ph)*5),rr=BR+10;
+    if(!c.got&&dx*dx+dy*dy<rr*rr){
+      c.got=true;
+      streak++;
+      var gain=2+(streak>=3?1:0);
+      score+=gain;
+      elScore.textContent=String(score);
+      elStreak.textContent=String(streak);
+      popups.push({x:c.x,y:c.y-20,txt:streak>=3?"+"+gain+" 连击x"+streak:"+"+gain,life:0.8});
+      coins.splice(i,1);
+      continue;
+    }
+    if(c.x<-20){
+      if(streak>0)popups.push({x:60,y:c.y,txt:"漏币!连击中断",life:0.9});
+      streak=0;
+      elStreak.textContent="0";
+      coins.splice(i,1);
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawPipe(p){
+  ctx.fillStyle="#92610c";
+  ctx.fillRect(p.x,0,PW,p.gy);
+  ctx.fillRect(p.x,p.gy+GAP,PW,GROUND-p.gy-GAP);
+  ctx.fillStyle="#d97706";
+  ctx.fillRect(p.x+6,0,7,p.gy);
+  ctx.fillRect(p.x+6,p.gy+GAP,7,GROUND-p.gy-GAP);
+  ctx.fillStyle="#5c3a05";
+  ctx.fillRect(p.x-4,p.gy-13,PW+8,13);
+  ctx.fillRect(p.x-4,p.gy+GAP,PW+8,13);
+}
+function draw(){
+  var i,c;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#141021";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,240,200,0.35)";
+  for(i=0;i<30;i++)ctx.fillRect((i*97)%W,(i*211)%GROUND,1.4,1.4);
+  for(i=0;i<pipes.length;i++)drawPipe(pipes[i]);
+  for(i=0;i<coins.length;i++){
+    c=coins[i];
+    var cy=c.y+Math.sin(tick*3+c.ph)*5,sc=1+Math.sin(tick*4+c.ph)*0.12;
+    ctx.save();
+    ctx.translate(c.x,cy);ctx.scale(sc,1);
+    ctx.fillStyle="#fbbf24";
+    ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#fde68a";
+    ctx.beginPath();ctx.arc(-2,-2,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#b45309";
+    ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText("¥",0,0.5);
+    ctx.restore();
+  }
+  ctx.fillStyle="#241c33";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle="#3a2c50";
+  var off=(tick*140)%24;
+  for(i=-1;i<W/24+1;i++)ctx.fillRect(i*24-off,GROUND,12,6);
+  ctx.fillStyle="#fde68a";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f59e0b";
+  ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#141021";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f97316";
+  ctx.beginPath();ctx.moveTo(BX+BR-2,bird.y);ctx.lineTo(BX+BR+8,bird.y+2);ctx.lineTo(BX+BR-2,bird.y+6);ctx.closePath();ctx.fill();
+  ctx.font="bold 15px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(253,230,138,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

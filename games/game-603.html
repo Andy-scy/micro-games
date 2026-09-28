@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数列探秘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#fbbf24;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:14px}
+.hud b{color:#fbbf24;font-size:16px}
+.seq{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:16px 0 6px}
+.seq span{background:#0b0e1a;border:1px solid #2a3054;border-radius:10px;padding:10px 12px;font-size:19px;font-weight:700;color:#e8eaf6;min-width:52px;text-align:center}
+.seq .qmark{color:#fbbf24;border-color:#fbbf24}
+.qline{text-align:center;font-size:15px;color:#c7cbe8;margin-bottom:14px}
+.opts{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.opts button{background:#232949;color:#e8eaf6;border:2px solid transparent;border-radius:12px;padding:14px 0;font-size:20px;font-weight:800;cursor:pointer;font-family:inherit}
+.opts button:active{transform:scale(.95)}
+.opts button.right{background:#14351f;border-color:#4ade80;color:#4ade80}
+.opts button.wrong{background:#3a1620;border-color:#f87171;color:#f87171}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:12px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#332100;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>数列探秘</h1>
+  <p class="hint">找出数字排列的规律 · 从四个选项中选出下一项 · 共 10 关,答错扣一颗心</p>
+  <div class="hud">
+    <span>第 <b id="no">1</b>/10 关</span>
+    <span>得分 <b id="score">0</b></span>
+    <span>连对 <b id="combo">0</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+  </div>
+  <div class="stage">
+    <div class="seq" id="seq"></div>
+    <div class="qline">下一项应该是多少?</div>
+    <div class="opts" id="opts"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">数列探秘</h2>
+      <p id="ovD">等差、等比、交替增减、平方数、递推和……每种规律都藏在已给出的五个数里。看清规律,选出下一个数!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始探秘</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elNo=$("no"),elScore=$("score"),elCombo=$("combo"),elLives=$("lives");
+var elSeq=$("seq"),elOpts=$("opts"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var state,score,combo,lives,no,cur,lock;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function shuffle(arr){
+  var i,j,t;
+  for(i=arr.length-1;i>0;i--){j=(Math.random()*(i+1))|0;t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr;
+}
+function makeSeq(){
+  var type=rnd(0,5),terms=[],rule="",i;
+  if(type===0){
+    var d=rnd(2,12)*(Math.random()<0.3?-1:1),s=rnd(1,15);
+    for(i=0;i<6;i++)terms.push(s+d*i);
+    rule="每次"+(d>0?"加 "+d:"减 "+(-d));
+  }else if(type===1){
+    var r=rnd(0,1)?2:3,s=rnd(1,4);
+    for(i=0;i<6;i++)terms.push(s*Math.pow(r,i));
+    rule="每次乘 "+r;
+  }else if(type===2){
+    var a=rnd(1,5),b=rnd(1,5);
+    terms.push(a,b);
+    for(i=2;i<6;i++)terms.push(terms[i-1]+terms[i-2]);
+    rule="前两数之和等于后一数";
+  }else if(type===3){
+    var add=rnd(1,4),dec=rnd(1,4),v=rnd(5,20),k;
+    terms.push(v);
+    for(k=0;k<5;k++){if(k%2===0)v+=add;else v=Math.max(0,v-dec);terms.push(v);}
+    rule="交替加 "+add+" 减 "+dec;
+  }else if(type===4){
+    var c=rnd(0,3),st=rnd(1,3);
+    for(i=0;i<6;i++)terms.push((st+i)*(st+i)+c);
+    rule="平方数"+(c?"再加 "+c:"");
+  }else{
+    var d2=rnd(1,4),v2=rnd(1,8),step=d2;
+    for(i=0;i<6;i++){terms.push(v2);v2+=step;step+=d2;}
+    rule="每次加的数都比上次多 "+d2;
+  }
+  return {terms:terms,ans:terms[5],rule:rule};
+}
+function gen(){
+  var m=makeSeq();
+  var opts=[m.ans],tries=0;
+  while(opts.length<4&&tries<200){
+    tries++;
+    var delta=[1,-1,2,-2,3,-3,m.ans>2?-m.ans%4-1:m.ans][(Math.random()*7)|0];
+    var cand=m.ans+delta;
+    if(cand!==m.ans&&opts.indexOf(cand)<0)opts.push(cand);
+  }
+  shuffle(opts);
+  cur={shown:m.terms.slice(0,5),ans:m.ans,rule:m.rule,opts:opts};
+  var html="",i;
+  for(i=0;i<5;i++)html+="<span>"+m.terms[i]+"</span>";
+  html+="<span class='qmark'>?</span>";
+  elSeq.innerHTML=html;
+  elOpts.innerHTML="";
+  for(i=0;i<4;i++){
+    var b=document.createElement("button");
+    b.textContent=opts[i];
+    b.addEventListener("click",function(ev){pick(parseInt(ev.currentTarget.textContent,10),ev.currentTarget);});
+    elOpts.appendChild(b);
+  }
+}
+function updHud(){
+  elNo.textContent=no;elScore.textContent=score;elCombo.textContent=combo;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function pick(v,btn){
+  if(state!=="playing"||lock)return;
+  lock=true;
+  if(v===cur.ans){
+    btn.className="right";
+    score+=10+combo*2;combo++;
+    setMsg("正确!规律:"+cur.rule,"good");
+  }else{
+    btn.className="wrong";
+    combo=0;lives--;
+    var bs=elOpts.getElementsByTagName("button"),i;
+    for(i=0;i<bs.length;i++)if(parseInt(bs[i].textContent,10)===cur.ans)bs[i].className="right";
+    setMsg("答案是 "+cur.ans+" · 规律:"+cur.rule,"badc");
+  }
+  updHud();
+  no++;
+  setTimeout(next,1100);
+}
+function next(){
+  lock=false;
+  if(lives<=0){gameOver(false);return;}
+  if(no>10){gameOver(true);return;}
+  setMsg("");
+  gen();
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"探秘成功!":"规律难解…";
+  ovD.textContent=win?"十段数列全被你破解,规律之王非你莫属!":"三颗心用完了,多留意相邻两数的差与商。";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";score=0;combo=0;lives=3;no=1;lock=false;
+  ovS.style.display="none";
+  setMsg("");
+  gen();updHud();
+  ov.classList.add("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+  }
+});
+btnGo.addEventListener("click",startGame);
+})();
+</script>
+</body>
+</html>

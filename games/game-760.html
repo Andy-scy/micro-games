@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全景战线</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8ecff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;gap:8px}
+h1{font-size:20px;letter-spacing:2px;color:#ffd76a}
+#hud{display:flex;gap:14px;font-size:14px;background:#181d33;border:1px solid #2a3155;border-radius:10px;padding:6px 14px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#7fe08a}
+#stage{position:relative}
+canvas{display:block;background:#10142a;border:1px solid #2a3155;border-radius:12px;max-width:96vw;height:auto}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;border-radius:12px;padding:14px}
+#ov h2{font-size:24px;color:#ffd76a}
+#ov p{font-size:13px;color:#aab3d8;line-height:1.8;max-width:430px}
+.btn{background:#ffd76a;color:#1a1c2e;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:700;cursor:pointer}
+.btn:active{transform:scale(.95)}
+#pad{display:none;gap:24px;margin-top:8px;user-select:none;-webkit-user-select:none;align-items:center}
+#dpad{display:grid;grid-template-areas:". u ." "l d r";gap:6px}
+.pbtn{width:54px;height:54px;border-radius:14px;background:#232a4d;border:1px solid #3a4373;color:#e8ecff;font-size:18px;display:flex;align-items:center;justify-content:center;touch-action:none}
+.pbtn.fire{width:84px;height:84px;border-radius:50%;font-size:16px;font-weight:700;background:#5a2a2a;border-color:#8a4444}
+@media(pointer:coarse){#pad{display:flex}}
+</style>
+</head>
+<body>
+<h1>全景战线</h1>
+<div id="hud"><span>生命 <b id="hA">3</b></span><span>敌堡 <b id="hB">3</b></span><span>区域 <b id="hC">1/3</b></span><span>分数 <b id="hD">0</b></span></div>
+<div id="stage">
+<canvas id="cv" width="480" height="416"></canvas>
+<div id="ov">
+  <h2>全景战线</h2>
+  <p id="ovP">450 米宽的完整战线!镜头跟随你的座车横向推进:<br>一区开阔砖阵地 → 二区湖泊岛屿 → 三区敌方要塞。<br>击毁每个区域的紫色堡垒(耐久 6)开启铁门,摧毁 3 座即胜。<br>右上角有小地图。方向键/WASD 移动,空格开火!</p>
+  <button class="btn" id="ovB">开始游戏</button>
+</div>
+</div>
+<div id="pad">
+  <div id="dpad">
+    <div class="pbtn" data-k="ArrowUp" style="grid-area:u">▲</div>
+    <div class="pbtn" data-k="ArrowLeft" style="grid-area:l">◀</div>
+    <div class="pbtn" data-k="ArrowDown" style="grid-area:d">▼</div>
+    <div class="pbtn" data-k="ArrowRight" style="grid-area:r">▶</div>
+  </div>
+  <div class="pbtn fire" data-k="Space">开火</div>
+</div>
+<script>
+"use strict";
+const TS=32,COLS=45,ROWS=13,VIEW_W=480;
+const DIRS=[[0,-1],[1,0],[0,1],[-1,0]];
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const ov=document.getElementById('ov'),ovP=document.getElementById('ovP'),ovB=document.getElementById('ovB');
+const hA=document.getElementById('hA'),hB=document.getElementById('hB'),hC=document.getElementById('hC'),hD=document.getElementById('hD');
+const OUTPOSTS=[[8,6],[23,6],[38,6]];
+const GATES=[{x:14,ys:[2,10]},{x:30,ys:[2,10]}];
+let grid,score,lives,camX,enemies,posts,bullets,parts,player,frame=0,state='start';
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code.indexOf('Arrow')===0||e.code==='Space')e.preventDefault();});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
+document.querySelectorAll('.pbtn').forEach(b=>{
+  const k=b.getAttribute('data-k');
+  const dn=e=>{e.preventDefault();keys[k]=true;};
+  const up=e=>{e.preventDefault();keys[k]=false;};
+  b.addEventListener('pointerdown',dn);b.addEventListener('pointerup',up);
+  b.addEventListener('pointercancel',up);b.addEventListener('pointerleave',up);
+});
+function buildWorld(){
+  grid=[];
+  for(let y=0;y<ROWS;y++){const r=[];for(let x=0;x<COLS;x++)r.push(0);grid.push(r);}
+  for(let x=3;x<13;x+=3)for(let y=2;y<11;y+=3)grid[y][x]=1;
+  for(let y=1;y<ROWS-1;y++){grid[y][15]=2;grid[y][29]=2;}
+  for(const gt of GATES)for(const gy of gt.ys){grid[gy][gt.x]=7;grid[gy][gt.x+1]=7;}
+  for(let x=17;x<28;x+=4)for(let y=2;y<11;y+=4)grid[y][x]=1;
+  for(const w of [[19,4],[20,4],[19,5],[24,8],[25,8],[24,7],[21,10],[22,10]])grid[w[1]][w[0]]=3;
+  for(const w of [[17,1],[18,1],[26,1],[17,11],[26,11],[27,11]])grid[w[1]][w[0]]=3;
+  for(let x=32;x<44;x+=2)if((x/2)%2===0)for(let y=3;y<10;y+=6)grid[y][x]=1;
+  grid[6][35]=2;grid[8][41]=2;grid[3][38]=2;
+  posts=[];
+  for(let i=0;i<OUTPOSTS.length;i++){
+    const o=OUTPOSTS[i];
+    posts.push({x:o[0],y:o[1],hp:6,zone:i,alive:true});
+    grid[o[1]][o[0]]=8;grid[o[1]][o[0]+1]=8;grid[o[1]-1][o[0]]=8;grid[o[1]-1][o[0]+1]=8;
+  }
+}
+function spawnZoneGuards(){
+  enemies=[];
+  const zones=[[[3,9],[6,3],[11,7]],[[18,3],[22,9],[26,5]],[[33,4],[37,10],[41,7],[35,8]]];
+  for(let z=0;z<3;z++){
+    for(const s of zones[z]){
+      enemies.push({x:s[0]*TS+2,y:s[1]*TS+2,dir:3,spd:1.2,zone:z,cd:80,think:20,home:s});
+    }
+  }
+}
+function initGame(){
+  buildWorld();
+  score=0;lives=3;camX=0;
+  spawnZoneGuards();
+  bullets=[];parts=[];
+  player={x:TS+2,y:6*TS+2,dir:1,cd:0,inv:80};
+}
+function startGame(){initGame();state='play';ov.style.display='none';}
+ovB.addEventListener('click',startGame);
+function rectVsGrid(x,y){
+  if(x<0||y<0||x+28>COLS*TS||y+28>ROWS*TS)return true;
+  const x0=Math.floor(x/TS),y0=Math.floor(y/TS),x1=Math.floor((x+27)/TS),y1=Math.floor((y+27)/TS);
+  for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){
+    const t=grid[ty][tx];
+    if(t!==0)return true;
+  }
+  return false;
+}
+function tankOverlap(x,y,self){
+  for(const t of enemies){if(t===self)continue;if(Math.abs(t.x-x)<27&&Math.abs(t.y-y)<27)return true;}
+  if(player&&player!==self&&Math.abs(player.x-x)<27&&Math.abs(player.y-y)<27)return true;
+  return false;
+}
+function moveTank(t,d){
+  if(t.dir!==d){
+    if(t.dir%2!==d%2){
+      if(d%2===0)t.x=Math.round((t.x-2)/TS)*TS+2;else t.y=Math.round((t.y-2)/TS)*TS+2;
+    }
+    t.dir=d;
+  }
+  const v=DIRS[d],nx=t.x+v[0]*t.spd,ny=t.y+v[1]*t.spd;
+  if(!rectVsGrid(nx,ny)&&!tankOverlap(nx,ny,t)){t.x=nx;t.y=ny;return true;}
+  return false;
+}
+function fire(t,from){
+  const v=DIRS[t.dir];
+  bullets.push({x:t.x+14+v[0]*17-3,y:t.y+14+v[1]*17-3,vx:v[0]*5,vy:v[1]*5,from:from,life:260});
+}
+function boom(x,y,n,c){for(let i=0;i<n;i++)parts.push({x:x,y:y,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:22+Math.random()*14,max:36,c:c||'#ffb050'});}
+function floatTxt(x,y,txt){parts.push({x:x,y:y,vx:0,vy:-0.7,life:44,max:44,c:'#ffd76a',txt:txt});}
+function zoneOf(px){return px<15*TS?0:(px<30*TS?1:2);}
+function updPlayer(){
+  let d=-1;
+  if(keys.ArrowUp||keys.KeyW)d=0;else if(keys.ArrowRight||keys.KeyD)d=1;
+  else if(keys.ArrowDown||keys.KeyS)d=2;else if(keys.ArrowLeft||keys.KeyA)d=3;
+  if(d>=0)moveTank(player,d);
+  if(player.inv>0)player.inv--;
+  player.cd--;
+  if((keys.Space||keys.KeyJ)&&player.cd<=0){
+    let n=0;for(const b of bullets)if(b.from==='p')n++;
+    if(n<2){fire(player,'p');player.cd=18;}
+  }
+  const target=player.x+14-VIEW_W/2;
+  camX=Math.max(0,Math.min(target,COLS*TS-VIEW_W));
+}
+function updEnemies(){
+  for(const e of enemies){
+    e.think--;e.cd--;
+    const dz=zoneOf(e.x);
+    let tgt=null;
+    if(dz===zoneOf(player.x))tgt=player;
+    if(!tgt){
+      let bd=1e9;
+      for(const o of posts){
+        if(!o.alive||o.zone!==e.zone)continue;
+        const d=Math.abs(o.x*TS-e.x)+Math.abs(o.y*TS-e.y);
+        if(d<bd){bd=d;tgt={x:o.x*TS,y:o.y*TS};}
+      }
+    }
+    if(tgt){
+      const dx=tgt.x-e.x,dy=tgt.y-e.y;
+      e.dir=Math.abs(dx)>Math.abs(dy)?(dx>0?1:3):(dy>0?2:0);
+    }
+    const moved=moveTank(e,e.dir);
+    if(!moved){
+      e.dir=Math.floor(Math.random()*4);
+      moveTank(e,e.dir);
+    }
+    if(e.cd<=0&&tgt){
+      if(Math.abs(e.x-tgt.x)<14){e.dir=tgt.y>e.y?2:0;}
+      else if(Math.abs(e.y-tgt.y)<14){e.dir=tgt.x>e.x?1:3;}
+      else{e.cd=15;continue;}
+      fire(e,'e');e.cd=100+Math.random()*70;
+    }
+  }
+}
+function openGates(zone){
+  for(const gt of GATES){
+    const gz=gt.x===14?0:1;
+    if(gz!==zone)continue;
+    for(const gy of gt.ys){
+      grid[gy][gt.x]=0;grid[gy][gt.x+1]=0;
+      boom(gt.x*TS+32,gy*TS+16,10,'#cfd6ee');
+    }
+  }
+  floatTxt(player.x,player.y-14,'铁门开启!');
+}
+function killPlayer(){
+  boom(player.x+14,player.y+14,14,'#7fe08a');
+  lives--;
+  if(lives<=0){end(false,'战线推进失败!');return;}
+  player.inv=150;player.cd=40;
+}
+function end(win,msg){
+  state=win?'win':'over';
+  ov.children[0].textContent=win?'全线告捷!':'游戏结束';
+  ovP.innerHTML=msg+'<br>最终得分:'+score;
+  ovB.textContent='再来一局';
+  ov.style.display='flex';
+}
+function hitPost(tx,ty,b){
+  for(const o of posts){
+    if(!o.alive)continue;
+    if(tx>=o.x&&tx<=o.x+1&&ty>=o.y-1&&ty<=o.y){
+      o.hp--;
+      boom(b.x+3,b.y+3,5,'#d090ff');
+      if(o.hp<=0){
+        o.alive=false;
+        grid[o.y][o.x]=0;grid[o.y][o.x+1]=0;grid[o.y-1][o.x]=0;grid[o.y-1][o.x+1]=0;
+        score+=500;
+        boom(o.x*TS+32,o.y*TS,26,'#d090ff');
+        floatTxt(o.x*TS,o.y*TS-14,'堡垒摧毁 +500');
+        openGates(o.zone);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+function updBullets(){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];let dead=false;
+    b.x+=b.vx;b.y+=b.vy;b.life--;
+    if(b.life<=0)dead=true;
+    if(b.x<0||b.y<0||b.x+6>COLS*TS||b.y+6>ROWS*TS)dead=true;
+    if(!dead){
+      const tx=Math.floor((b.x+3)/TS),ty=Math.floor((b.y+3)/TS);
+      if(tx>=0&&ty>=0&&tx<COLS&&ty<ROWS){
+        const t=grid[ty][tx];
+        if(t===8){dead=hitPost(tx,ty,b);}
+        else if(t===1){grid[ty][tx]=0;dead=true;boom(b.x+3,b.y+3,4,'#d08a50');}
+        else if(t===2||t===7){dead=true;boom(b.x+3,b.y+3,3,'#cfd6ee');}
+      }
+    }
+    if(!dead){
+      if(b.from==='e'){
+        if(player.inv<=0&&Math.abs(b.x+3-(player.x+14))<16&&Math.abs(b.y+3-(player.y+14))<16){dead=true;killPlayer();}
+      }else{
+        for(const e of enemies){
+          if(Math.abs(b.x+3-(e.x+14))<16&&Math.abs(b.y+3-(e.y+14))<16){
+            dead=true;enemies.splice(enemies.indexOf(e),1);
+            score+=120;floatTxt(e.x,e.y,'+120');
+            boom(e.x+14,e.y+14,12,'#ffb050');break;
+          }
+        }
+      }
+    }
+    if(dead)bullets.splice(i,1);
+  }
+}
+function updParts(){
+  for(let i=parts.length-1;i>=0;i--){
+    const p=parts[i];p.x+=p.vx;p.y+=p.vy;p.life--;
+    if(p.life<=0)parts.splice(i,1);
+  }
+}
+function updHud(){
+  hA.textContent=lives;
+  hB.textContent=posts.filter(o=>o.alive).length;
+  hC.textContent=(zoneOf(player.x)+1)+'/3';
+  hD.textContent=score;
+}
+function drawTile(t,X,Y){
+  if(t===1){
+    ctx.fillStyle='#8a4a28';ctx.fillRect(X,Y,TS,TS);
+    ctx.fillStyle='#5c2f18';ctx.fillRect(X,Y+15,TS,2);
+    ctx.fillStyle='#a55c32';ctx.fillRect(X+1,Y+1,14,13);ctx.fillRect(X+17,Y+1,14,13);
+  }else if(t===2){
+    ctx.fillStyle='#6b7694';ctx.fillRect(X+1,Y+1,TS-2,TS-2);
+    ctx.fillStyle='#9aa6c4';ctx.fillRect(X+5,Y+5,TS-10,TS-10);
+  }else if(t===3){
+    ctx.fillStyle='#16345c';ctx.fillRect(X,Y,TS,TS);
+    ctx.fillStyle='#1e4a80';ctx.fillRect(X+4,Y+8,10,2);ctx.fillRect(X+18,Y+20,10,2);
+  }else if(t===7){
+    ctx.fillStyle='#4a3a2a';ctx.fillRect(X,Y,TS,TS);
+    ctx.fillStyle='#8a6a4a';
+    ctx.fillRect(X+4,Y+2,6,TS-4);ctx.fillRect(X+14,Y+2,6,TS-4);ctx.fillRect(X+24,Y+2,6,TS-4);
+  }else if(t===8){
+    ctx.fillStyle='#3a1050';ctx.fillRect(X,Y,TS,TS);
+    ctx.fillStyle='#9040c8';ctx.fillRect(X+3,Y+3,TS-6,TS-6);
+    ctx.fillStyle='#e0b0ff';ctx.fillRect(X+10,Y+10,TS-20,TS-20);
+  }
+}
+function draw(){
+  ctx.fillStyle='#10142a';ctx.fillRect(0,0,cv.width,cv.height);
+  const tx0=Math.floor(camX/TS);
+  for(let ty=0;ty<ROWS;ty++){
+    for(let tx=tx0;tx<tx0+16&&tx<COLS;tx++){
+      if(grid[ty][tx]!==0)drawTile(grid[ty][tx],tx*TS-camX,ty*TS);
+    }
+  }
+  const drawT=(t,c)=>{
+    const sx=t.x-camX,sy=t.y;
+    if(sx<-40||sx>VIEW_W+40)return;
+    ctx.fillStyle='#171b2e';ctx.fillRect(sx,sy,28,28);
+    ctx.fillStyle=c;ctx.fillRect(sx+4,sy+4,20,20);
+    const cc=sx+14;
+    ctx.fillStyle='#12152a';
+    if(t.dir===0)ctx.fillRect(cc-2,sy,4,14);
+    else if(t.dir===1)ctx.fillRect(cc,sy+12,14,4);
+    else if(t.dir===2)ctx.fillRect(cc-2,sy+14,4,14);
+    else ctx.fillRect(sx,sy+12,14,4);
+    ctx.fillStyle=c;ctx.fillRect(sx+9,sy+9,10,10);
+  };
+  for(const e of enemies)drawT(e,'#c46a6a');
+  if(player&&!(player.inv>0&&frame%6<3))drawT(player,'#5fbf68');
+  for(const b of bullets){
+    const sx=b.x-camX;
+    if(sx<-10||sx>VIEW_W+10)continue;
+    ctx.fillStyle=b.from==='p'?'#ffe9a0':'#ff9d6a';
+    ctx.fillRect(sx,b.y,6,6);
+  }
+  for(const p of parts){
+    const sx=p.x-camX;
+    if(p.txt){
+      if(sx<-60||sx>VIEW_W+60)continue;
+      ctx.globalAlpha=Math.min(p.life/22,1);
+      ctx.fillStyle=p.c;ctx.font='bold 13px system-ui';ctx.textAlign='center';
+      ctx.fillText(p.txt,sx,p.y);
+    }else{
+      if(sx<-10||sx>VIEW_W+10)continue;
+      ctx.globalAlpha=Math.max(p.life/p.max,0);
+      ctx.fillStyle=p.c;ctx.fillRect(sx-2,p.y-2,4,4);
+    }
+  }
+  ctx.globalAlpha=1;
+  const mw=135,mh=39,mx=cv.width-mw-8,my=8;
+  ctx.fillStyle='rgba(10,12,28,0.85)';
+  ctx.fillRect(mx-2,my-2,mw+4,mh+4);
+  ctx.strokeStyle='#3a4373';ctx.strokeRect(mx-2,my-2,mw+4,mh+4);
+  const sc=mw/(COLS*TS);
+  for(const o of posts){
+    ctx.fillStyle=o.alive?'#9040c8':'#445';
+    ctx.fillRect(mx+o.x*TS*sc,my+o.y*TS*sc,6,4);
+  }
+  for(const gt of GATES){
+    ctx.fillStyle='#8a6a4a';
+    ctx.fillRect(mx+gt.x*TS*sc,my,2,mh);
+  }
+  if(player){
+    ctx.fillStyle='#5fbf68';
+    ctx.fillRect(mx+player.x*sc-1,my+player.y*sc-1,3,3);
+  }
+  ctx.fillStyle='#7fe08a';ctx.font='bold 10px system-ui';ctx.textAlign='left';
+  ctx.fillText('战线全景',mx+2,my+mh-3);
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==='play'){
+    frame++;
+    updPlayer();updEnemies();updBullets();updParts();updHud();
+    if(posts.every(o=>!o.alive)&&state==='play')end(true,'三座敌堡全部摧毁,战线贯通!');
+  }
+  draw();
+}
+initGame();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞碟猎手</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffab40;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffab40;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffab40}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffab40;color:#3d2300;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>飞碟猎手</h1>
+  <p class="hint">抛靶机不断抛出飞碟 · 在它落地前击碎 · 45 秒拿 180 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">45</b>秒</span>
+    <span>坠落 <b id="dp">0</b>/5</span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">飞碟猎手</h2>
+      <p id="ovD">抛靶机把陶土飞碟抛上半空,划出弧线坠落。在它触地前把它打碎:飞得越高分越多。放走五个飞碟,或时间耗尽,本轮结束。打飞碟讲究提前量——瞄它要去的方向。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">装填开赛</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elDp=$("dp"),elMsg=$("msg");
+const GOAL=180,DUR=45,G=430;
+let state="menu",score=0,timeLeft=DUR,elapsed=0,tp=0,spawnT=0.6,dropped=0;
+let mouse={x:240,y:260},discs=[],pops=[],shots=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function spawn(){
+  const fromLeft=Math.random()<0.5;
+  discs.push({
+    x:fromLeft?-20:500,y:470,
+    vx:(fromLeft?1:-1)*(150+Math.random()*80),
+    vy:-(330+Math.random()*110),
+    ph:Math.random()*6.28
+  });
+}
+function shoot(){
+  if(state!=="play")return;
+  const px=mouse.x,py=mouse.y;
+  shots.push({x0:240,y0:530,x1:px,y1:py,l:0.14});
+  let hit=null;
+  for(let i=0;i<discs.length;i++){
+    if(Math.hypot(px-discs[i].x,py-discs[i].y)<30){hit=discs[i];break;}
+  }
+  if(hit){
+    const gain=10+Math.max(0,Math.floor((470-hit.y)/45))*2;
+    score+=gain;
+    elMsg.textContent="碎!+"+gain;
+    for(let i=0;i<12;i++){
+      const a=Math.random()*6.28,s=70+Math.random()*160;
+      pops.push({x:hit.x,y:hit.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.55,c:"#ff7043"});
+    }
+    discs.splice(discs.indexOf(hit),1);
+    elSc.textContent=score;
+  }else{
+    elMsg.textContent="空枪";
+  }
+}
+function startGame(){
+  score=0;timeLeft=DUR;elapsed=0;tp=0;spawnT=0.6;dropped=0;
+  discs=[];pops=[];shots=[];
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;elDp.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(early){
+  state="over";
+  const win=!early&&score>=GOAL;
+  ovT.textContent=win?"碟无虚发!":"本轮结束";
+  ovT.style.color=win?"#ffab40":"#ef9a9a";
+  ovD.textContent=early?"五个飞碟落地,枪支暂扣。下一轮把枪口再抬高一点。":(win?"每一条弧线都逃不过你的准星。":"打飞碟别盯着碟,盯它即将经过的那片天空。");
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分 · 坠落 "+dropped;
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    elapsed+=dt;timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    spawnT-=dt;
+    if(spawnT<=0){spawn();spawnT=Math.max(0.8,1.6-elapsed*0.02);}
+    for(let i=discs.length-1;i>=0;i--){
+      const d=discs[i];
+      d.vy+=G*dt;d.x+=d.vx*dt;d.y+=d.vy*dt;
+      if(d.y>580||d.x<-50||d.x>530){
+        discs.splice(i,1);dropped++;
+        elDp.textContent=dropped;
+        elMsg.textContent="飞碟落地!";
+        if(dropped>=5){finish(true);}
+      }
+    }
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=350*dt;
+    }
+    for(let i=shots.length-1;i>=0;i--){
+      shots[i].l-=dt;
+      if(shots[i].l<=0)shots.splice(i,1);
+    }
+    if(state==="play"&&timeLeft<=0)finish(false);
+  }
+  draw();
+}
+function drawDisc(d){
+  ctx.save();ctx.translate(d.x,d.y);ctx.rotate(Math.sin(tp*3+d.ph)*0.3);
+  ctx.fillStyle="#bf5f2c";
+  ctx.beginPath();ctx.ellipse(0,0,22,9,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#e08a4e";
+  ctx.beginPath();ctx.ellipse(0,-3,16,6,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.25)";
+  ctx.beginPath();ctx.ellipse(-6,-5,6,2.4,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#3a2a4d");g.addColorStop(0.55,"#7a3f4d");g.addColorStop(1,"#241a2e");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#e8ca7a";
+  ctx.beginPath();ctx.arc(400,90,30,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(232,202,122,0.15)";
+  ctx.beginPath();ctx.arc(400,90,52,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#241a2e";ctx.fillRect(0,500,W,H-500);
+  ctx.fillStyle="#2e2238";ctx.fillRect(0,500,W,6);
+  ctx.fillStyle="#37474f";
+  ctx.fillRect(220,522,40,20);
+  for(let i=0;i<discs.length;i++)drawDisc(discs[i]);
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.55);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  for(let i=0;i<shots.length;i++){
+    const s=shots[i];
+    ctx.globalAlpha=Math.max(0,s.l/0.14);
+    ctx.strokeStyle="#fff3c4";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(s.x0,s.y0);ctx.lineTo(s.x1,s.y1);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  if(state==="play"){
+    ctx.strokeStyle="#ffab40";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,14,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,3,0,Math.PI*2);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深海钩爪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:8px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>深海钩爪</h1>
+  <p class="tips">操纵深海炮台的钩爪,抓取上浮的泡泡!银泡 30 分、金泡 80 分,但水雷混在其中——抓到水雷直接扣 1 条生命。45 秒限时打捞!</p>
+  <div class="card">
+    <div class="bar"><div id="tbar"></div></div>
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">捕获</div><div class="big" id="ct">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">深海钩爪</h2><p id="ovp">玩法说明:<br>· 移动瞄准,点击或按空格发射钩爪<br>· 钩爪伸到最远或碰到目标就回收<br>· 银泡泡 +30,金泡泡 +80<br>· 深色带刺的水雷千万别抓,抓到 -1 条生命<br>· 钩爪收回前不能再发射,瞄准再出手<br>· 45 秒内尽量多打捞,3 条生命用完提前结束</p><button class="btn" id="obtn">开始打捞</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var CX=210,CY=498;
+var bubbles=[],parts=[],floats=[];
+var score=0,lives=3,caught=0,timeLeft=45;
+var aimA=-Math.PI/2,claw=null;
+var spawnT=0,running=false,lastT=0,shakeT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('sc').textContent=score;
+  $i('ct').textContent=caught;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function reset(){
+  bubbles=[];parts=[];floats=[];
+  score=0;lives=3;caught=0;timeLeft=45;claw=null;
+  spawnT=0;shakeT=0;
+  for(var i=0;i<5;i++)spawnBubble(true);
+  upd();
+  $i('tbar').style.width='100%';
+}
+function spawnBubble(anywhere){
+  var roll=Math.random(),type='silver';
+  if(roll<0.15)type='mine';
+  else if(roll<0.4)type='gold';
+  bubbles.push({
+    x:rnd(30,W-30),y:anywhere?rnd(120,H-40):H+24,
+    r:type==='mine'?17:(type==='gold'?16:18),
+    vy:-(rnd(26,46)+ (45-timeLeft)*0.4),
+    sw:rnd(0,6.28),sp:rnd(0.8,1.8),amp:rnd(6,16),
+    type:type});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(50,180);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+function tipPos(){
+  return {x:CX+Math.cos(claw.a)*claw.len,y:CY+Math.sin(claw.a)*claw.len};
+}
+function fire(){
+  if(claw||!running)return;
+  claw={a:aimA,len:24,st:'out',cargo:null};
+}
+function deliver(){
+  var cg=claw.cargo;
+  claw=null;
+  if(!cg)return;
+  if(cg.type==='mine'){
+    lives--;shakeT=0.4;
+    addFloat(CX,CY-60,'抓到水雷!','#ff5c5c');
+    if(lives<=0){timeLeft=0;}
+  }else{
+    var gain=cg.type==='gold'?80:30;
+    score+=gain;caught++;
+    addFloat(CX,CY-60,'+'+gain,cg.type==='gold'?'#ffd166':'#8fd3ff');
+  }
+  upd();
+  if(lives<=0){
+    lives=0;upd();
+    running=false;
+    $i('ovt').textContent='打捞结束!';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>捕获泡泡:'+caught+' 个<br>'+(timeLeft<=0?'生命用完,提前收工':'时间到');
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+}
+function update(dt){
+  var i;
+  if(running){
+    timeLeft-=dt;
+    if(timeLeft<=0){
+      timeLeft=0;running=false;
+      $i('ovt').textContent='时间到!';
+      $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>捕获泡泡:'+caught+' 个';
+      $i('obtn').textContent='再来一局';
+      $i('overlay').classList.remove('hide');
+    }
+    $i('tbar').style.width=(timeLeft/45*100)+'%';
+    spawnT-=dt;
+    if(spawnT<=0){
+      spawnBubble(false);
+      spawnT=Math.max(0.4,0.9-(45-timeLeft)*0.01);
+    }
+    for(i=bubbles.length-1;i>=0;i--){
+      var b=bubbles[i];
+      b.y+=b.vy*dt;b.sw+=b.sp*dt;b.x+=Math.sin(b.sw)*b.amp*dt;
+      if(b.y<-30)bubbles.splice(i,1);
+    }
+    if(claw){
+      if(claw.st==='out'){
+        claw.len+=440*dt;
+        var tp=tipPos();
+        if(tp.x<0||tp.x>W||tp.y<0)claw.st='back';
+        if(claw.len>470)claw.st='back';
+        for(i=bubbles.length-1;i>=0;i--){
+          var bb=bubbles[i];
+          var dx=tp.x-bb.x,dy=tp.y-bb.y;
+          if(dx*dx+dy*dy<(bb.r+8)*(bb.r+8)){
+            bubbles.splice(i,1);
+            claw.cargo=bb;
+            claw.st='back';
+            break;
+          }
+        }
+      }else{
+        claw.len-=500*dt;
+        if(claw.len<=24){
+          claw.len=24;
+          deliver();
+        }
+      }
+    }
+  }
+  if(shakeT>0)shakeT-=dt;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=150*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function drawBubbleObj(b,alpha){
+  ctx.globalAlpha=alpha;
+  if(b.type==='mine'){
+    ctx.strokeStyle='#4a5578';ctx.lineWidth=3;
+    for(var k=0;k<8;k++){
+      var a=k/8*6.2832;
+      ctx.beginPath();
+      ctx.moveTo(b.x+Math.cos(a)*b.r*0.8,b.y+Math.sin(a)*b.r*0.8);
+      ctx.lineTo(b.x+Math.cos(a)*(b.r+7),b.y+Math.sin(a)*(b.r+7));
+      ctx.stroke();
+    }
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.2832);
+    ctx.fillStyle='#232a48';ctx.fill();
+    ctx.strokeStyle='#6b76a3';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(b.x-4,b.y-4,4,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.2)';ctx.fill();
+  }else{
+    var c=b.type==='gold'?'#ffd166':'#8fb6ff';
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.2832);
+    ctx.fillStyle=c;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.4)';ctx.stroke();
+    ctx.beginPath();ctx.arc(b.x-b.r*0.32,b.y-b.r*0.32,b.r*0.26,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.6)';ctx.fill();
+    if(b.type==='gold'){
+      ctx.font='bold 11px system-ui';ctx.textAlign='center';
+      ctx.fillStyle='#7a5200';ctx.fillText('金',b.x,b.y+4);
+    }
+  }
+  ctx.globalAlpha=1;
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#16204a');g.addColorStop(1,'#0a1024');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  if(shakeT>0)ctx.save(),ctx.translate(rnd(-4,4),rnd(-4,4));
+  var i;
+  for(i=0;i<bubbles.length;i++)drawBubbleObj(bubbles[i],1);
+  if(claw){
+    var tp=tipPos();
+    ctx.strokeStyle='#c8d7ff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(CX,CY);ctx.lineTo(tp.x,tp.y);ctx.stroke();
+    ctx.beginPath();ctx.arc(tp.x,tp.y,7,0.4,2.8);
+    ctx.strokeStyle='#ffd166';ctx.lineWidth=4;ctx.stroke();
+    if(claw.cargo)drawBubbleObj(claw.cargo,1);
+  }
+  ctx.save();ctx.translate(CX,CY);ctx.rotate(aimA+Math.PI/2);
+  ctx.fillStyle='#3a4470';ctx.fillRect(-8,-40,16,40);
+  ctx.fillStyle='#565f8a';ctx.fillRect(-12,-6,24,14);
+  ctx.restore();
+  ctx.beginPath();ctx.arc(CX,CY,17,0,6.2832);
+  ctx.fillStyle='#232a48';ctx.fill();
+  ctx.strokeStyle='#8fd3ff';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(CX+Math.cos(aimA)*34,CY+Math.sin(aimA)*34,4,0,6.2832);
+  ctx.fillStyle='#ffd166';ctx.fill();
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  ctx.font='13px system-ui';ctx.fillStyle='#7f8ab0';
+  ctx.textAlign='left';ctx.fillText('银+30 金+80 雷-1命',12,24);
+  if(shakeT>0)ctx.restore();
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointermove',function(e){
+  if(!running)return;
+  var p=pt(e),dx=p.x-CX,dy=p.y-CY;
+  if(dy>-10)dy=-10;
+  aimA=Math.atan2(dy,dx);
+  if(aimA>-0.12)aimA=-0.12;
+  if(aimA<-Math.PI+0.12)aimA=-Math.PI+0.12;
+});
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),dx=p.x-CX,dy=p.y-CY;
+  if(dy>-10)dy=-10;
+  aimA=Math.atan2(dy,dx);
+  if(aimA>-0.12)aimA=-0.12;
+  if(aimA<-Math.PI+0.12)aimA=-Math.PI+0.12;
+  fire();
+});
+window.addEventListener('keydown',function(e){
+  if(!running)return;
+  if(e.code==='Space'){fire();e.preventDefault();}
+  if(e.code==='ArrowLeft'){aimA-=0.06;if(aimA<-Math.PI+0.12)aimA=-Math.PI+0.12;e.preventDefault();}
+  if(e.code==='ArrowRight'){aimA+=0.06;if(aimA>-0.12)aimA=-0.12;e.preventDefault();}
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

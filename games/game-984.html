@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星轨引力梦</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#a5b4fc;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{background:#a5b4fc;color:#1e1b4b;border-color:#a5b4fc;font-weight:700}
+.lb{color:#8b90b0;margin-left:4px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a5b4fc}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#a5b4fc;color:#1e1b4b;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星轨引力梦</h1>
+  <p class="hint">点按放置星球(再点星球可移除)· 让彗星绕星环游得禅意 · 禅意 300 圆满</p>
+  <div class="hud">
+    <span>禅意 <b id="hZen">0</b>/300</span>
+    <span>圈数 <b id="hLap">0</b></span>
+    <span>星尘 <b id="hDust">0</b></span>
+  </div>
+  <div class="ctl">
+    <span class="lb">星球质量</span>
+    <button data-m="900">小星</button><button data-m="1800" class="sel">中星</button><button data-m="3600">巨星</button>
+    <button id="btnClr">清空星球</button>
+    <button id="btnComet">重置彗星</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="330"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">星轨引力梦</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开始观星</button>
+      <button id="btnMore" style="display:none">继续观星</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hZen=$("hZen"),hLap=$("hLap"),hDust=$("hDust");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=330,TAU=Math.PI*2;
+function sr(n){var x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x);}
+var bgStars=[],i;
+for(i=0;i<60;i++)bgStars.push({x:sr(i*7+1)*W,y:sr(i*7+2)*H,s:0.6+sr(i*7+3)*1.4});
+var stars=[],curM=1800;
+var comet={x:14,y:160,vx:120,vy:0,trail:[],dead:0};
+var dust=[];
+for(i=0;i<6;i++)dust.push({x:40+sr(i*13+5)*390,y:30+sr(i*13+6)*270});
+var zen=0,laps=0,dustN=0,state="menu",goalDone=false;
+var nearStar=null,lapAcc=0,lastAng=0;
+var fx=[];
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function respawn(){
+  comet.x=14;comet.y=40+Math.random()*250;
+  comet.vx=100+Math.random()*50;comet.vy=(Math.random()-0.5)*80;
+  comet.trail=[];comet.dead=0;nearStar=null;lapAcc=0;
+}
+function step(dt){
+  var i,j,sub;
+  if(comet.dead>0){
+    comet.dead-=dt;
+    if(comet.dead<=0)respawn();
+  }else{
+    var n=4,h=dt/n;
+    for(sub=0;sub<n;sub++){
+      var ax=0,ay=0;
+      for(i=0;i<stars.length;i++){var s=stars[i];
+        var dx=s.x-comet.x,dy=s.y-comet.y,d2=dx*dx+dy*dy+40,d=Math.sqrt(d2);
+        var a=Math.min(1400,s.m*1100/d2);
+        ax+=a*dx/d;ay+=a*dy/d;}
+      comet.vx+=ax*h;comet.vy+=ay*h;
+      comet.x+=comet.vx*h;comet.y+=comet.vy*h;
+    }
+    comet.trail.push({x:comet.x,y:comet.y});
+    if(comet.trail.length>46)comet.trail.shift();
+    var burnt=false;
+    for(i=0;i<stars.length;i++){var s2=stars[i];
+      var ddx=comet.x-s2.x,ddy=comet.y-s2.y;
+      if(ddx*ddx+ddy*ddy<(10+s2.m/700)*(10+s2.m/700))burnt=true;}
+    if(comet.x<-30||comet.x>W+30||comet.y<-30||comet.y>H+30)burnt=true;
+    if(burnt){comet.dead=1.1;addFx(comet.x,comet.y,"化作流星","#94a3b8");nearStar=null;lapAcc=0;}
+    else{
+      var bs=null,bd=170*170;
+      for(i=0;i<stars.length;i++){var s3=stars[i];
+        var ex=comet.x-s3.x,ey=comet.y-s3.y,ed=ex*ex+ey*ey;
+        if(ed<bd){bd=ed;bs=s3;}}
+      if(bs!==nearStar){nearStar=bs;lapAcc=0;}
+      if(bs){
+        var ang=Math.atan2(comet.y-bs.y,comet.x-bs.x);
+        var delta=ang-lastAng;
+        if(delta>Math.PI)delta-=TAU;
+        if(delta<-Math.PI)delta+=TAU;
+        lapAcc+=delta;lastAng=ang;
+        if(Math.abs(lapAcc)>TAU){
+          lapAcc-=TAU*(lapAcc>0?1:-1);
+          laps++;zen+=60;
+          hZen.textContent=zen;hLap.textContent=laps;
+          addFx(comet.x,comet.y-16,"环游一圈 +60","#a5b4fc");
+        }
+      }
+      for(i=0;i<dust.length;i++){var mo=dust[i];
+        var mx=comet.x-mo.x,my=comet.y-mo.y;
+        if(mx*mx+my*my<15*15){
+          zen+=10;dustN++;hZen.textContent=zen;hDust.textContent=dustN;
+          addFx(mo.x,mo.y,"拾星尘 +10","#fcd34d");
+          mo.x=40+Math.random()*390;mo.y=30+Math.random()*270;
+        }}
+    }
+  }
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  if(!goalDone&&zen>=300){
+    goalDone=true;state="zen";
+    ovT.textContent="星轨圆满";
+    ovD.textContent="禅意已达 300:环游 "+laps+" 圈,拾星尘 "+dustN+" 粒。\n引力仍在,星轨不息,可继续布星。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  for(i=0;i<bgStars.length;i++){var bgs=bgStars[i];
+    ctx.fillStyle="rgba(200,210,255,.35)";
+    ctx.fillRect(bgs.x,bgs.y,bgs.s,bgs.s);}
+  for(i=0;i<dust.length;i++){var mo=dust[i];
+    var tw=2+Math.sin(performance.now()/300+i)*0.7;
+    ctx.fillStyle="#fcd34d";
+    ctx.beginPath();ctx.arc(mo.x,mo.y,tw,0,TAU);ctx.fill();}
+  for(i=0;i<stars.length;i++){var s=stars[i];
+    var r0=10+s.m/700;
+    ctx.fillStyle="rgba(165,180,252,.16)";
+    ctx.beginPath();ctx.arc(s.x,s.y,r0*2.4,0,TAU);ctx.fill();
+    ctx.fillStyle="rgba(165,180,252,.3)";
+    ctx.beginPath();ctx.arc(s.x,s.y,r0*1.5,0,TAU);ctx.fill();
+    ctx.fillStyle="#e0e7ff";
+    ctx.beginPath();ctx.arc(s.x,s.y,r0,0,TAU);ctx.fill();}
+  if(comet.dead<=0){
+    for(i=1;i<comet.trail.length;i++){
+      ctx.strokeStyle="rgba(253,224,171,"+(i/comet.trail.length*0.55).toFixed(3)+")";
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(comet.trail[i-1].x,comet.trail[i-1].y);
+      ctx.lineTo(comet.trail[i].x,comet.trail[i].y);ctx.stroke();}
+    ctx.fillStyle="#fde68a";
+    ctx.beginPath();ctx.arc(comet.x,comet.y,4.5,0,TAU);ctx.fill();
+    ctx.fillStyle="rgba(253,230,138,.35)";
+    ctx.beginPath();ctx.arc(comet.x,comet.y,9,0,TAU);ctx.fill();
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var rc=cv.getBoundingClientRect();
+  var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+  var i;
+  for(i=stars.length-1;i>=0;i--){var s=stars[i];
+    var dx=s.x-x,dy=s.y-y;
+    if(dx*dx+dy*dy<20*20){stars.splice(i,1);return;}}
+  if(stars.length<6){stars.push({x:x,y:y,m:curM});}
+  else addFx(x,y,"星球已满六颗","#94a3b8");
+});
+var mbs=document.querySelectorAll("[data-m]");
+for(i=0;i<mbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    curM=parseInt(b.getAttribute("data-m"),10);
+    for(var k=0;k<mbs.length;k++)mbs[k].className="";
+    b.className="sel";
+  });
+})(mbs[i]);}
+$("btnClr").addEventListener("click",function(){stars=[];});
+$("btnComet").addEventListener("click",function(){if(state==="play")respawn();});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="星轨引力梦";
+  ovD.textContent="点按星空放下一颗星球,彗星会被引力牵引。\n让它贴着星球环游,每满一圈得禅意 60;\n顺路拾取金色星尘各得 10。禅意满 300 即圆满。\n再点星球可将其移除,重新布局。";
+  btnGo.textContent="开始观星";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){respawn();state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

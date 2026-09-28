@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>通缉令</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f59e0b;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f59e0b;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#1e1a10;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f59e0b}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#f59e0b;color:#301c03;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>通缉令</h1>
+  <p class="hint">只抓戴「通缉帽」的那只 · 抓错帽子的要扣分</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>抓捕 <b id="got">0</b></span>
+    <span>时间 <b id="time">60</b> 秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">通缉令</h2>
+      <p id="ovDesc">地鼠们戴着草帽、军帽、皇冠、礼帽四种帽子。看清左上角的通缉令:抓到目标帽子的地鼠 +20 分,并刷新通缉目标;抓错帽子 -10 分!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elGot=$("got"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var GAME_LEN=60;
+var hatNames=["草帽","军帽","皇冠","礼帽"];
+var best=loadBest("mg_s211");
+var state="menu",score=0,got=0,timeLeft=GAME_LEN,spawnT=350,wanted=0;
+var holes=[],moles=[],floats=[],rings=[];
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initHoles(){
+  holes=[];
+  for(var r=0;r<3;r++)for(var c=0;c<3;c++)holes.push({x:90+c*150,y:168+r*128});
+}
+initHoles();
+
+function freeHole(){
+  var used={},i,cand=[];
+  for(i=0;i<moles.length;i++)used[moles[i].hole]=1;
+  for(i=0;i<holes.length;i++)if(!used[i])cand.push(i);
+  if(!cand.length)return -1;
+  return cand[(Math.random()*cand.length)|0];
+}
+function spawnMole(){
+  var h=freeHole();
+  if(h<0)return;
+  moles.push({hole:h,state:"rise",frac:0,t:0,upMs:980,hat:(Math.random()*4)|0});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function reset(){
+  moles=[];floats=[];rings=[];
+  score=0;got=0;timeLeft=GAME_LEN;spawnT=350;wanted=0;
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s211",best);}
+  ovTitle.textContent="时间到!";
+  ovDesc.textContent="共抓捕目标地鼠 "+got+" 只";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elGot.textContent=got;
+  elTime.textContent=Math.ceil(timeLeft);
+  elBest.textContent=best;
+}
+
+function update(dt){
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;endGame();return;}
+  spawnT-=dt;
+  var prog=1-timeLeft/GAME_LEN;
+  if(spawnT<=0){
+    var gap=Math.max(380,660-prog*280);
+    spawnT=gap*(0.8+Math.random()*0.4);
+    spawnMole();
+    if(prog>0.5&&Math.random()<0.45)spawnMole();
+  }
+  var i,m;
+  for(i=moles.length-1;i>=0;i--){
+    m=moles[i];m.t+=dt;
+    if(m.state==="rise"){
+      m.frac=Math.min(1,m.t/130);
+      if(m.frac>=1){m.state="up";m.t=0;}
+    }else if(m.state==="up"){
+      if(m.t>=m.upMs){m.state="down";m.t=0;}
+    }else if(m.state==="down"){
+      m.frac=1-Math.min(1,m.t/150);
+      if(m.frac<=0)moles.splice(i,1);
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>800)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>300)rings.splice(i,1);}
+}
+
+function whack(p){
+  if(state!=="playing")return;
+  var i,m;
+  for(i=0;i<moles.length;i++){
+    m=moles[i];
+    if(m.state!=="down"&&m.frac>0.3){
+      var hx=holes[m.hole].x,hy=holes[m.hole].y-34*m.frac;
+      var dx=p.x-hx,dy=p.y-hy;
+      if(dx*dx+dy*dy<58*58){
+        if(m.hat===wanted){
+          moles.splice(i,1);
+          score+=20;got++;
+          addFloat(hx,hy-46,"抓到了 +20","#4ade80");
+          addRing(hx,hy,54,"rgba(74,222,128,0.85)");
+          var nw=wanted;
+          while(nw===wanted)nw=(Math.random()*4)|0;
+          wanted=nw;
+        }else{
+          m.state="down";m.t=0;
+          score=Math.max(0,score-10);
+          addFloat(hx,hy-46,"抓错帽! -10","#f87171");
+          addRing(hx,hy,44,"rgba(248,113,113,0.8)");
+        }
+        updateHud();
+        return;
+      }
+    }
+  }
+}
+
+function drawHat(kind,cx,cy){
+  if(kind===0){
+    ctx.fillStyle="#caa84a";
+    ctx.beginPath();ctx.ellipse(cx,cy+2,30,8,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#d8bc62";
+    ctx.beginPath();ctx.ellipse(cx,cy-8,17,12,0,Math.PI,Math.PI*2);ctx.fill();
+    ctx.fillRect(cx-17,cy-8,34,8);
+  }else if(kind===1){
+    ctx.fillStyle="#c0392b";
+    ctx.beginPath();ctx.ellipse(cx,cy-6,18,11,0,Math.PI,Math.PI*2);ctx.fill();
+    ctx.fillRect(cx-18,cy-7,36,7);
+    ctx.fillRect(cx-24,cy-2,48,6);
+    ctx.fillStyle="#fbbf24";
+    ctx.beginPath();ctx.arc(cx,cy-14,3,0,Math.PI*2);ctx.fill();
+  }else if(kind===2){
+    ctx.fillStyle="#fbbf24";
+    ctx.beginPath();
+    ctx.moveTo(cx-16,cy);ctx.lineTo(cx-16,cy-13);ctx.lineTo(cx-8,cy-5);
+    ctx.lineTo(cx,cy-16);ctx.lineTo(cx+8,cy-5);ctx.lineTo(cx+16,cy-13);
+    ctx.lineTo(cx+16,cy);ctx.closePath();ctx.fill();
+  }else{
+    ctx.fillStyle="#5b3a8e";
+    ctx.fillRect(cx-13,cy-26,26,24);
+    ctx.fillRect(cx-22,cy-4,44,7);
+    ctx.fillStyle="#7c54b8";
+    ctx.fillRect(cx-13,cy-26,26,5);
+  }
+}
+function drawMoleAt(h,frac,hat){
+  var bh=76,base=h.y+10,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-72,h.y-176,144,188);ctx.clip();
+  ctx.fillStyle="#a5682a";
+  ctx.beginPath();ctx.ellipse(h.x,cy,34,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1a1408";
+  ctx.beginPath();ctx.arc(h.x-11,cy-4,3.6,0,Math.PI*2);ctx.arc(h.x+11,cy-4,3.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+7,5.5,4,0,0,Math.PI*2);ctx.fill();
+  drawHat(hat,h.x,cy-22);
+  ctx.restore();
+}
+function drawHoleBack(h){
+  ctx.fillStyle="#120e06";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#5c4a20";ctx.lineWidth=4;ctx.stroke();
+}
+function drawHoleFront(h){
+  ctx.fillStyle="#120e06";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#262013");g.addColorStop(1,"#151008");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<holes.length;i++)drawHoleBack(holes[i]);
+  for(i=0;i<moles.length;i++){
+    var m=moles[i];
+    if(m.frac>0.02)drawMoleAt(holes[m.hole],m.frac,m.hat);
+  }
+  for(i=0;i<holes.length;i++)drawHoleFront(holes[i]);
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/300;
+    ctx.strokeStyle=r.c;ctx.lineWidth=3*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.4+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/800;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 19px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-34*fk);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="#d8c9a3";
+  ctx.strokeStyle="#6b5b3a";ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(12,34);ctx.lineTo(150,34);
+  ctx.arcTo(162,34,162,104,10);ctx.arcTo(162,104,12,104,10);
+  ctx.arcTo(12,104,12,34,10);ctx.arcTo(12,34,162,34,10);
+  ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.fillStyle="#4a3a1c";
+  ctx.font="bold 15px sans-serif";ctx.textAlign="center";
+  ctx.fillText("通缉令",87,52);
+  ctx.strokeStyle="#4a3a1c";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(76,66);ctx.lineTo(98,66);ctx.stroke();
+  drawHat(wanted,87,86);
+  ctx.font="bold 14px sans-serif";
+  ctx.fillStyle="#7a2e2e";
+  ctx.fillText(hatNames[wanted],87,97);
+  ctx.fillStyle="rgba(0,0,0,0.35)";ctx.fillRect(0,0,W,26);
+  ctx.fillStyle="#f59e0b";ctx.fillRect(0,0,W*timeLeft/GAME_LEN,26);
+  ctx.font="bold 14px sans-serif";ctx.textAlign="right";
+  ctx.fillStyle="#0f1220";
+  ctx.fillText("剩余 "+Math.ceil(timeLeft)+" 秒",W-10,14);
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

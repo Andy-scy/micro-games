@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暗夜听音</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#94a3b8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#94a3b8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#94a3b8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#94a3b8;color:#0f172a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>暗夜听音</h1>
+  <p class="hint">判定线与音符全部隐去,凭双耳敲击 · 高音「嘀」响后一拍即音符到达 · 空格 / 点击 / 触屏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">4</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">暗夜听音</h2>
+      <p id="ovDesc">这是一场没有画面的节奏测试。
+每拍有低沉的「嗒」,音符到达前一拍会响起清脆的「嘀」;
+听到「嘀」后数一拍,在音符穿过隐形判定线时敲击!
+切分音会打乱你的数拍,命中后有一瞬微光作为印证;
+漏 4 拍游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,CX=240,JY=470,APPROACH=1500;
+var BPM=96,beatInt=60000/BPM;
+var PATS=[[0,1,2,3],[0,1.5,2,3.5],[0,0.5,2,2.5],[0,1.5,2.5,3]];
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g376");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sCue(){tone("triangle",920,1240,0.09,0.2);}
+function sTickLow(){tone("square",500,0,0.045,0.1);}
+function sPerfect(){tone("sine",660,990,0.14,0.2);}
+function sGood(){tone("sine",520,520,0.08,0.16);}
+function sMiss(){tone("sawtooth",180,80,0.24,0.18);}
+function sStatic(){noiseHit(0.08,0.14,2000);}
+
+var state="menu",notes,pops,score,combo,life,maxCombo,hits,barIdx,barStart,tickBeat,reveals;
+function reset(){
+  notes=[];pops=[];reveals=[];
+  score=0;combo=0;life=4;maxCombo=0;hits=0;
+  barStart=performance.now()+2000;
+  barIdx=0;
+  tickBeat=barStart;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(txt,color){pops.push({txt:txt,color:color,t0:performance.now()});}
+function addReveal(a){reveals.push({a:a,t0:performance.now()});}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g376",best);}
+  upd();
+  ovTitle.textContent="夜色吞没";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="凭听覚命中 "+hits+" 拍 · 最高连击 "+maxCombo+"\n闭上眼,让耳朵带路,再来一次!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  while(barStart-now<APPROACH+beatInt*4){
+    var pat=PATS[barIdx%PATS.length],i;
+    for(i=0;i<pat.length;i++){
+      notes.push({t:barStart+pat[i]*beatInt,hit:false,cued:false});
+    }
+    barIdx++;
+    barStart+=beatInt*4;
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTickLow();tickBeat+=beatInt;}
+  for(i=0;i<notes.length;i++){
+    if(!notes[i].cued&&now>=notes[i].t-beatInt){
+      notes[i].cued=true;
+      sCue();
+    }
+  }
+}
+function press(){
+  if(state!=="play")return;
+  var now=performance.now(),i,n,dt,bi=-1,bd=1e9;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];if(n.hit)continue;
+    dt=now-n.t;
+    if(Math.abs(dt)>180)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0){
+    combo=0;sStatic();
+    addPop("杂音…","#64748b");upd();return;
+  }
+  n=notes[bi];n.hit=true;hits++;
+  if(Math.abs(bd)<=90){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=300+combo*10;
+    addPop("心有灵犀 +"+(300+combo*10),"#fbbf24");
+    addReveal(1);sPerfect();
+  }else{
+    combo++;score+=120;
+    addPop("摸到 +120","#94a3b8");
+    addReveal(0.45);sGood();
+  }
+  upd();
+}
+function update(now){
+  var i,n;
+  for(i=notes.length-1;i>=0;i--){
+    n=notes[i];
+    if(n.hit){notes.splice(i,1);continue;}
+    if(now>n.t+180){
+      notes.splice(i,1);
+      combo=0;life--;sMiss();
+      addPop("错过","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>620)pops.splice(i,1);}
+  for(i=reveals.length-1;i>=0;i--){if(now-reveals[i].t0>420)reveals.splice(i,1);}
+}
+function draw(now){
+  var i;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  var beatPh=1-((tickBeat-now)%beatInt)/beatInt;
+  if(beatPh<0)beatPh=0;
+  var glow=beatPh<0.18?1-beatPh/0.18:0;
+  ctx.fillStyle="rgba(148,163,184,"+(0.03+glow*0.05)+")";
+  ctx.fillRect(CX-70,0,140,H);
+  ctx.strokeStyle="rgba(148,163,184,0.06)";
+  ctx.beginPath();ctx.moveTo(CX,0);ctx.lineTo(CX,H);ctx.stroke();
+  for(i=0;i<reveals.length;i++){
+    var r=reveals[i],pr=(now-r.t0)/420;
+    ctx.strokeStyle="rgba(251,191,36,"+(r.a*(1-pr))+")";
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(CX-60,JY);ctx.lineTo(CX+60,JY);ctx.stroke();
+    ctx.beginPath();ctx.arc(CX,JY,10+pr*40,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+  }
+  ctx.fillStyle="rgba(148,163,184,0.55)";
+  ctx.font="14px system-ui";ctx.textAlign="center";
+  if(combo>=3)ctx.fillText("连击 "+combo,CX,120);
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr2=(now-p.t0)/620;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr2;
+    ctx.font="bold 17px system-ui";
+    ctx.fillText(p.txt,CX,220-pr2*22);
+    ctx.globalAlpha=1;
+  }
+}
+function onTap(){press();}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap();});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap();});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();onTap();},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    else press();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

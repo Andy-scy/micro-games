@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>高低连猜 谁是预言家</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 20px;font-size:16px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:20px;width:100%;max-width:700px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#duo{display:flex;gap:26px;align-items:center}
+.card{width:74px;height:106px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:24px;font-weight:800}
+.card .s{font-size:38px;line-height:1}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+.tag{font-size:12px;color:#9aa3c0;text-align:center;margin-top:6px}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>高低连猜 · 谁是预言家</h1>
+<p id="how">猜下一张牌比当前牌「更大」还是「更小」，A 最小 K 最大。猜对连击 +1，连满 10 连击即胜利；猜错扣一颗心，心用完失败。平牌不算成败。每局有 3 次「换一张」机会。</p>
+<div id="bar"><span>连击 <b id="st">0</b></span><span>最佳 <b id="bs">0</b></span><span>生命 <b id="lv">♥♥♥</b></span><span>换牌 <b id="sk">3</b> 次</span></div>
+<div id="table">
+  <div id="duo">
+    <div><div id="curCard"></div><div class="tag">当前牌</div></div>
+    <div style="font-size:26px;color:#ffd166">→</div>
+    <div><div id="nextCard"></div><div class="tag">下一张？</div></div>
+  </div>
+  <div id="msg"></div>
+  <div id="btns">
+    <button id="hi" class="acc">更大 ▲</button>
+    <button id="lo" class="acc">更小 ▼</button>
+    <button id="skip">换一张</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var deck=[],cur=null,nxt=null,lives=3,streak=0,best=0,skips=3,phase='play',timer=null;
+function $(id){return document.getElementById(id);}
+function val(r){return RANKS.indexOf(r)+1;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function draw(){if(deck.length===0)refill();return deck.pop();}
+function cardHTML(c,back){
+  if(back)return '<div class="card back"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('curCard').innerHTML=cardHTML(cur,false);
+  $('nextCard').innerHTML=cardHTML(nxt,phase!=='done');
+  $('st').textContent=streak;$('bs').textContent=best;$('sk').textContent=skips;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'·';
+  $('lv').textContent=h;
+  var on=(phase==='play');
+  $('hi').disabled=$('lo').disabled=!on;
+  $('skip').disabled=!on||skips<=0;
+}
+function msg(s){$('msg').textContent=s;}
+function advance(){
+  cur=nxt;nxt=draw();render();
+}
+function guess(dir){
+  if(phase!=='play')return;
+  var a=val(cur.r),b=val(nxt.r);
+  if(a===b){msg('平牌！不计成败，继续');advance();return;}
+  var ok=(dir==='hi')?(b>a):(b<a);
+  if(ok){
+    streak++;if(streak>best)best=streak;
+    msg('猜对了！连击 ×'+streak);
+    if(streak>=10){end(true,'连满 10 连击，预言家就是你！');return;}
+    advance();
+  }else{
+    lives--;streak=0;
+    if(lives<=0){end(false,'猜错三次，连击中断');return;}
+    msg('猜错了，失去一颗心');advance();
+  }
+  render();
+}
+function skip(){
+  if(phase!=='play'||skips<=0)return;
+  skips--;msg('换了一张新牌');advance();render();
+}
+function end(win,info){
+  phase='done';if(timer){clearTimeout(timer);timer=null;}
+  render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 本局最佳连击：'+best;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(timer){clearTimeout(timer);timer=null;}
+  refill();lives=3;streak=0;best=0;skips=3;phase='play';
+  cur=draw();nxt=draw();
+  $('over').classList.add('hide');msg('第一张已翻开，预言开始！');render();
+}
+$('hi').onclick=function(){guess('hi');};
+$('lo').onclick=function(){guess('lo');};
+$('skip').onclick=skip;
+$('again').onclick=newGame;
+document.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp')guess('hi');
+  if(e.key==='ArrowDown')guess('lo');
+});
+newGame();
+})();
+</script>
+</body>
+</html>

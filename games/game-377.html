@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜像双手</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#22d3ee;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#04222a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>镜像双手</h1>
+  <p class="hint">左 F 右 J · 左手打正拍右手打反拍,双手相位交错 · 触屏点两半</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">5</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">镜像双手</h2>
+      <p id="ovDesc">两条镜像轨道,两种相位:
+左轨音符永远落在正拍上,右轨音符永远落在反拍上。
+左手 F 接正拍,右手 J 接反拍,
+像摇摆乐里的司鼓一样左右开弓!
+漏 5 个音符游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,LANES=2,LW=W/LANES,JY=470,APPROACH=1300;
+var BPM=92,beatInt=60000/BPM;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g377");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sNote(l){tone("triangle",l===0?587:880,0,0.11,0.22);}
+function sTick(){noiseHit(0.04,0.06,7000);}
+function sMiss(){tone("sawtooth",200,100,0.2,0.16);}
+
+var state="menu",notes,pops,score,combo,life,maxCombo,hits,schedBeat,schedCount,tickBeat,flash;
+function reset(){
+  notes=[];pops=[];flash=[0,0];
+  score=0;combo=0;life=5;maxCombo=0;hits=0;
+  schedBeat=performance.now()+2000;
+  tickBeat=schedBeat;
+  schedCount=0;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g377",best);}
+  upd();
+  ovTitle.textContent="双手失衡";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="共命中 "+hits+" 音 · 最高连击 "+maxCombo+"\n左手正拍右手反拍,再试一次!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  if(schedBeat-now>4000)schedBeat=now+2000;
+  while(schedBeat-now<APPROACH+beatInt){
+    if(Math.random()<0.85){
+      notes.push({lane:0,t:schedBeat,judged:false});
+    }
+    if(Math.random()<0.85){
+      notes.push({lane:1,t:schedBeat+beatInt/2,judged:false});
+    }
+    schedCount++;
+    schedBeat+=beatInt;
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTick();tickBeat+=beatInt;}
+}
+function down(l){
+  if(state!=="play")return;
+  var now=performance.now(),i,n,dt,bi=-1,bd=1e9;
+  flash[l]=now;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    if(n.lane!==l||n.judged)continue;
+    dt=now-n.t;
+    if(dt<-180||dt>180)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0)return;
+  n=notes[bi];n.judged=true;hits++;
+  var x=l*LW+LW/2;
+  if(Math.abs(bd)<=80){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=300+combo*10;
+    addPop(x,JY-46,"完美 +"+(300+combo*10),"#fbbf24");
+  }else{
+    combo++;score+=120;
+    addPop(x,JY-46,"还行 +120","#22d3ee");
+  }
+  sNote(l);upd();
+}
+function update(now){
+  var i,n,x;
+  for(i=notes.length-1;i>=0;i--){
+    n=notes[i];
+    if(n.judged){notes.splice(i,1);continue;}
+    if(now>n.t+180){
+      notes.splice(i,1);
+      combo=0;life--;sMiss();
+      x=n.lane*LW+LW/2;
+      addPop(x,JY-46,"MISS","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>560)pops.splice(i,1);}
+}
+function draw(now){
+  var i,n,y,x;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(34,211,238,0.2)";
+  ctx.beginPath();ctx.moveTo(LW,0);ctx.lineTo(LW,H);ctx.stroke();
+  ctx.strokeStyle="rgba(34,211,238,0.9)";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,JY);ctx.lineTo(W,JY);ctx.stroke();ctx.lineWidth=1;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    y=JY-(n.t-now)*(JY+40)/APPROACH;
+    if(y<-40)continue;
+    x=n.lane*LW+LW/2;
+    if(n.lane===0){
+      ctx.save();
+      ctx.translate(x,y);ctx.rotate(Math.PI/4);
+      ctx.fillStyle="#22d3ee";
+      ctx.fillRect(-13,-13,26,26);
+      ctx.restore();
+    }else{
+      ctx.fillStyle="#fbbf24";
+      ctx.beginPath();ctx.arc(x,y,15,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.4)";
+      ctx.beginPath();ctx.arc(x-4,y-5,4,0,Math.PI*2);ctx.fill();
+    }
+  }
+  for(i=0;i<2;i++){
+    var fl=1-(now-flash[i])/160;if(fl<0)fl=0;
+    x=i*LW+40;
+    ctx.fillStyle="rgba(34,211,238,"+(0.15+fl*0.5)+")";
+    ctx.fillRect(x,496,LW-80,50);
+    ctx.strokeStyle="rgba(34,211,238,0.5)";
+    ctx.strokeRect(x,496,LW-80,50);
+    ctx.fillStyle="rgba(232,234,246,0.8)";
+    ctx.font="bold 22px system-ui";ctx.textAlign="center";
+    ctx.fillText(i===0?"F 正拍":"J 反拍",x+(LW-80)/2,528);
+  }
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/560;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y-pr*26);
+    ctx.globalAlpha=1;
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();var p=toXY(e.clientX,e.clientY);down(p.x<LW?0:1);});
+}else{
+  cv.addEventListener("mousedown",function(e){var p=toXY(e.clientX,e.clientY);down(p.x<LW?0:1);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];var p=toXY(t.clientX,t.clientY);down(p.x<LW?0:1);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.repeat)return;
+  if(e.code==="KeyF"||e.code==="ArrowLeft"){e.preventDefault();down(0);}
+  else if(e.code==="KeyJ"||e.code==="ArrowRight"){e.preventDefault();down(1);}
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

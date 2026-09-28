@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工地电梯</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>工地电梯</h1>
+<p class="tip">工地楼层之间没有楼梯,只能站在黄色升降平台上随电梯上下!<br>看准平台停靠的时机走上去,再在它贴近目标层时走下来;躲开左右巡游的吊车,登顶屋顶得分。←→ 走,↑↓ 上下楼/乘梯。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>轮次 <b id="sC">1</b></span></div>
+<canvas id="cv" width="420" height="400"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,ROWS=10,LOOP=620,OFF=100;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sC=document.getElementById("sC");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var elevs,cranes,frog,score,lives,round,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function buildElevs(){
+  elevs=[
+    {c:2,a:1,b:4,pos:1,phase:"dwell",t:0.6,target:0},
+    {c:5,a:3,b:6,pos:6,phase:"dwell",t:0.9,target:0},
+    {c:8,a:5,b:8,pos:5,phase:"dwell",t:0.4,target:0}
+  ];
+}
+function buildCranes(){
+  cranes=[];var r;
+  for(r=1;r<=8;r++){
+    cranes.push({r:r,x:rnd(0,LOOP),w:72,sp:rnd(55,110)*(1+round*0.1),dir:r%2===0?1:-1});
+  }
+}
+function elevAt(c){var i;for(i=0;i<elevs.length;i++)if(elevs[i].c===c)return elevs[i];return null;}
+function updHud(){sS.textContent=score;sL.textContent=lives;sC.textContent=round;}
+function resetFrog(){frog={c:4,r:9,x:4.5*CELL,y:9*CELL,mode:"grid",e:null};moving=false;}
+function reset(){score=0;lives=3;round=1;deadT=0;buildElevs();buildCranes();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",坚持到第 "+round+" 轮。");}
+}
+function beginMove(c,r){
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function arrive(){
+  if(frog.r===0){
+    score+=300+round*50;round++;
+    buildCranes();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var e,tr,tc;
+  if(frog.mode==="ride"){
+    e=frog.e;tr=Math.round(e.pos);
+    if(d==="left"||d==="right"){
+      if(Math.abs(e.pos-tr)>0.25)return;
+      tc=e.c+(d==="left"?-1:1);
+      if(tc<0||tc>9)return;
+      frog.mode="grid";frog.e=null;
+      beginMove(tc,tr);
+    }else if(d==="up"&&Math.abs(e.pos-1)<0.3){
+      frog.mode="grid";frog.e=null;
+      beginMove(e.c,0);
+    }
+    return;
+  }
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(9,c));r=Math.max(0,Math.min(9,r));
+  if(c===frog.c&&r===frog.r)return;
+  if(r!==frog.r){
+    var ok=false,e2;
+    if(frog.r===9&&r===8)ok=true;
+    else if(frog.r===1&&r===0)ok=true;
+    else{e2=elevAt(c);if(e2&&Math.abs(e2.pos-r)<0.2)ok=true;}
+    if(!ok)return;
+  }
+  beginMove(c,r);
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var i,e,spd,d2;
+  for(i=0;i<elevs.length;i++){
+    e=elevs[i];
+    if(e.phase==="dwell"){
+      e.t-=dt;
+      if(e.t<=0){e.target=(e.pos===e.a)?e.b:e.a;e.phase="move";}
+    }else{
+      spd=(2.1+round*0.12)*dt;d2=e.target-e.pos;
+      if(Math.abs(d2)<=spd){e.pos=e.target;e.phase="dwell";e.t=Math.max(0.55,1.0-round*0.03);}
+      else e.pos+=Math.sign(d2)*spd;
+    }
+  }
+  for(i=0;i<cranes.length;i++)cranes[i].x=(cranes[i].x+cranes[i].dir*cranes[i].sp*dt+LOOP)%LOOP;
+  if(moving){
+    mt+=dt/0.13;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+    return;
+  }
+  if(frog.mode==="grid"&&frog.r>=1&&frog.r<=8){
+    var ea=elevAt(frog.c);
+    if(ea&&Math.abs(ea.pos-frog.r)<0.2){frog.mode="ride";frog.e=ea;}
+  }
+  if(frog.mode==="ride"){
+    frog.x=(frog.e.c+0.5)*CELL;frog.y=frog.e.pos*CELL;frog.r=frog.e.pos;
+  }
+  var rowOf=frog.mode==="ride"?Math.round(frog.e.pos):frog.r;
+  if(rowOf>=1&&rowOf<=8){
+    for(i=0;i<cranes.length;i++){
+      var cr=cranes[i];
+      if(cr.r!==rowOf)continue;
+      var cx=cr.x-OFF;
+      if(Math.abs(cx+cr.w/2-frog.x)<cr.w/2+10){die("被吊车撞飞了!");return;}
+    }
+  }
+}
+function drawFrog(x,y){
+  ctx.fillStyle="#5ad469";
+  ctx.beginPath();ctx.ellipse(x,y+24,11,13,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#2f7d3f";
+  ctx.beginPath();ctx.arc(x-5,y+13,4.5,0,Math.PI*2);ctx.arc(x+5,y+13,4.5,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var r,i,e;
+  for(r=0;r<ROWS;r++){
+    ctx.fillStyle=r===0?"#1e3b26":(r===9?"#20301f":"#1b1f31");
+    ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  ctx.fillStyle="#3a4157";
+  for(r=1;r<=8;r++)ctx.fillRect(0,r*CELL+35,420,5);
+  ctx.fillStyle="#565f80";
+  for(r=1;r<=8;r++)for(i=0;i<10;i++)ctx.fillRect(i*40+18,r*CELL+36,3,3);
+  for(i=0;i<elevs.length;i++){
+    e=elevs[i];
+    ctx.strokeStyle="#2c3352";ctx.lineWidth=3;ctx.setLineDash([6,8]);
+    ctx.beginPath();ctx.moveTo(e.c*CELL+20,CELL);ctx.lineTo(e.c*CELL+20,9*CELL);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for(i=0;i<elevs.length;i++){
+    e=elevs[i];
+    var py=e.pos*CELL;
+    ctx.strokeStyle="#8a6a1f";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(e.c*CELL+20,Math.max(0,py-90));ctx.lineTo(e.c*CELL+20,py+30);ctx.stroke();
+    ctx.fillStyle="#e8b23d";rr(e.c*CELL+4,py+28,32,11,3);ctx.fill();
+    ctx.fillStyle="#191d33";
+    for(r=0;r<4;r++)ctx.fillRect(e.c*CELL+7+r*8,py+30,4,7);
+  }
+  for(i=0;i<cranes.length;i++){
+    var cr=cranes[i],cx=cr.x-OFF,cy=cr.r*CELL;
+    if(cx>420||cx+cr.w<0)continue;
+    ctx.strokeStyle="#7a5a2f";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(cx+cr.w/2,cy);ctx.lineTo(cx+cr.w/2,cy+22);ctx.stroke();
+    ctx.fillStyle="#e0862f";rr(cx,cy+6,cr.w,16,4);ctx.fill();
+    ctx.fillStyle="#191d33";
+    for(r=0;r<5;r++)ctx.fillRect(cx+6+r*14,cy+9,7,4);
+  }
+  ctx.fillStyle="#3fae5f";ctx.fillRect(0,4,420,10);
+  ctx.fillStyle="#ffd668";ctx.fillRect(206,14,3,20);
+  ctx.beginPath();ctx.moveTo(209,14);ctx.lineTo(236,20);ctx.lineTo(209,27);ctx.fill();
+  if(deadT<=0||Math.floor(gt*12)%2===0)drawFrog(frog.x,frog.y);
+  ctx.fillStyle="#8f97c0";ctx.font="11px system-ui";ctx.textAlign="left";
+  ctx.fillText("虚线=电梯井 · 黄条=升降平台",8,12);
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,130,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」上工",210,175);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("地面→一层可任意上 · 楼层间只能乘电梯",210,205);
+    ctx.fillText("站上黄条随它升降,贴近楼层时走下",210,227);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("工地电梯","没有楼梯的高楼:站上黄色升降平台随电梯移动,贴近目标楼层时左右走下。小心横向巡游的吊车,一层层乘到屋顶得分。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

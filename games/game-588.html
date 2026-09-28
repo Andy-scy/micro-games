@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>词义快选</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#hud .hp{color:#ff6b8a}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:12px}
+#fill{height:100%;width:100%;background:#4cc9f0}
+.card{background:#151a30;border-radius:14px;padding:16px;text-align:center}
+#cat{font-size:13px;color:#9aa3c7;margin-bottom:6px}
+#zh{font-size:34px;font-weight:bold;color:#fff;margin-bottom:16px}
+#opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#opts button{padding:16px 6px;font-size:20px;font-weight:bold;font-family:Consolas,monospace;border:none;border-radius:12px;background:#232a4d;color:#e8eaf6;cursor:pointer}
+#opts button.good{background:#2ec27e;color:#08131c}
+#opts button.bad{background:#ff6b8a;color:#1a1d33}
+#msg{font-size:13px;color:#9aa3c7;min-height:18px;margin-top:10px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>词义快选</h1>
+<p id="tip">看中文词义在 8 秒内选出正确的英文单词 · 越快得分越高 · 答错或超时扣一颗心,3 心用完失败</p>
+<div id="wrap">
+<div id="hud"><span>题号 <b id="prog">1</b>/20</span><span>得分 <b id="score">0</b></span><span class="hp" id="hp">♥♥♥</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div class="card">
+<div id="cat"></div>
+<div id="zh"></div>
+<div id="opts">
+<button id="o0"></button><button id="o1"></button>
+<button id="o2"></button><button id="o3"></button>
+</div>
+<div id="msg"></div>
+</div>
+<div id="ov"><h2 id="ovT">词义快选</h2><p id="ovP">中文词义 + 四个英文选项
+8 秒内选出正确答案
+抢答越快加分越多</p><button id="ovB">开始抢答</button></div>
+</div>
+<script>
+"use strict";
+var CATS = { animal: "动物", fruit: "水果", color: "颜色", body: "身体", trans: "交通", school: "文具" };
+var WORDS = [
+  ["tiger", "老虎", "animal"], ["lion", "狮子", "animal"], ["bear", "熊", "animal"], ["horse", "马", "animal"],
+  ["sheep", "绵羊", "animal"], ["monkey", "猴子", "animal"], ["rabbit", "兔子", "animal"], ["mouse", "老鼠", "animal"],
+  ["snake", "蛇", "animal"], ["eagle", "老鹰", "animal"], ["whale", "鲸鱼", "animal"], ["zebra", "斑马", "animal"],
+  ["apple", "苹果", "fruit"], ["lemon", "柠檬", "fruit"], ["mango", "芒果", "fruit"], ["grape", "葡萄", "fruit"],
+  ["peach", "桃子", "fruit"], ["melon", "甜瓜", "fruit"], ["pear", "梨", "fruit"], ["banana", "香蕉", "fruit"],
+  ["red", "红色", "color"], ["blue", "蓝色", "color"], ["green", "绿色", "color"], ["black", "黑色", "color"],
+  ["white", "白色", "color"], ["pink", "粉色", "color"], ["brown", "棕色", "color"], ["gray", "灰色", "color"],
+  ["hand", "手", "body"], ["foot", "脚", "body"], ["head", "头", "body"], ["nose", "鼻子", "body"],
+  ["mouth", "嘴巴", "body"], ["heart", "心脏", "body"], ["knee", "膝盖", "body"], ["neck", "脖子", "body"],
+  ["train", "火车", "trans"], ["plane", "飞机", "trans"], ["ship", "轮船", "trans"], ["truck", "卡车", "trans"],
+  ["boat", "小船", "trans"], ["taxi", "出租车", "trans"], ["bus", "公交车", "trans"], ["bike", "自行车", "trans"],
+  ["pencil", "铅笔", "school"], ["ruler", "尺子", "school"], ["eraser", "橡皮", "school"], ["school", "学校", "school"],
+  ["book", "书", "school"], ["chair", "椅子", "school"], ["paper", "纸张", "school"], ["clock", "时钟", "school"]
+];
+var PERQ = 8, TOTALQ = 20;
+var progEl = document.getElementById("prog");
+var scoreEl = document.getElementById("score");
+var hpEl = document.getElementById("hp");
+var catEl = document.getElementById("cat");
+var zhEl = document.getElementById("zh");
+var fillEl = document.getElementById("fill");
+var msgEl = document.getElementById("msg");
+var opts = [document.getElementById("o0"), document.getElementById("o1"), document.getElementById("o2"), document.getElementById("o3")];
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var qNum = 0, score = 0, hp = 3, playing = false;
+var answer = "", timeLeft = PERQ, lastTs = 0, rafId = 0, locked = false;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function makeQ() {
+  var pick = WORDS[Math.floor(Math.random() * WORDS.length)];
+  var others = [];
+  for (var i = 0; i < WORDS.length; i++) {
+    if (WORDS[i][2] === pick[2] && WORDS[i][0] !== pick[0]) others.push(WORDS[i][0]);
+  }
+  shuffle(others);
+  var set = [pick[0], others[0], others[1], others[2]];
+  shuffle(set);
+  answer = pick[0];
+  catEl.textContent = "类别:" + CATS[pick[2]];
+  zhEl.textContent = pick[1];
+  for (var k = 0; k < 4; k++) {
+    opts[k].textContent = set[k];
+    opts[k].className = "";
+  }
+  msgEl.textContent = "";
+  locked = false;
+  timeLeft = PERQ;
+  lastTs = 0;
+}
+
+function choose(idx) {
+  if (!playing || locked) return;
+  locked = true;
+  var ok = opts[idx].textContent === answer;
+  if (ok) {
+    var bonus = Math.round(timeLeft);
+    score += 10 + bonus;
+    scoreEl.textContent = score;
+    opts[idx].className = "good";
+    msgEl.textContent = "正确!+" + (10 + bonus);
+    setTimeout(next, 700);
+  } else {
+    opts[idx].className = "bad";
+    loseHp("正确答案:" + answer.toUpperCase());
+  }
+}
+
+function loseHp(msg) {
+  hp--;
+  hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+  for (var k = 0; k < 4; k++) if (opts[k].textContent === answer) opts[k].className = "good";
+  msgEl.textContent = msg;
+  if (hp <= 0) {
+    playing = false;
+    cancelAnimationFrame(rafId);
+    setTimeout(function () {
+      ovT.textContent = "挑战失败";
+      ovP.textContent = "进行到第 " + (qNum + 1) + " 题\n得分 " + score;
+      ovB.textContent = "再来一局";
+      ov.classList.remove("hide");
+    }, 900);
+    return;
+  }
+  setTimeout(next, 1200);
+}
+
+function next() {
+  if (!playing) return;
+  qNum++;
+  if (qNum >= TOTALQ) {
+    playing = false;
+    cancelAnimationFrame(rafId);
+    ovT.textContent = "通关!";
+    ovP.textContent = "20 题全部完成\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  progEl.textContent = qNum + 1;
+  makeQ();
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    fillEl.style.width = "0%";
+    if (!locked) {
+      locked = true;
+      loseHp("超时!正确答案:" + answer.toUpperCase());
+    }
+    rafId = requestAnimationFrame(loop);
+    return;
+  }
+  fillEl.style.width = (timeLeft / PERQ * 100) + "%";
+  rafId = requestAnimationFrame(loop);
+}
+
+function start() {
+  qNum = 0; score = 0; hp = 3;
+  scoreEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  progEl.textContent = "1";
+  playing = true;
+  ov.classList.add("hide");
+  makeQ();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+for (var i = 0; i < 4; i++) {
+  (function (idx) {
+    opts[idx].onclick = function () { choose(idx); };
+  })(i);
+}
+ovB.onclick = start;
+</script>
+</body>
+</html>

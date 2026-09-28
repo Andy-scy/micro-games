@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>碎裂弹台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fb7185;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fb7185;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fb7185}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fb7185;color:#3d0a17;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>碎裂弹台</h1>
+  <p class="hint">左右键 / 按住屏幕左右半侧 移动 · 每块弹台只能弹一次就会碎!别被上升的尖刺追上</p>
+  <div class="hud">
+    <span>深度 <b id="dp">0m</b></span>
+    <span>金币 <b id="coin">0</b></span>
+    <span>最佳 <b id="best">0m</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">碎裂弹台</h2>
+      <p id="ovDesc">小球在深井里不停下坠,落在弹台上会被弹起,但弹台碎裂后便消失!左右移动找下一块弹台,顺路收集金币;红色刺台碰不得,底部尖刺正不断上涌——看你能下潜多深!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=9,GRAV=0.0009,WL=16,WR=464,BOUNCE=0.52;
+function $(id){return document.getElementById(id);}
+var elDp=$("dp"),elCoin=$("coin"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s398");
+var state,ball,pads,coins,camY,lastPadY,spikeY,depth,coinN,keyL,keyR,touchDir,shake;
+function reset(){
+  ball={x:W/2,y:200,vx:0,vy:0};
+  pads=[{x:170,y:290,w:140,sp:false,br:0}];
+  coins=[];
+  lastPadY=290;
+  gen();
+  camY=0;spikeY=200+620;depth=0;coinN=0;
+  keyL=false;keyR=false;touchDir=0;shake=0;
+  updateHud();
+}
+function gen(){
+  while(lastPadY<camY+900){
+    var gap=95+Math.random()*40;
+    lastPadY+=gap;
+    var w=70+Math.random()*46;
+    var x=40+Math.random()*(400-w);
+    var sp=Math.random()<0.15&&lastPadY>800;
+    var pad={x:x,y:lastPadY,w:w,sp:sp,br:0};
+    pads.push(pad);
+    if(!sp&&Math.random()<0.3)coins.push({x:x+w/2,y:lastPadY-26});
+  }
+}
+function updateHud(){
+  elDp.textContent=depth+"m";elCoin.textContent=coinN;elBest.textContent=best+"m";
+}
+function depthM(){return Math.max(0,Math.floor((ball.y-200)/10));}
+function die(reason){
+  state="over";
+  var sc=depth+coinN;
+  if(depth>best){best=depth;saveBest("mg_s398",best);}
+  ovT.textContent="游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="深度 "+depth+"m · 金币 "+coinN+" · 最佳 "+best+"m";
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(e.key.indexOf("Arrow")===0)e.preventDefault();
+  if((e.key===" "||e.key==="Enter")&&(state==="menu"||state==="over")){startGame();return;}
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=true;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=true;
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function tDir(e){
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  return((t.clientX-r.left)*W/r.width)<W/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  touchDir=tDir(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing")return;
+  touchDir=tDir(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchDir=0;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    var dir=(keyL?-1:0)+(keyR?1:0)+touchDir;
+    if(dir>1)dir=1;if(dir<-1)dir=-1;
+    ball.vx+=dir*0.0008*dt;
+    if(ball.vx>0.32)ball.vx=0.32;
+    if(ball.vx<-0.32)ball.vx=-0.32;
+    ball.vy+=GRAV*dt;
+    if(ball.vy>0.5)ball.vy=0.5;
+    ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+    if(ball.x<WL+BR){ball.x=WL+BR;ball.vx=Math.abs(ball.vx)*0.7;}
+    if(ball.x>WR-BR){ball.x=WR-BR;ball.vx=-Math.abs(ball.vx)*0.7;}
+    var i;
+    for(i=0;i<pads.length;i++){
+      var p=pads[i];
+      if(p.br!==0){
+        if(p.br>0){p.br-=dt;if(p.br<=0)p.br=-1;}
+        continue;
+      }
+      if(ball.vy>0&&ball.y+BR>=p.y&&ball.y+BR<=p.y+16&&ball.x>p.x-4&&ball.x<p.x+p.w+4){
+        if(p.sp){die("撞上了红色刺台!");return;}
+        ball.y=p.y-BR;
+        ball.vy=-BOUNCE;
+        p.br=450;
+        break;
+      }
+    }
+    for(i=coins.length-1;i>=0;i--){
+      var c=coins[i];
+      var dx=c.x-ball.x,dy=c.y-ball.y;
+      if(dx*dx+dy*dy<20*20){coins.splice(i,1);coinN+=5;}
+    }
+    for(i=pads.length-1;i>=0;i--)if(pads[i].br===-1)pads.splice(i,1);
+    var targetCam=ball.y-230;
+    if(targetCam>camY)camY=targetCam;
+    spikeY-=0.022*dt;
+    if(camY+560>spikeY)spikeY=camY+560;
+    gen();
+    depth=depthM();
+    if(depth+coinN>0)updateHud();
+    if(ball.y+BR>=spikeY){die("被上涌的尖刺追上了!");return;}
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1124";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#141a30";ctx.fillRect(0,0,WL,H);
+  ctx.fillRect(WR,0,W-WR,H);
+  ctx.fillStyle="#232d4c";ctx.fillRect(WL-4,0,4,H);
+  ctx.fillRect(WR,0,4,H);
+  for(i=0;i<pads.length;i++){
+    var p=pads[i],py=p.y-camY;
+    if(py<-40||py>H+40)continue;
+    if(p.br>0){
+      ctx.globalAlpha=p.br/450;
+      ctx.fillStyle="#7c6242";
+      ctx.fillRect(p.x,py+Math.random()*3,p.w,6);
+      ctx.globalAlpha=1;
+      continue;
+    }
+    ctx.fillStyle=p.sp?"#f87171":"#8b7355";
+    ctx.fillRect(p.x,py,p.w,9);
+    ctx.fillStyle=p.sp?"#dc2626":"#6b5637";
+    ctx.fillRect(p.x,py+6,p.w,3);
+    if(p.sp){
+      ctx.fillStyle="#fecaca";
+      var k;
+      for(k=0;k<p.w/10;k++){
+        var sx=p.x+k*10+3;
+        ctx.beginPath();
+        ctx.moveTo(sx,py);ctx.lineTo(sx+3,py-6);ctx.lineTo(sx+6,py);
+        ctx.closePath();ctx.fill();
+      }
+    }
+  }
+  for(i=0;i<coins.length;i++){
+    var c=coins[i],cy=c.y-camY;
+    if(cy<-20||cy>H+20)continue;
+    ctx.fillStyle="#fbbf24";
+    ctx.shadowColor="#fbbf24";ctx.shadowBlur=8;
+    ctx.beginPath();ctx.arc(c.x,cy,6,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  var sy=spikeY-camY;
+  if(sy<H+30){
+    ctx.fillStyle="#94a3b8";
+    ctx.fillRect(0,sy+14,W,H-sy);
+    var j;
+    for(j=0;j<W/16;j++){
+      ctx.beginPath();
+      ctx.moveTo(j*16,sy+16);ctx.lineTo(j*16+8,sy-4);ctx.lineTo(j*16+16,sy+16);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  var by=ball.y-camY;
+  ctx.fillStyle="#fb7185";
+  ctx.shadowColor="#fb7185";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(ball.x,by,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(255,255,255,0.5)";
+  ctx.beginPath();ctx.arc(ball.x-3,by-3,2.5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(251,113,133,0.85)";ctx.font="bold 12px system-ui";
+  ctx.fillText("▲ 尖刺",20,20);
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

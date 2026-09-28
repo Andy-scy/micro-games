@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>动物图鉴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:24px;text-align:center;color:#51d88a;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#51d88a}
+#dex{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px}
+.card2{border:2px solid #2c3357;background:#232a48;border-radius:10px;min-height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:#5b648a;padding:3px;text-align:center}
+.card2 .em{font-size:22px;line-height:1.2}
+.card2.lit{border-color:#51d88a;background:#173327;color:#cdd6f4}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#51d88a;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#51d88a}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#51d88a;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#51d88a;color:#0c2410;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>动物图鉴</h1>
+  <p class="tips">答对动物冷知识即可点亮对应的图鉴卡片!答错不会结束,但会消耗 1 次机会,答错的动物会排到队尾再来一遍。12 张卡片全部点亮即通关,机会只有 10 次。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">收集</div><div class="big" id="col">0/12</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">剩余机会</div><div class="big" id="ms">10</div></div>
+  </div></div>
+  <div class="card">
+    <div id="dex"></div>
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">动物图鉴</h2><p id="ovp">· 题库共 12 种动物,逐题问答<br>· 答对:点亮该动物卡片,一次答对 +120,<br>　重试后答对 +80<br>· 答错:消耗 1 次机会,该题排到队尾<br>· 12 张卡片全部点亮即通关<br>· 10 次机会耗尽则挑战失败</p><button class="btn" id="obtn">开始收集</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{name:'金鱼',em:'🐠',q:'金鱼的野生祖先是哪种鱼?',o:['鲫鱼','鲤鱼','草鱼','鲨鱼']},
+{name:'章鱼',em:'🐙',q:'章鱼有几个心脏?',o:['3 个','1 个','2 个','4 个']},
+{name:'非洲象',em:'🐘',q:'世界上最大的陆地动物是?',o:['非洲象','亚洲象','长颈鹿','河马']},
+{name:'海豚',em:'🐬',q:'海豚之间主要靠什么交流?',o:['声音','颜色','气味','心跳']},
+{name:'乌龟',em:'🐢',q:'乌龟长寿的一个重要原因是?',o:['新陈代谢慢','吃得多','不停运动','睡觉特别少']},
+{name:'猫',em:'🐱',q:'猫的胡须主要用途是?',o:['测量通道宽窄','纯粹装饰','挠痒','保暖']},
+{name:'蚂蚁',em:'🐜',q:'民间说"蚂蚁搬家",往往预示着?',o:['要下雨了','要地震了','要涨潮了','要降温了']},
+{name:'蛇',em:'🐍',q:'蛇的舌头分叉,主要用来?',o:['嗅探气味','尝出甜味','发出声音','攻击敌人']},
+{name:'企鹅',em:'🐧',q:'企鹅是不会飞的鸟,但它特别擅长?',o:['游泳','奔跑','攀岩','滑翔']},
+{name:'长颈鹿',em:'🦒',q:'长颈鹿的长脖子主要用来?',o:['吃高处的树叶','储存水分','发出低鸣','调节体温']},
+{name:'蜘蛛',em:'🕷️',q:'蜘蛛在网上行走为什么不被粘住?',o:['脚上有防粘的油','网中央没有胶','它只走网边缘','它速度太快']},
+{name:'蝙蝠',em:'🦇',q:'蝙蝠休息时通常是什么姿势?',o:['倒挂着','趴在地上','站着睡','搭窝坐睡']}
+];
+var MS=10;
+var collected=[],firstTry=[],pending=[],score=0,misses=0,playing=false,over=false,locked=false,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function buildDex(){
+  var d=$('dex');d.innerHTML='';
+  for(var i=0;i<BANK.length;i++){
+    var c=document.createElement('div');
+    c.className='card2';
+    c.id='card'+i;
+    c.textContent='?';
+    d.appendChild(c);
+  }
+}
+function paintStats(){
+  var cnt=0,i;
+  for(i=0;i<BANK.length;i++)if(collected[i])cnt++;
+  $('col').textContent=cnt+'/12';
+  $('ms').textContent=MS-misses;
+  $('tbar').style.width=(cnt/BANK.length*100)+'%';
+  for(i=0;i<BANK.length;i++){
+    var c=$('card'+i);
+    if(collected[i]){
+      c.className='card2 lit';
+      c.innerHTML='<span class="em">'+BANK[i].em+'</span>'+BANK[i].name;
+    }
+  }
+}
+function startGame(){
+  S++;score=0;misses=0;over=false;playing=true;locked=false;
+  collected=[];firstTry=[];
+  for(var i=0;i<BANK.length;i++){collected.push(false);firstTry.push(true);}
+  pending=shuffle([0,1,2,3,4,5,6,7,8,9,10,11]);
+  $('sc').textContent='0';
+  $('overlay').classList.add('hide');
+  buildDex();
+  paintStats();
+  showQ();
+}
+function showQ(){
+  if(pending.length===0){finish(true);return;}
+  var it=BANK[pending[0]];
+  locked=false;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var idx=pending[0];
+  var it=BANK[idx];
+  locked=true;
+  var btns=$('opts').children,i;
+  if(btn.dataset.ok==='1'){
+    var gain=firstTry[idx]?120:80;
+    score+=gain;
+    collected[idx]=true;
+    pending.shift();
+    btn.classList.add('ok');
+    paintStats();
+    $('msg').textContent=it.name+' 入册!+'+gain+' 分';
+    schedule(function(){
+      if(!playing||over)return;
+      if(pending.length===0)finish(true);
+      else showQ();
+    },1200);
+  }else{
+    misses++;
+    firstTry[idx]=false;
+    pending.shift();pending.push(idx);
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent='差一点!'+it.name+'的题目排到队尾了,稍后再来';
+    schedule(function(){
+      if(!playing||over)return;
+      if(misses>=MS)finish(false);
+      else showQ();
+    },1500);
+  }
+  $('sc').textContent=score;
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1300?'动物学博士!':(score>=900?'图鉴收藏家!':'初级观察员!');
+  $('ovt').textContent=win?'图鉴收集完毕!':'机会用尽…';
+  $('ovp').innerHTML='点亮 '+countLit()+'/12 张卡片<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 冷知识就是图鉴钥匙,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function countLit(){
+  var n=0;
+  for(var i=0;i<collected.length;i++)if(collected[i])n++;
+  return n;
+}
+$('obtn').addEventListener('click',startGame);
+</script>
+</body>
+</html>

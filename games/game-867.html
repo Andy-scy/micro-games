@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>护送小蝌蚪</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>护送小蝌蚪</h1>
+<p class="tip">一只小蝌蚪会沿着你走过的路尾随(延迟半秒)。先带它一起穿过马路和浮木河,<br>再踩进空巢;只有蝌蚪跟在身边时到家才算救援成功!蝌蚪被车撞或落单溺水都会扣命。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>已救 <b id="sR">0/5</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=14,LOOP=540,OFF=60,LAG=42;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sR=document.getElementById("sR");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var CAR_COLORS=["#e05656","#e8a33d","#3fa66a","#4f8ef7","#b06ee0","#d05fa2"];
+var roads,logs,homes,frog,score,lives,rescued,deadT,state,gt=0,babySafe=0;
+var trail=[],moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function buildWorld(){
+  roads=[];logs=[];var r,i,x0;
+  for(r=7;r<=11;r++){
+    var dir=r%2===1?1:-1,speed=rnd(48,95)*(1+rescued*0.08),cars=[];
+    x0=rnd(0,LOOP);
+    for(i=0;i<3;i++)cars.push({x:(x0+i*180+rnd(-30,30)+LOOP)%LOOP,w:rnd(46,78),c:CAR_COLORS[(r+i)%CAR_COLORS.length]});
+    roads.push({r:r,dir:dir,speed:speed,cars:cars});
+  }
+  var lens=[80,120,160];
+  for(r=1;r<=5;r++){
+    var dir2=r%2===0?1:-1,sp2=rnd(32,66)*(1+rescued*0.06),lg=[];
+    x0=rnd(0,LOOP);
+    for(i=0;i<3;i++)lg.push({x:(x0+i*220+rnd(-15,15)+LOOP)%LOOP,len:lens[Math.floor(rnd(0,3))]});
+    logs.push({r:r,dir:dir2,speed:sp2,logs:lg});
+  }
+}
+function logLane(r){var i;for(i=0;i<logs.length;i++)if(logs[i].r===r)return logs[i];return null;}
+function onLog(r){
+  var ln=logLane(r);
+  if(!ln)return true;
+  var i,lg,dx;
+  for(i=0;i<ln.logs.length;i++){
+    lg=ln.logs[i];dx=lg.x-OFF;
+    if(frog.x>dx+6&&frog.x<dx+lg.len-6)return true;
+  }
+  return false;
+}
+function updHud(){sS.textContent=score;sL.textContent=lives;sR.textContent=rescued+"/5";}
+function resetFrog(){frog={c:5,r:13,x:5.5*CELL,y:13*CELL};moving=false;trail=[];}
+function reset(){score=0;lives=3;rescued=0;deadT=0;babySafe=1.2;homes=[];var i;for(i=0;i<5;i++)homes.push({x:42+i*84,filled:false});buildWorld();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;trail=[];updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",救回 "+rescued+"/5 只小蝌蚪。");}
+}
+function babyDie(msg){
+  if(babySafe>0)return;
+  trail=[];babySafe=1.2;
+  die(msg);
+}
+function arrive(){
+  if(frog.r!==0)return;
+  var h=-1,i;
+  for(i=0;i<5;i++)if(Math.abs(frog.x-homes[i].x)<20){h=i;break;}
+  if(h<0){die("扑通!掉进了河里。");return;}
+  if(homes[h].filled)return;
+  var baby=trail.length?trail[0]:{x:frog.x,y:frog.y};
+  var d=Math.abs(baby.x-frog.x)+Math.abs(baby.y-frog.y);
+  if(d>90)return;
+  homes[h].filled=true;rescued++;score+=250;
+  babySafe=1.2;
+  if(rescued>=5){updHud();state="over";show("团圆大结局!","5 只小蝌蚪全部安全到家!最终得分 "+score+"。");return;}
+  buildWorld();resetFrog();updHud();
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r,x=frog.x;
+  if(d==="left")x-=40;else if(d==="right")x+=40;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));x=Math.max(15,Math.min(405,x));
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=x;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  if(babySafe>0)babySafe-=dt;
+  var i,j,ln;
+  for(i=0;i<roads.length;i++){
+    ln=roads[i];
+    for(j=0;j<ln.cars.length;j++)ln.cars[j].x=(ln.cars[j].x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+  }
+  for(i=0;i<logs.length;i++){
+    ln=logs[i];
+    for(j=0;j<ln.logs.length;j++)ln.logs[j].x=(ln.logs[j].x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+  }
+  if(moving){
+    mt+=dt/0.12;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }else if(frog.r>=1&&frog.r<=5){
+    if(!onLog(frog.r)){die("青蛙落水,蝌蚪吓跑了!");return;}
+    frog.x+=logLane(frog.r).dir*logLane(frog.r).speed*dt;
+    if(frog.x<14||frog.x>406){die("被水流冲出了河道!");return;}
+  }else if(frog.r===0){
+    var near=false;
+    for(i=0;i<5;i++)if(Math.abs(frog.x-homes[i].x)<22)near=true;
+    if(!near){die("扑通!掉进了河里。");return;}
+  }
+  trail.push({x:frog.x,y:frog.y});
+  if(trail.length>LAG)trail.shift();
+  var baby=trail.length?trail[0]:{x:frog.x,y:frog.y};
+  for(i=0;i<roads.length;i++){
+    ln=roads[i];var cy=ln.r*CELL;
+    if(baby.y+20>cy+2&&baby.y+20<cy+38){
+      for(j=0;j<ln.cars.length;j++){
+        var car=ln.cars[j],cx=car.x-OFF;
+        if(Math.abs(cx+car.w/2-baby.x)<car.w/2+7){babyDie("小蝌蚪被车撞了!");return;}
+      }
+    }
+  }
+}
+function drawFrog(x,y){
+  ctx.fillStyle="#5ad469";
+  ctx.beginPath();ctx.ellipse(x,y+22,12,14,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#2f7d3f";
+  ctx.beginPath();ctx.arc(x-6,y+11,5,0,Math.PI*2);ctx.arc(x+6,y+11,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0d1730";
+  ctx.beginPath();ctx.arc(x-6,y+10,2,0,Math.PI*2);ctx.arc(x+6,y+10,2,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var r,i,j,ln;
+  for(r=0;r<ROWS;r++){
+    var col=r===0?"#152a4e":(r===6||r>=12?"#1e3b26":(r<=5?"#16305e":"#232741"));
+    ctx.fillStyle=col;ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  ctx.strokeStyle="#3a4470";ctx.lineWidth=2;ctx.setLineDash([14,18]);
+  for(i=0;i<roads.length;i++){ln=roads[i];ctx.beginPath();ctx.moveTo(0,ln.r*CELL+20);ctx.lineTo(420,ln.r*CELL+20);ctx.stroke();}
+  ctx.setLineDash([]);
+  for(i=0;i<logs.length;i++){
+    ln=logs[i];
+    for(j=0;j<ln.logs.length;j++){
+      var lg=ln.logs[j],dx=lg.x-OFF;
+      if(dx>420||dx+lg.len<0)continue;
+      ctx.fillStyle="#8a5a2b";rr(dx,ln.r*CELL+6,lg.len,28,10);ctx.fill();
+      ctx.strokeStyle="rgba(0,0,0,.25)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(dx+lg.len*0.4,ln.r*CELL+9);ctx.lineTo(dx+lg.len*0.4,ln.r*CELL+31);ctx.stroke();
+    }
+  }
+  for(i=0;i<roads.length;i++){
+    ln=roads[i];var cy=ln.r*CELL;
+    for(j=0;j<ln.cars.length;j++){
+      var car=ln.cars[j],cx=car.x-OFF;
+      if(cx>420||cx+car.w<0)continue;
+      ctx.fillStyle=car.c;rr(cx+2,cy+6,car.w-4,28,7);ctx.fill();
+      ctx.fillStyle="rgba(20,24,48,.55)";rr(cx+car.w/2-7,cy+11,14,8,3);ctx.fill();
+    }
+  }
+  for(i=0;i<5;i++){
+    var h2=homes[i];
+    ctx.fillStyle="#0d1730";ctx.beginPath();ctx.arc(h2.x,20,17,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=h2.filled?"#4f6ef7":"#31407a";ctx.lineWidth=2;ctx.stroke();
+    if(h2.filled)drawFrog(h2.x,2);
+  }
+  ctx.strokeStyle="rgba(120,170,255,.12)";ctx.lineWidth=1;
+  for(i=0;i<trail.length;i+=6){
+    ctx.beginPath();ctx.arc(trail[i].x,trail[i].y+20,1.5,0,Math.PI*2);ctx.stroke();
+  }
+  var baby=trail.length?trail[0]:{x:frog.x,y:frog.y};
+  if(deadT<=0){
+    ctx.fillStyle="#39d0c3";
+    ctx.beginPath();ctx.arc(baby.x,baby.y+24,8,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#39d0c3";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(baby.x,baby.y+30);
+    ctx.quadraticCurveTo(baby.x+Math.sin(gt*14)*6,baby.y+38,baby.x+Math.sin(gt*14)*9,baby.y+42);
+    ctx.stroke();
+    if(babySafe>0&&Math.floor(gt*10)%2===0){
+      ctx.strokeStyle="rgba(255,255,255,.7)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(baby.x,baby.y+24,11,0,Math.PI*2);ctx.stroke();
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0)drawFrog(frog.x,frog.y);
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,220,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,270);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("小蝌蚪会尾随你的足迹 · 一起到家才算救出",210,300);
+    ctx.fillText("踩空巢等待它跟上即可",210,322);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("护送小蝌蚪","你走过的路会留下足迹,小蝌蚪沿足迹半秒后跟进。带它穿过马路与浮木河,一起踏进空巢才完成救援;路上它同样会被车撞、会落水。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

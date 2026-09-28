@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>水果落落乐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#7ed957;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#7ed957;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#7ed957}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#7ed957;color:#0c2a10;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>水果落落乐</h1>
+  <p class="hint">移动瞄准 · 松手掉落 · 相同水果相碰合成进化<br>水果堆过红色警戒线 2 秒即结束</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>下一个 <b id="next">·</b></span>
+    <span>最高 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="340" height="470"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">水果落落乐</h2>
+      <p id="ovP">瞄准落点,让相同的水果碰在一起,合出传说中的瓜王!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var W=340,H=470,LINE=88,GRAV=1500;
+var RAD=[12,16,21,26,32,39,46,54,62,71,80];
+var COL=['#7ed957','#f9d71c','#ff8c42','#ff5d5d','#e56399','#a06cd5','#5aa9e6','#4dd0c4','#f6bd60','#f28482','#ffd166'];
+var NAME=['樱桃','草莓','葡萄','橘子','苹果','蜜桃','菠萝','蜜瓜','西瓜','大瓜','瓜王'];
+var balls=[],pops=[],cur=null,nxt=0,cd=0,aim=W/2;
+var score=0,best=0,state='ready',danger=0,tG=0;
+
+function randLvl(){var r=Math.random();if(r<0.42)return 0;if(r<0.72)return 1;if(r<0.90)return 2;if(r<0.98)return 3;return 4;}
+function addScore(n){score+=n;if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function pop(x,y,lvl){pops.push({x:x,y:y,r:RAD[lvl],t:0,c:COL[lvl]});}
+
+function drop(){
+  if(!cur)return;
+  var r=RAD[cur.lvl];
+  var x=Math.max(r+4,Math.min(W-r-4,aim));
+  balls.push({x:x,y:56,vx:0,vy:60,r:r,lvl:cur.lvl,dead:false});
+  cur=null;cd=0.55;
+}
+function doMerge(a,b){
+  var mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+  a.dead=true;b.dead=true;
+  if(a.lvl>=10){addScore(2000);pop(mx,my,10);return;}
+  var nl=a.lvl+1;
+  balls.push({x:mx,y:my,vx:(a.vx+b.vx)*0.3,vy:(a.vy+b.vy)*0.3,r:RAD[nl],lvl:nl,dead:false});
+  addScore((nl+1)*(nl+1)*2);
+  pop(mx,my,nl);
+}
+function update(dt){
+  if(!cur){cd-=dt;if(cd<=0){cur={lvl:nxt};nxt=randLvl();$('next').textContent=NAME[nxt];}}
+  var i,j,k,a,b;
+  for(i=0;i<balls.length;i++){b=balls[i];b.vy+=GRAV*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;}
+  for(k=0;k<2;k++){
+    for(i=0;i<balls.length;i++){
+      a=balls[i];if(a.dead)continue;
+      for(j=i+1;j<balls.length;j++){
+        b=balls[j];if(b.dead)continue;
+        var dx=b.x-a.x,dy=b.y-a.y,rr=a.r+b.r,d2=dx*dx+dy*dy;
+        if(d2<rr*rr&&d2>0.01){
+          var d=Math.sqrt(d2),nx=dx/d,ny=dy/d,ov=rr-d;
+          var ma=a.r*a.r,mb=b.r*b.r,tm=ma+mb;
+          a.x-=nx*ov*(mb/tm);a.y-=ny*ov*(mb/tm);
+          b.x+=nx*ov*(ma/tm);b.y+=ny*ov*(ma/tm);
+          var rvn=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+          if(rvn<0){var im=-rvn*0.59;a.vx-=im*nx;a.vy-=im*ny;b.vx+=im*nx;b.vy+=im*ny;}
+        }
+      }
+    }
+  }
+  for(i=0;i<balls.length;i++){
+    b=balls[i];
+    if(b.x-b.r<4){b.x=4+b.r;b.vx=Math.abs(b.vx)*0.4;}
+    if(b.x+b.r>W-4){b.x=W-4-b.r;b.vx=-Math.abs(b.vx)*0.4;}
+    if(b.y+b.r>H-4){b.y=H-4-b.r;b.vy=-Math.abs(b.vy)*0.3;b.vx*=0.92;}
+    if(b.y-b.r<0){b.y=b.r;b.vy=Math.abs(b.vy)*0.3;}
+  }
+  for(i=0;i<balls.length;i++){
+    a=balls[i];if(a.dead)continue;
+    for(j=i+1;j<balls.length;j++){
+      b=balls[j];if(b.dead||b.lvl!==a.lvl)continue;
+      var ddx=b.x-a.x,ddy=b.y-a.y,trr=(a.r+b.r)*0.96;
+      if(ddx*ddx+ddy*ddy<trr*trr){doMerge(a,b);break;}
+    }
+  }
+  var keep=[];
+  for(i=0;i<balls.length;i++)if(!balls[i].dead)keep.push(balls[i]);
+  balls=keep;
+  var hot=false;
+  for(i=0;i<balls.length;i++){
+    b=balls[i];
+    if(b.y-b.r<LINE&&Math.abs(b.vy)<50&&Math.abs(b.vx)<50){hot=true;break;}
+  }
+  danger=hot?danger+dt:Math.max(0,danger-dt*2);
+  if(danger>2){finish();return;}
+  for(i=0;i<pops.length;i++)pops[i].t+=dt;
+  var pk=[];
+  for(i=0;i<pops.length;i++)if(pops[i].t<0.4)pk.push(pops[i]);
+  pops=pk;
+}
+function ballPaint(x,y,r,lvl,alpha){
+  ctx.save();ctx.globalAlpha=alpha;
+  ctx.beginPath();ctx.arc(x,y,r,0,7);
+  ctx.fillStyle=COL[lvl];ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(0,0,0,.28)';ctx.stroke();
+  ctx.beginPath();ctx.arc(x-r*0.32,y-r*0.36,r*0.28,0,7);
+  ctx.fillStyle='rgba(255,255,255,.32)';ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  ctx.font='700 '+Math.max(10,r*0.78)+'px system-ui';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(String(lvl+1),x,y+1);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(0,H-4,W,4);
+  var dr=Math.min(1,danger/2);
+  ctx.save();
+  ctx.setLineDash([6,6]);
+  ctx.strokeStyle=dr>0?'rgba(255,80,80,'+(0.45+0.55*Math.abs(Math.sin(tG*6)))+')':'rgba(255,255,255,.14)';
+  ctx.lineWidth=dr>0?3:1.5;
+  ctx.beginPath();ctx.moveTo(0,LINE);ctx.lineTo(W,LINE);ctx.stroke();
+  ctx.restore();
+  var i;
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=p.t/0.4;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r*(1+pr*1.4),0,7);
+    ctx.strokeStyle=p.c;ctx.globalAlpha=1-pr;ctx.lineWidth=3;ctx.stroke();ctx.globalAlpha=1;
+  }
+  for(i=0;i<balls.length;i++)ballPaint(balls[i].x,balls[i].y,balls[i].r,balls[i].lvl,1);
+  if(state==='play'&&cur){
+    var r=RAD[cur.lvl],x=Math.max(r+4,Math.min(W-r-4,aim));
+    ctx.save();ctx.setLineDash([4,7]);ctx.strokeStyle='rgba(255,255,255,.2)';
+    ctx.beginPath();ctx.moveTo(x,56+r);ctx.lineTo(x,H-6);ctx.stroke();ctx.restore();
+    ballPaint(x,56,r,cur.lvl,0.9);
+  }
+  if(dr>0){
+    ctx.fillStyle='rgba(255,80,80,'+(dr*0.5)+')';
+    ctx.font='700 15px system-ui';ctx.textAlign='center';
+    ctx.fillText('警戒!',W/2,LINE-10);
+  }
+}
+function posOf(e){
+  var t=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  var rc=cv.getBoundingClientRect();
+  return {x:(t.clientX-rc.left)*W/rc.width,y:(t.clientY-rc.top)*H/rc.height};
+}
+var pressing=false;
+function onDown(e){if(state!=='play')return;pressing=true;aim=posOf(e).x;e.preventDefault();}
+function onMove(e){if(state!=='play')return;aim=posOf(e).x;if(e.type!=='mousemove')e.preventDefault();}
+function onUp(e){if(state!=='play')return;if(pressing){drop();pressing=false;}if(e.type!=='mousemove')e.preventDefault();}
+function finish(){
+  state='over';
+  $('ovT').textContent='游戏结束';
+  $('ovP').textContent='水果堆过了警戒线!\n最高进化:'+NAME[10];
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  balls=[];pops=[];score=0;danger=0;cur=null;cd=0.3;nxt=randLvl();aim=W/2;
+  $('score').textContent='0';$('best').textContent=best;$('next').textContent='·';
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+cv.addEventListener('mousedown',onDown);
+window.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('touchstart',onDown,{passive:false});
+cv.addEventListener('touchmove',onMove,{passive:false});
+cv.addEventListener('touchend',onUp,{passive:false});
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;tG+=dt;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

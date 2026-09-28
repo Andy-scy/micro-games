@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拆弹物语</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#f28482;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#f28482;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f28482}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#f28482;color:#3d0c0c;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>拆弹物语</h1>
+  <p class="hint">◀ ▶ 选列 · 投放数字块,相邻同数自动合一<br>炸弹无法合成还会连环殉爆,点击炸弹用钳拆除!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>拆弹钳 <b id="tong">2</b></span>
+    <span>下一个 <b id="next">·</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="320" height="352"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">拆弹物语</h2>
+      <p id="ovP">数字块一碰就合,炸弹碰炸弹 = 大爆炸\n合成 5 次奖励一把拆弹钳,点击炸弹即可拆除</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button id="pL">◀</button>
+    <button id="pD">投 放</button>
+    <button id="pR">▶</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=7,ROWS=8,CELL=42,BX=13,BY=8;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#e56399','#a06cd5'];
+var grid=[],col=3,nextBomb=false,nextE=1,score=0,tong=2,mergeN=0,state='ready';
+var flashes=[],shake=0,resolveT=0;
+function val(e){return Math.pow(2,e);}
+function addScore(n){score=Math.max(0,score+n);$('score').textContent=score;}
+function newGrid(){var g=[],r,c;for(r=0;r<ROWS;r++){g.push([]);for(c=0;c<COLS;c++)g[r].push(0);}return g;}
+function lowest(c){var r;for(r=ROWS-1;r>=0;r--)if(!grid[r][c])return r;return -1;}
+function compact(){
+  var r,c,stack,i;
+  for(c=0;c<COLS;c++){
+    stack=[];
+    for(r=ROWS-1;r>=0;r--)if(grid[r][c])stack.push(grid[r][c]);
+    for(r=ROWS-1,i=0;r>=0;r--,i++)grid[r][c]=(i<stack.length)?stack[i]:0;
+  }
+}
+function findBoom(){
+  var r,c;
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    var a=grid[r][c];
+    if(a&&a.bomb){
+      if(c+1<COLS&&grid[r][c+1]&&grid[r][c+1].bomb)return [r,c];
+      if(r+1<ROWS&&grid[r+1][c]&&grid[r+1][c].bomb)return [r,c];
+    }
+  }
+  return null;
+}
+function findPair(){
+  var r,c;
+  for(r=ROWS-1;r>=0;r--)for(c=0;c<COLS;c++){
+    var a=grid[r][c];
+    if(a&&!a.bomb){
+      var dn=(r+1<ROWS)?grid[r+1][c]:null;
+      if(dn&&!dn.bomb&&dn.e===a.e)return [[r,c],[r+1,c]];
+      var rt=(c+1<COLS)?grid[r][c+1]:null;
+      if(rt&&!rt.bomb&&rt.e===a.e)return [[r,c],[r,c+1]];
+    }
+  }
+  return null;
+}
+function boom(r,c){
+  var rr,cc;
+  for(rr=Math.max(0,r-1);rr<=Math.min(ROWS-1,r+1);rr++){
+    for(cc=Math.max(0,c-1);cc<=Math.min(COLS-1,c+1);cc++){
+      if(grid[rr][cc]){flashes.push({r:rr,c:cc,t:0,boom:true});grid[rr][cc]=0;}
+    }
+  }
+  addScore(-100);shake=0.4;
+  compact();
+}
+function resolveStep(){
+  var bp=findBoom();
+  if(bp){boom(bp[0],bp[1]);return;}
+  var pr=findPair();
+  if(pr){
+    var a=pr[0],b=pr[1];
+    var tgt=(b[0]>a[0]||(b[0]===a[0]&&b[1]>a[1]))?b:a;
+    var ne=grid[a[0]][a[1]].e+1;
+    grid[a[0]][a[1]]=0;grid[b[0]][b[1]]=0;
+    grid[tgt[0]][tgt[1]]={e:ne,bomb:false};
+    addScore(val(ne)*8);
+    flashes.push({r:tgt[0],c:tgt[1],t:0,boom:false});
+    mergeN++;
+    if(mergeN%5===0&&tong<4){tong++;$('tong').textContent=String(tong);}
+    compact();
+  }
+}
+function doDrop(){
+  if(state!=='play')return;
+  var r=lowest(col);
+  if(r<0){finish();return;}
+  if(nextBomb)grid[r][col]={e:0,bomb:true};
+  else grid[r][col]={e:nextE,bomb:false};
+  flashes.push({r:r,c:col,t:0,boom:nextBomb});
+  rollNext();
+  compact();
+}
+function rollNext(){
+  nextBomb=Math.random()<0.14;
+  nextE=Math.random()<0.7?1:2;
+  $('next').textContent=nextBomb?'炸弹':String(val(nextE));
+}
+function finish(){
+  state='over';
+  $('ovT').textContent='轰!堆到顶了';
+  $('ovP').textContent='弹坑遍地,数字塔轰然倒塌';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  grid=newGrid();score=0;tong=2;mergeN=0;col=3;flashes=[];shake=0;
+  rollNext();
+  $('score').textContent='0';$('tong').textContent='2';
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function clickAt(x,y){
+  if(state!=='play')return;
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r>=0&&r<ROWS&&c>=0&&c<COLS&&grid[r][c]&&grid[r][c].bomb){
+    if(tong>0){tong--;$('tong').textContent=String(tong);grid[r][c]=0;addScore(10);compact();}
+    else shake=0.2;
+    return;
+  }
+  if(c>=0&&c<COLS)col=c;
+  doDrop();
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*320/rc.width,(e.clientY-rc.top)*352/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*320/rc.width,(t.clientY-rc.top)*352/rc.height);
+  e.preventDefault();
+},{passive:false});
+window.addEventListener('keydown',function(e){
+  if(state!=='play')return;
+  if(e.keyCode===37){col=(col+COLS-1)%COLS;e.preventDefault();}
+  else if(e.keyCode===39){col=(col+1)%COLS;e.preventDefault();}
+  else if(e.keyCode===32||e.keyCode===40){doDrop();e.preventDefault();}
+});
+$('pL').addEventListener('click',function(){if(state==='play')col=(col+COLS-1)%COLS;});
+$('pR').addEventListener('click',function(){if(state==='play')col=(col+1)%COLS;});
+$('pD').addEventListener('click',doDrop);
+function update(dt){
+  var i;
+  if(shake>0)shake-=dt;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  if(state==='play'){
+    resolveT+=dt;
+    if(resolveT>=0.2){resolveT=0;resolveStep();}
+  }
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawBlock(c,r){
+  var b=grid[r][c],x=BX+c*CELL,y=BY+r*CELL;
+  if(b.bomb){
+    ctx.beginPath();ctx.arc(x+CELL/2,y+CELL/2,CELL/2-5,0,7);
+    ctx.fillStyle='#2a2d3a';ctx.fill();
+    ctx.strokeStyle='#f28482';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+CELL/2,y+CELL/2-CELL/2+6);
+    ctx.quadraticCurveTo(x+CELL/2+7,y+2,x+CELL-6,y+7);
+    ctx.strokeStyle='#c9a15f';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(x+CELL-6,y+7,3,0,7);
+    ctx.fillStyle='#ffb347';ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.85)';
+    ctx.font='700 13px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('危',x+CELL/2,y+CELL/2+2);
+  }else{
+    ctx.fillStyle=CCOL[Math.min(b.e,9)];
+    roundRect(x+3,y+3,CELL-6,CELL-6,8);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.9)';
+    ctx.font='700 '+Math.min(19,10+b.e*2)+'px system-ui';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(String(val(b.e)),x+CELL/2,y+CELL/2+1);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,320,352);
+  ctx.save();
+  if(shake>0)ctx.translate((Math.random()-0.5)*6*shake*2.5,(Math.random()-0.5)*6*shake*2.5);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(-8,-8,336,368);
+  var r,c,i;
+  ctx.strokeStyle='rgba(255,255,255,.05)';
+  for(i=0;i<=COLS;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+ROWS*CELL);ctx.stroke();}
+  for(i=0;i<=ROWS;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+COLS*CELL,BY+i*CELL);ctx.stroke();}
+  if(state==='play'){
+    var full=lowest(col)<0;
+    ctx.fillStyle=full?'rgba(255,80,80,.2)':'rgba(242,132,130,.13)';
+    ctx.fillRect(BX+col*CELL+2,BY,CELL-4,ROWS*CELL);
+  }
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++)if(grid[r][c])drawBlock(c,r);
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle=f.boom?'#ffb347':'#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+2-pr*6,BY+f.r*CELL+2-pr*6,CELL-4+pr*12,CELL-4+pr*12,8);ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

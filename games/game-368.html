@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>心流潮汐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#2dd4bf;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#2dd4bf;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#2dd4bf;color:#03211d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>心流潮汐</h1>
+  <p class="hint">涟漪从中心扩散至外环的一瞬敲击 · 60 秒 · 不会失败,只需沉浸 · 空格 / 点击 / 触屏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>心流 <b id="flow">50%</b></span>
+    <span>剩余 <b id="time">60s</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">心流潮汐</h2>
+      <p id="ovDesc">这里没有失败,只有潮汐。
+涟漪从中心一圈圈扩散,当它漫过外环的一瞬轻轻敲击。
+命中让心流上涨,抢拍与溜走让它回落;
+60 秒后,看看你的心流停在哪种境界。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elFlow=$("flow"),elTime=$("time");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,CX=240,CY=300,BPM=88,beatInt=60000/BPM;
+var TARGET=150,OUT=230,DUR=60;
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sHit(){tone("sine",520,780,0.16,0.2);noiseHit(0.04,0.06,7000);}
+function sSlip(){tone("sine",300,220,0.14,0.1);}
+function sTick(){noiseHit(0.035,0.05,8000);}
+
+var state="menu",rings,score,combo,flow,flowAvg,flowN,beats,hits,startT,nextBeat,beatNo,pops;
+function reset(){
+  rings=[];pops=[];
+  score=0;combo=0;flow=50;flowAvg=50;flowN=1;beats=0;hits=0;beatNo=0;
+  startT=performance.now();
+  nextBeat=startT+1600;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elFlow.textContent=Math.round(flow)+"%";
+  var remain=Math.max(0,Math.ceil(DUR-(performance.now()-startT)/1000));
+  elTime.textContent=remain+"s";
+}
+function addPop(txt,color){pops.push({txt:txt,color:color,t0:performance.now()});}
+function bump(v){
+  flow=Math.max(0,Math.min(100,flow+v));
+  flowAvg+=flow;flowN++;
+}
+function schedule(now){
+  if(now-nextBeat>4000)nextBeat=now+400;
+  while(now>=nextBeat){
+    beatNo++;beats++;
+    rings.push({born:nextBeat,done:false});
+    sTick();
+    nextBeat+=beatInt;
+  }
+}
+function press(){
+  if(state!=="play")return;
+  var now=performance.now(),i,r,dt,bi=-1,bd=1e9;
+  var speed=OUT/(beatInt*2);
+  for(i=0;i<rings.length;i++){
+    r=rings[i];if(r.done)continue;
+    dt=now-(r.born+TARGET/speed);
+    if(Math.abs(dt)>220)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0){
+    combo=0;bump(-10);addPop("抢拍","#8b90b0");sSlip();upd();return;
+  }
+  r=rings[bi];r.done=true;hits++;
+  if(Math.abs(bd)<=70){
+    combo++;score+=200+combo*8;bump(9);
+    addPop("入拍 +"+(200+combo*8),"#fbbf24");sHit();
+  }else{
+    combo++;score+=80+combo*4;bump(5);
+    addPop("随拍 +"+(80+combo*4),"#2dd4bf");sHit();
+  }
+  upd();
+}
+function rankOf(a){
+  if(a>=88)return "入定 · 心随潮动";
+  if(a>=70)return "专注 · 涟漪在手";
+  if(a>=50)return "平静 · 潮起潮落";
+  return "浮躁 · 心猿意马";
+}
+function finish(){
+  state="over";
+  var avg=flowAvg/flowN;
+  ovTitle.textContent="潮汐退去";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 心流 "+Math.round(avg)+"%";
+  var acc=beats?Math.round(hits/beats*100):0;
+  ovDesc.textContent="命中 "+hits+"/"+beats+" 涟漪(准确率 "+acc+"%)\n境界:"+rankOf(avg)+"\n随时再来一分钟。";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function update(now){
+  var i,r;
+  var speed=OUT/(beatInt*2);
+  for(i=rings.length-1;i>=0;i--){
+    r=rings[i];
+    if(r.done){rings.splice(i,1);continue;}
+    if(now>r.born+OUT/speed+120){
+      rings.splice(i,1);
+      combo=0;bump(-8);sSlip();
+      addPop("溜走","#8b90b0");
+      upd();
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>620)pops.splice(i,1);}
+  if(now-startT>=DUR*1000)finish();
+}
+function draw(now){
+  var i,r,k;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  var speed=OUT/(beatInt*2);
+  ctx.setLineDash([6,6]);
+  ctx.strokeStyle="rgba(45,212,191,0.5)";
+  ctx.beginPath();ctx.arc(CX,CY,TARGET,0,Math.PI*2);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle="rgba(45,212,191,0.18)";
+  ctx.beginPath();ctx.arc(CX,CY,OUT,0,Math.PI*2);ctx.stroke();
+  for(i=0;i<rings.length;i++){
+    r=rings[i];
+    var rad=(now-r.born)*speed;
+    if(rad<0||rad>OUT)continue;
+    var near=1-Math.abs(rad-TARGET)/OUT;
+    ctx.strokeStyle="rgba(45,212,191,"+(0.35+near*0.55)+")";
+    ctx.lineWidth=2+near*2;
+    ctx.beginPath();ctx.arc(CX,CY,rad,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+  }
+  ctx.fillStyle="rgba(45,212,191,0.6)";
+  ctx.beginPath();ctx.arc(CX,CY,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(45,212,191,0.25)";
+  ctx.fillRect(40,40,W-80,14);
+  ctx.fillStyle="#2dd4bf";
+  ctx.fillRect(40,40,(W-80)*flow/100,14);
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/620;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 17px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,CX,CY-40-pr*24);
+    ctx.globalAlpha=1;
+  }
+}
+function onTap(){press();}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap();});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap();});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();onTap();},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    else press();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

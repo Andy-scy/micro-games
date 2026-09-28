@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>夜航灯影</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fde047;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fde047;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fde047}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fde047;color:#08101f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>夜航灯影</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 拍翅膀 · 黑夜飞行,只有身边一圈灯光!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>灯距 <b id="lit">205</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">夜航灯影</h2>
+      <p id="ovDesc">浓黑夜航:你只能看清身边一小圈,灯光会越来越暗!穿管 +1 分;远处金色灯笼是唯一路标,吃到灯笼 +1 分并把灯距重新撑大。灯灭之前,摸黑也要活下去。撞管坠地即结束!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">点亮灯笼</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,PW=68,GAP=154,SPACE=246,GRAV=1480,FLAP=-378,BX=120,BR=13,SPEED=138;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),elLit=$("lit"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",bird,pipes,lanterns,popups,score,best=0,tick,lit;
+function newPipe(x){
+  var p={x:x,gy:64+Math.random()*(GROUND-128-GAP),passed:false};
+  lanterns.push({x:x+PW+118,y:Math.max(84,Math.min(GROUND-84,p.gy+GAP/2+(Math.random()*180-90))),got:false,ph:Math.random()*6.28});
+  return p;
+}
+function reset(){
+  bird={y:280,vy:0,fl:0};
+  lanterns=[];
+  pipes=[newPipe(W+150)];
+  popups=[];score=0;tick=0;lit=205;
+  elScore.textContent="0";
+  elLit.textContent="205";
+}
+function act(){
+  if(state!=="playing")return;
+  bird.vy=FLAP;bird.fl=1;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,p,l;
+  tick+=dt;
+  lit=Math.max(92,lit-13*dt);
+  elLit.textContent=String(Math.round(lit));
+  bird.vy+=GRAV*dt;
+  bird.y+=bird.vy*dt;
+  bird.fl=Math.max(0,bird.fl-dt*5);
+  if(bird.y<BR+2){bird.y=BR+2;bird.vy=Math.max(bird.vy,0);}
+  if(bird.y+BR>GROUND){die("黑夜里一头栽向了地面!");return;}
+  for(i=0;i<pipes.length;i++)pipes[i].x-=SPEED*dt;
+  if(pipes[pipes.length-1].x<W-SPACE)pipes.push(newPipe(W+24));
+  if(pipes[0].x<-PW-12)pipes.shift();
+  for(i=0;i<pipes.length;i++){
+    p=pipes[i];
+    if(!p.passed&&p.x+PW<BX-BR){
+      p.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:bird.y-26,txt:"+1",life:0.8});
+    }
+    if(circleRect(BX,bird.y,BR,p.x,0,PW,p.gy)||circleRect(BX,bird.y,BR,p.x,p.gy+GAP,PW,GROUND-p.gy-GAP)){
+      die("黑暗中撞上了管道!");return;
+    }
+  }
+  for(i=lanterns.length-1;i>=0;i--){
+    l=lanterns[i];
+    l.x-=SPEED*dt;
+    if(l.x<-30){lanterns.splice(i,1);continue;}
+    var dx=BX-l.x,dy=bird.y-(l.y+Math.sin(tick*2.4+l.ph)*7),rr=BR+13;
+    if(!l.got&&dx*dx+dy*dy<rr*rr){
+      l.got=true;
+      score++;
+      lit=Math.min(205,lit+65);
+      elScore.textContent=String(score);
+      elLit.textContent=String(Math.round(lit));
+      popups.push({x:l.x,y:l.y-22,txt:"灯火 +1",life:0.9});
+      lanterns.splice(i,1);
+    }
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function drawPipe(p){
+  ctx.fillStyle="#3f3a22";
+  ctx.fillRect(p.x,0,PW,p.gy);
+  ctx.fillRect(p.x,p.gy+GAP,PW,GROUND-p.gy-GAP);
+  ctx.fillStyle="#8a7a2e";
+  ctx.fillRect(p.x+6,0,6,p.gy);
+  ctx.fillRect(p.x+6,p.gy+GAP,6,GROUND-p.gy-GAP);
+  ctx.fillStyle="#26230f";
+  ctx.fillRect(p.x-4,p.gy-13,PW+8,13);
+  ctx.fillRect(p.x-4,p.gy+GAP,PW+8,13);
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#05070f";
+  ctx.fillRect(0,0,W,H);
+  for(i=0;i<pipes.length;i++)drawPipe(pipes[i]);
+  ctx.fillStyle="#141414";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  var off=(tick*SPEED)%24;
+  ctx.fillStyle="#1e1e1e";
+  for(i=-1;i<W/24+1;i++)ctx.fillRect(i*24-off,GROUND,12,6);
+  ctx.fillStyle="#fde047";
+  ctx.beginPath();ctx.arc(BX,bird.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#eab308";
+  ctx.beginPath();ctx.arc(BX-4,bird.y+4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(BX+5,bird.y-4,3.4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f97316";
+  ctx.beginPath();ctx.moveTo(BX+BR-2,bird.y);ctx.lineTo(BX+BR+8,bird.y+2);ctx.lineTo(BX+BR-2,bird.y+6);ctx.closePath();ctx.fill();
+  var g=ctx.createRadialGradient(BX,bird.y,Math.max(12,lit*0.45),BX,bird.y,lit);
+  g.addColorStop(0,"rgba(4,6,14,0)");
+  g.addColorStop(1,"rgba(4,6,14,0.965)");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+  for(i=0;i<lanterns.length;i++){
+    var l=lanterns[i],ly=l.y+Math.sin(tick*2.4+l.ph)*7;
+    var lg=ctx.createRadialGradient(l.x,ly,2,l.x,ly,30);
+    lg.addColorStop(0,"rgba(253,224,71,0.5)");
+    lg.addColorStop(1,"rgba(253,224,71,0)");
+    ctx.fillStyle=lg;
+    ctx.fillRect(l.x-30,ly-30,60,60);
+    ctx.fillStyle="#fef08a";
+    ctx.beginPath();ctx.arc(l.x,ly,5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(253,224,71,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

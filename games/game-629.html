@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色带截击</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:400px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+canvas{display:block;margin:0 auto;width:100%;max-width:340px;border-radius:10px;touch-action:none;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色带截击</h1>
+  <p class="tips">光点在彩虹色带上左右折返扫掠,金色目标带随机出现在色带某处!在光点落入目标带的一瞬点击色带(或按空格)。命中目标带收窄、光点加速;点偏 -1 生命(共 3 条),每回合限时 5 秒。命中 12 次通关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">命中</div><div class="big" id="win">0/12</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <canvas id="cv" width="340" height="230"></canvas>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色带截击</h2><p id="ovp">玩法:一条彩虹渐变色带横在屏幕中央,白色光点在其上往返扫掠。<br>· 色带上有一段金色高亮的目标带<br>· 光点进入目标带的瞬间点击(空格亦可)<br>· 命中:+100+连击加成,目标带变窄、光点加速<br>· 点偏或 5 秒内未出手:-1 生命,共 3 条<br>· 命中 12 次通关,考验你对颜色的定位与时机!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BX0=22,BX1=318,BY=106,BH=44;
+var p=0,dir=1,success=0,lives=3,score=0,combo=0,band=[140,204],roundT=5;
+var playing=false,over=false,last=0;
+function $(id){return document.getElementById(id)}
+function speed(){return Math.min(1.5,0.35+success*0.09)}
+function newBand(){
+  var w=Math.max(26,68-success*4);
+  var x=BX0+Math.random()*(BX1-BX0-w);
+  band=[x,x+w];
+  roundT=5;
+}
+function dotX(){return BX0+p*(BX1-BX0)}
+function press(){
+  if(!playing||over)return;
+  var dx=dotX();
+  if(dx>=band[0]-2&&dx<=band[1]+2){
+    success++;combo++;
+    score+=100+combo*25;
+    if(success>=12){drawTop();finish(true);return;}
+    newBand();
+  }else{
+    lives--;combo=0;
+    if(lives<=0){drawTop();finish(false);return;}
+    newBand();
+  }
+  drawTop();
+}
+function drawTop(){
+  $('win').textContent=success+'/12';
+  $('ck').textContent=combo;
+  $('sc').textContent=score;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+}
+function draw(){
+  var c=$('cv').getContext('2d');
+  c.fillStyle='#131832';c.fillRect(0,0,340,230);
+  var g=c.createLinearGradient(BX0,0,BX1,0);
+  for(var i=0;i<=12;i++)g.addColorStop(i/12,'hsl('+(i*30)+',72%,55%)');
+  c.fillStyle=g;
+  c.fillRect(BX0,BY,BX1-BX0,BH);
+  c.fillStyle='rgba(255,255,255,.2)';
+  c.fillRect(band[0],BY-6,band[1]-band[0],BH+12);
+  c.fillStyle='#ffd166';
+  c.fillRect(band[0],BY-6,3,BH+12);
+  c.fillRect(band[1]-3,BY-6,3,BH+12);
+  var dx=dotX();
+  c.beginPath();c.arc(dx,BY+BH/2,11,0,Math.PI*2);
+  c.fillStyle='#ffffff';c.fill();
+  c.strokeStyle='#ffd166';c.lineWidth=3;c.stroke();
+  c.fillStyle='#232a48';
+  c.fillRect(BX0,36,BX1-BX0,8);
+  c.fillStyle='#4cc9f0';
+  c.fillRect(BX0,36,(BX1-BX0)*Math.max(0,roundT/5),8);
+  c.fillStyle='#9aa3c0';
+  c.font='12px system-ui,sans-serif';
+  c.textAlign='center';
+  c.fillText('光点进入金色目标带时点击!',170,26);
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'截击专家!':'三次脱靶…';
+  $('ovp').innerHTML=(win?'12 次截击全部命中!':'止步于 ')+ '得分 <b>'+score+'</b> · 命中 <b>'+success+'</b> 次<br>目标带会越来越窄,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('cv').addEventListener('mousedown',press);
+$('cv').addEventListener('touchstart',function(e){e.preventDefault();press()},{passive:false});
+document.addEventListener('keydown',function(e){
+  if(e.code==='Space'&&!e.repeat){e.preventDefault();press();}
+});
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    p+=dir*speed()*dt;
+    if(p>1){p=2-p;dir=-1;}
+    if(p<0){p=-p;dir=1;}
+    roundT-=dt;
+    if(roundT<=0){
+      lives--;combo=0;
+      if(lives<=0){drawTop();finish(false);requestAnimationFrame(loop);return;}
+      newBand();
+    }
+    drawTop();
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+function startGame(){
+  p=0;dir=1;success=0;lives=3;score=0;combo=0;
+  playing=true;over=false;
+  newBand();
+  drawTop();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+newBand();drawTop();draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

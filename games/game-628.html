@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>像素填色</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+#grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.cell{aspect-ratio:1/1;border-radius:6px;background:#232a48;border:0;cursor:pointer;position:relative;font-size:13px;font-weight:800;color:rgba(232,234,246,.65);transition:transform .06s}
+.cell:active{transform:scale(.9)}
+.cell.ok{color:transparent}
+.cell.wrong{box-shadow:inset 0 0 0 2px #ff5c5c}
+#pals{display:flex;gap:10px;justify-content:center;margin-top:12px}
+.pal{width:52px;height:52px;border-radius:12px;border:3px solid rgba(255,255,255,.15);cursor:pointer;font-weight:900;color:#0f1220;font-size:15px}
+.pal.on{border-color:#ffd166;box-shadow:0 0 12px rgba(255,209,102,.5)}
+#hint{text-align:center;font-size:12px;color:#9aa3c0;margin-top:8px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>像素填色</h1>
+  <p class="tips">8×8 像素画等你上色!每格标有数字 1-4,先在下方选中对应色号,再点击格子填色;填对后数字消失,填错格子会亮红框(算一次失误)。本关失误满 12 次失败,完成 3 幅即通关。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">进度</div><div class="big" id="lv">1/3</div></div>
+      <div class="stat"><div class="mut">本关失误</div><div class="big" id="mis">0/12</div></div>
+      <div class="stat"><div class="mut">本关用时</div><div class="big" id="tm">0s</div></div>
+      <div class="stat"><div class="mut">总分</div><div class="big" id="sc">0</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="grid"></div>
+    <div id="pals"></div>
+    <div id="hint">点色盘或按键盘 1-4 选择颜色,再点格子填色</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">像素填色</h2><p id="ovp">玩法:数字填色·像素画。<br>· 每个格子上的数字表示它应填的色号(1-4)<br>· 下方色盘点选(或按 1-4 键),再点格子涂色<br>· 填对的格子数字消失;填错立即记一次失误并亮红框,可重涂<br>· 全部填对自动进入下一幅;单幅失误 12 次判负;完成 3 幅通关,得分 = 基础分 - 失误 - 用时</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var PAL=[['红','#ff5c5c'],['黄','#ffd166'],['绿','#51d88a'],['蓝','#4da3ff']];
+var level=1,pattern=[],paint=[],active=0;
+var lvlMist=0,lvlStart=0,totalScore=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function genPattern(){
+  pattern=[];paint=[];
+  for(var r=0;r<8;r++){
+    var half=[];
+    for(var c=0;c<4;c++)half.push(Math.floor(Math.random()*4));
+    for(c=0;c<4;c++){pattern.push(half[c]);paint.push(-1);}
+    for(c=0;c<4;c++){pattern.push(half[3-c]);paint.push(-1);}
+  }
+}
+function render(){
+  var g=$('grid');
+  if(g.childElementCount!==64){
+    g.innerHTML='';
+    for(var k=0;k<64;k++){
+      var d=document.createElement('button');
+      d.className='cell';
+      (function(idx){d.addEventListener('click',function(){paintCell(idx)})})(k);
+      g.appendChild(d);
+    }
+  }
+  var done=0;
+  for(var i=0;i<64;i++){
+    var el=g.children[i];
+    var p=paint[i],want=pattern[i];
+    el.style.background=p>=0?PAL[p][1]:'#232a48';
+    var good=p===want;
+    if(good){done++;}
+    el.className='cell'+(good?' ok':'')+(p>=0&&!good?' wrong':'');
+    el.textContent=good?'':String(want+1);
+  }
+  $('mis').textContent=lvlMist+'/12';
+  $('sc').textContent=totalScore;
+  $('lv').textContent=level+'/3';
+  return done;
+}
+function checkComplete(){
+  var done=render();
+  if(done<64)return;
+  var secs=Math.round((performance.now()-lvlStart)/1000);
+  var gained=Math.max(60,600-lvlMist*50-secs*3);
+  totalScore+=gained;
+  if(level>=3){finish(true);return;}
+  level++;lvlMist=0;
+  genPattern();lvlStart=performance.now();
+  render();
+}
+function paintCell(idx){
+  if(!playing||over)return;
+  if(paint[idx]===pattern[idx])return;
+  paint[idx]=active;
+  if(active!==pattern[idx]){
+    lvlMist++;
+    if(lvlMist>=12){render();finish(false);return;}
+  }
+  checkComplete();
+}
+function buildPals(){
+  var box=$('pals');box.innerHTML='';
+  for(var i=0;i<4;i++){
+    var b=document.createElement('button');
+    b.className='pal'+(i===active?' on':'');
+    b.style.background=PAL[i][1];
+    b.textContent=i+1;
+    (function(idx){b.addEventListener('click',function(){setActive(idx)})})(i);
+    box.appendChild(b);
+  }
+}
+function setActive(i){
+  active=i;buildPals();
+}
+document.addEventListener('keydown',function(e){
+  if(e.key>='1'&&e.key<='4')setActive(+e.key-1);
+});
+function finish(win){
+  playing=false;over=true;
+  var secs=Math.round((performance.now()-lvlStart)/1000);
+  $('ovt').textContent=win?'像素画展出成功!':'失误太多,画布报废…';
+  $('ovp').innerHTML=(win?'三幅像素画全部完成!':'本幅失误满 12 次。')+'<br>总分 <b>'+totalScore+'</b> · 本关用时 '+secs+' 秒<br>先填大块再抠细节,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  level=1;lvlMist=0;totalScore=0;active=0;
+  playing=true;over=false;
+  genPattern();
+  lvlStart=performance.now();
+  buildPals();render();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+genPattern();buildPals();render();
+function loop(){
+  if(playing&&!over){
+    $('tm').textContent=Math.floor((performance.now()-lvlStart)/1000)+'s';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

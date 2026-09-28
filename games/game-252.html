@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双线同打</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#151a30;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#6bd6ff}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>双线同打</h1>
+<div id="tip">上下两条战线各有一个单词逼近核心：一次按键自动分配给匹配的那条线，一心二用！</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var WORDS=["twin","dual","pair","fork","lane","core","mesh","bind","flux","grip","halt","jinx","kilo","loom","mint","nexus","ozone","pivot","quilt","relay","spur","tact","unity","volt","wick","yield","zonal","drift","ember","crane","blade","frost","pearl","pixel","solar","spark","vivid","whale","maple","orbit"];
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var lanes,score,lives,kills,level,spawnT,elapsed,shake,running,raf,tPrev,parts;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function hudUpd(){hud.textContent='得分 '+score+'　核心 '+lives+'　歼灭 '+kills+'　等级 '+level;}
+function reset(){
+  lanes=[null,null];
+  score=0;lives=3;kills=0;level=1;spawnT=0.2;elapsed=0;shake=0;parts=[];
+  fill(0);fill(1);
+  hudUpd();
+}
+function fill(i){
+  var t=pick(WORDS);
+  for(var k=0;k<2;k++){if(lanes[k]&&lanes[k].text===t)t=pick(WORDS);}
+  lanes[i]={text:t,idx:0,x:i===0?-10:cv.width+10,dir:i===0?1:-1,done:0};
+  position(i);
+}
+function position(i){
+  var L=lanes[i];
+  if(!L)return;
+  var tw=L.text.length*13+26;
+  if(L.dir===1)L.x=Math.min(L.x,-2);
+  else L.x=Math.max(L.x,cv.width-tw+2);
+}
+function boom(x,y,col){for(var i=0;i<12;i++)parts.push({x:x,y:y,vx:rnd(-100,100),vy:rnd(-120,40),life:rnd(.25,.6),c:col});}
+function laneY(i){return cv.height*(i===0?0.3:0.7);}
+function complete(i){
+  var L=lanes[i];
+  score+=L.text.length*10;kills++;
+  if(kills%6===0)level=Math.min(9,level+1);
+  boom(L.dir===1?L.x+L.text.length*13+26:L.x,laneY(i),'#6bd6ff');
+  fill(i);
+  hudUpd();
+}
+function laneTw(L){return L.text.length*13+26;}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var order=[0,1];
+  var d0=Math.abs(lanes[0].x+laneTw(lanes[0])/2-cv.width/2);
+  var d1=Math.abs(lanes[1].x+laneTw(lanes[1])/2-cv.width/2);
+  if(d1<d0){order=[1,0];}
+  var hit=-1;
+  for(var o=0;o<2;o++){
+    var i=order[o],L=lanes[i];
+    if(L.text.charAt(L.idx)===ch){hit=i;break;}
+  }
+  if(hit<0){shake=Math.max(shake,3);return;}
+  var W=lanes[hit];
+  W.idx++;
+  if(W.idx>=W.text.length)complete(hit);
+}
+function update(dt){
+  elapsed+=dt;shake=Math.max(0,shake-dt*12);
+  for(var i=0;i<2;i++){
+    var L=lanes[i],tw=laneTw(L);
+    L.x+=L.dir*(30+level*5)*dt;
+    var cx=L.x+tw/2;
+    if(Math.abs(cx-cv.width/2)<8){
+      boom(cx,laneY(i),'#ff6b6b');
+      fill(i);
+      lives--;shake=7;hudUpd();
+      if(lives<=0){end(false);return;}
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  ctx.strokeStyle='rgba(107,214,255,.18)';ctx.lineWidth=2;
+  ctx.setLineDash([6,10]);
+  ctx.beginPath();ctx.moveTo(0,laneY(0));ctx.lineTo(cv.width,laneY(0));ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,laneY(1));ctx.lineTo(cv.width,laneY(1));ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#6bd6ff';
+  ctx.beginPath();ctx.arc(cv.width/2,cv.height/2,22+3*Math.sin(elapsed*4),0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#0f1220';
+  ctx.font='bold 13px system-ui, sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('核心',cv.width/2,cv.height/2+5);
+  ctx.textAlign='left';
+  ctx.font='bold 19px ui-monospace, Consolas, monospace';
+  for(var i=0;i<2;i++){
+    var L=lanes[i],tw=laneTw(L);
+    var y=laneY(i);
+    ctx.fillStyle='rgba(107,214,255,.12)';rr(L.x,y-15,tw,30,7);ctx.fill();
+    ctx.strokeStyle='rgba(107,214,255,.5)';ctx.lineWidth=1.5;rr(L.x,y-15,tw,30,7);ctx.stroke();
+    var pre=L.text.slice(0,L.idx);
+    ctx.fillStyle='#ffd76a';ctx.fillText(pre,L.x+13,y+7);
+    ctx.fillStyle='#e8eaf6';ctx.fillText(L.text.slice(L.idx),L.x+13+ctx.measureText(pre).width,y+7);
+    ctx.font='12px system-ui, sans-serif';
+    ctx.fillStyle='#9aa3c0';
+    ctx.fillText('战线'+(i+1),8,y-24);
+    ctx.font='bold 19px ui-monospace, Consolas, monospace';
+  }
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'双线告捷':'核心过载';
+  ovX.textContent='得分 '+score+'\n歼灭 '+kills+' 个单词　等级 '+level+'\n坚守 '+Math.round(elapsed)+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='双线同打';
+ovX.textContent='上下两条战线各有一个单词正逼近中央核心。\n你只有一套键盘：每个按键会自动匹配给「下一个需要的字母」吻合的那条战线。\n单词抵达核心扣 1 点核心值，共 3 点，打错键会抖动警示。';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

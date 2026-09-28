@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色影翻牌</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:460px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+#board{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:6px}
+.cardb{aspect-ratio:3/4;border-radius:10px;border:2px solid #333c63;background:linear-gradient(145deg,#232a48,#1a1f36);color:#9aa3c0;font-size:22px;font-weight:800;cursor:pointer;transition:background .12s,transform .08s}
+.cardb:active{transform:scale(.95)}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色影翻牌</h1>
+  <p class="tips">4×4 共 16 张牌,内藏 8 对颜色——但它们来自同一色相的邻近色域,彼此极其相似!翻两张:颜色完全一致即配对成功并保留,否则盖回。步数越少、用时越短,得分越高。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">已配对</div><div class="big" id="mt">0/8</div></div>
+      <div class="stat"><div class="mut">翻牌次数</div><div class="big" id="mv">0</div></div>
+      <div class="stat"><div class="mut">用时</div><div class="big" id="tm">0s</div></div>
+    </div>
+  </div>
+  <div class="card"><div id="board"></div></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色影翻牌</h2><p id="ovp">玩法:记忆翻牌·高难配色。<br>· 16 张牌中有 8 对两两同色的牌<br>· 每次翻开两张:同色即配对成功(保持翻开)<br>· 不同色则短暂展示后自动盖回<br>· 8 对全部配出即通关<br>· 挑战:牌色都在相近色域内,靠细微差别记忆!</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var baseHue=0,deck=[],first=-1,lockT=0,moves=0,matched=0,elapsed=0;
+var playing=false,over=false,timeoutId=0;
+function $(id){return document.getElementById(id)}
+function colOf(c){return 'hsl('+Math.round((baseHue+c*13)%360)+',58%,50%)'}
+function build(){
+  baseHue=Math.floor(Math.random()*360);
+  deck=[];
+  for(var i=0;i<16;i++)deck.push({c:i%8,up:false,done:false});
+  for(i=15;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=deck[i];deck[i]=deck[j];deck[j]=t;
+  }
+}
+function render(){
+  var b=$('board');
+  if(b.childElementCount!==16){
+    b.innerHTML='';
+    for(var k=0;k<16;k++){
+      var d=document.createElement('button');
+      d.className='cardb';
+      (function(idx){d.addEventListener('click',function(){flip(idx)})})(k);
+      b.appendChild(d);
+    }
+  }
+  for(var i=0;i<16;i++){
+    var el=b.children[i],d=deck[i];
+    if(d.up||d.done){
+      el.style.background=colOf(d.c);
+      el.style.borderColor='rgba(255,255,255,.45)';
+      el.textContent='';
+    }else{
+      el.style.background='';
+      el.style.borderColor='';
+      el.textContent='?';
+    }
+  }
+  $('mt').textContent=matched+'/8';
+  $('mv').textContent=moves;
+}
+function flip(idx){
+  if(!playing||over)return;
+  if(performance.now()<lockT)return;
+  var d=deck[idx];
+  if(d.up||d.done)return;
+  d.up=true;
+  if(first<0){first=idx;render();return;}
+  moves++;
+  var a=deck[first],f=first;
+  first=-1;
+  if(a.c===d.c){
+    a.done=true;d.done=true;matched++;
+    render();
+    if(matched>=8)finish(true);
+  }else{
+    lockT=performance.now()+750;
+    render();
+    if(timeoutId)clearTimeout(timeoutId);
+    timeoutId=setTimeout(function(){
+      deck[f].up=false;deck[idx].up=false;
+      render();
+    },750);
+  }
+}
+function finish(win){
+  playing=false;over=true;
+  var score=Math.max(0,2000-moves*35-Math.round(elapsed)*4);
+  $('ovt').textContent='全部配对!';
+  $('ovp').innerHTML='翻牌 <b>'+moves+'</b> 次 · 用时 <b>'+Math.round(elapsed)+'</b> 秒<br>得分 <b>'+score+'</b><br>相邻色相的细微差别逃不过你的眼睛,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function startGame(){
+  if(timeoutId)clearTimeout(timeoutId);
+  first=-1;lockT=0;moves=0;matched=0;elapsed=0;
+  playing=true;over=false;
+  build();render();
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+build();render();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    elapsed+=dt;
+    $('tm').textContent=Math.round(elapsed)+'s';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

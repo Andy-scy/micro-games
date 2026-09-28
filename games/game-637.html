@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深浅对决</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:460px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+#rule{text-align:center;font-size:18px;font-weight:800;color:#4cc9f0;margin-bottom:10px;min-height:26px}
+#duel{display:flex;gap:16px;justify-content:center}
+.side{width:150px;height:150px;border-radius:16px;border:3px solid rgba(255,255,255,.12);cursor:pointer;transition:transform .08s}
+.side:active{transform:scale(.93)}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>深浅对决</h1>
+  <p class="tips">两块同色系色块正面对决,按顶部规则点出「更深」或「更浅」的那块!每关两者明暗差更小、思考时间更短,规则还会随机互换。答对涨连击分,答错或超时 -1 生命(共 3 条)。撑过 15 关通关!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/15</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div id="rule"></div>
+    <div class="tbarWrap" style="margin-bottom:10px"><div id="tbar"></div></div>
+    <div id="duel">
+      <button class="side" id="sA"></button>
+      <button class="side" id="sB"></button>
+    </div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">深浅对决</h2><p id="ovp">玩法:明度分辨力对决。<br>· 两块同色相、不同明度的色块同台<br>· 按规则点击「更深」或「更浅」的那块<br>· 规则每关随机切换,读清再出手!<br>· 限时作答,超时算错;色差逐关缩小(16% → 3%)<br>· 答对 +1+连击加成;答错 -1 生命;撑过 15 关通关</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var level=1,lives=3,score=0,streak=0;
+var hue=0,ligA=0,ligB=0,rule=0;
+var roundT=0,roundLen=0,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function startRound(){
+  hue=Math.floor(Math.random()*360);
+  var delta=Math.max(3,16-level);
+  var dir=Math.random()<0.5?1:-1;
+  if(dir>0){
+    ligA=18+Math.random()*(76-delta);
+    ligB=ligA+delta;
+  }else{
+    ligA=8+delta+Math.random()*(80-delta);
+    ligB=ligA-delta;
+  }
+  rule=Math.random()<0.5?0:1;
+  roundLen=Math.max(2.2,4.5-level*0.15);
+  roundT=roundLen;
+  $('rule').textContent=rule===0?'点出「更深」的色块':'点出「更浅」的色块';
+  $('sA').style.background='hsl('+hue+',62%,'+Math.round(ligA)+'%)';
+  $('sB').style.background='hsl('+hue+',62%,'+Math.round(ligB)+'%)';
+  $('lv').textContent=Math.min(level,15)+'/15';
+}
+function drawTop(){
+  $('sc').textContent=score;
+  $('ck').textContent=streak;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+  $('tbar').style.width=(Math.max(0,roundT)/roundLen*100)+'%';
+}
+function pick(side){
+  if(!playing||over)return;
+  var ok;
+  if(rule===0)ok=(side===0)===(ligA<ligB);
+  else ok=(side===0)===(ligA>ligB);
+  if(ok){
+    streak++;
+    score+=1+Math.floor(streak/5);
+    level++;
+    if(level>15){finish(true);return;}
+    startRound();
+  }else{
+    lives--;streak=0;
+    if(lives<=0){drawTop();finish(false);return;}
+    startRound();
+  }
+  drawTop();
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'明度之眼,15 连破!':'看不出来了…';
+  $('ovp').innerHTML=(win?'15 关深浅全部判对!':'止步第 '+level+' 关。')+'<br>总分 <b>'+score+'</b> · 最高连击见证你的稳定<br>盯住色块的「重量感」,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('sA').addEventListener('click',function(){pick(0)});
+$('sB').addEventListener('click',function(){pick(1)});
+document.addEventListener('keydown',function(e){
+  if(e.repeat)return;
+  if(e.key==='ArrowLeft')pick(0);
+  if(e.key==='ArrowRight')pick(1);
+});
+function startGame(){
+  level=1;lives=3;score=0;streak=0;
+  playing=true;over=false;
+  $('overlay').classList.add('hide');
+  startRound();drawTop();
+}
+$('obtn').addEventListener('click',startGame);
+startRound();drawTop();
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    roundT-=dt;
+    if(roundT<=0){
+      lives--;streak=0;
+      if(lives<=0){drawTop();finish(false);requestAnimationFrame(loop);return;}
+      startRound();
+    }
+    drawTop();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

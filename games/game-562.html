@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双骰惊魂</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:26px;text-align:center;color:#ff6b81;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.sc{flex:1;text-align:center;min-width:150px;padding:10px}
+.nm{font-size:14px;color:#cdd6f4;margin-bottom:4px}
+.big{font-size:24px;font-weight:800;color:#ff6b81}
+.mut{color:#9aa3c0;font-size:13px}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:56px;height:56px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.active{outline:2px solid #ff6b81}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ff6b81;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>双骰惊魂</h1>
+  <p class="tips">每轮同时掷两颗骰子:对子记「点数×2」入本轮;出现单个 1 则本轮清零换人;最可怕的双 1 会让<b>全部总分归零</b>!先攒满 100 分者胜,随时可收分落袋。</p>
+  <div class="row">
+    <div class="card sc" id="c0"><div class="nm">你</div><div class="big" id="t0">0</div><div class="mut">本轮 <b id="p0">0</b> 分</div></div>
+    <div class="card sc" id="c1"><div class="nm">电脑</div><div class="big" id="t1">0</div><div class="mut">本轮 <b id="p1">0</b> 分</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
+    <div class="big" id="pot" style="margin-top:8px">本轮 0 分</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="roll">继续掷</button>
+      <button class="btn sec" id="hold">收分落袋</button>
+    </div>
+  </div>
+  <div class="card log" id="log">你先手,点「继续掷」开始!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var GOAL=100;
+var tot=[0,0],pot=0,turn=0,busy=false,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function anim(cb){
+  var t0=performance.now(),last=0,a=rnd(),b=rnd();
+  function step(t){
+    if(t-t0<650){ if(t-last>80){last=t;setDie($('d1'),rnd());setDie($('d2'),rnd());} requestAnimationFrame(step); }
+    else{ setDie($('d1'),a);setDie($('d2'),b);cb(a,b); }
+  }
+  requestAnimationFrame(step);
+}
+function draw(){
+  $('t0').textContent=tot[0];$('t1').textContent=tot[1];
+  $('p0').textContent=(turn===0&&!over)?pot:0;
+  $('p1').textContent=(turn===1&&!over)?pot:0;
+  $('c0').classList.toggle('active',turn===0&&!over);
+  $('c1').classList.toggle('active',turn===1&&!over);
+  $('pot').textContent='本轮 '+pot+' 分';
+}
+function say(m){$('log').textContent=m}
+function setBtns(){
+  var my=(turn===0&&!busy&&!over);
+  $('roll').disabled=!my;
+  $('hold').disabled=!my||pot===0;
+}
+function endTurn(msg){
+  pot=0;turn=1-turn;draw();setBtns();
+  if(msg)say(msg);
+  if(turn===1)setTimeout(aiAct,800);
+}
+function win(w){
+  over=true;draw();setBtns();
+  $('ovt').textContent=w===0?'你赢啦!':'电脑获胜';
+  $('ovp').innerHTML='最终比分 — 你 <b>'+tot[0]+'</b> : 电脑 <b>'+tot[1]+'</b><br>'+(w===0?'对子翻倍的甜头你尝到了!':'电脑抢先攒满 100 分,再战一回?');
+  $('overlay').classList.add('show');
+}
+function judge(a,b,who){
+  var name=who===0?'你':'电脑';
+  if(a===1&&b===1){
+    tot[who]=0;pot=0;draw();
+    endTurn('双 1 惊魂!'+name+'本轮清零,总分也被打回 0!');
+    return true;
+  }
+  if(a===1||b===1){
+    var lost=pot;pot=0;draw();
+    endTurn(name+'掷出单个 1,本轮 '+lost+' 分清零,换人!');
+    return true;
+  }
+  if(a===b){
+    pot+=(a+b)*2;draw();
+    say(name+'掷出对 '+a+'!本轮 +'+((a+b)*2)+' 分,共 '+pot+' 分。');
+    return false;
+  }
+  pot+=a+b;draw();
+  say(name+'掷出 '+a+'+'+b+'='+(a+b)+' 本轮共 '+pot+' 分。');
+  return false;
+}
+$('roll').onclick=function(){
+  if(busy||over||turn!==0)return;
+  busy=true;setBtns();
+  anim(function(a,b){
+    var boom=judge(a,b,0);
+    if(!boom){busy=false;setBtns();}
+  });
+};
+$('hold').onclick=function(){
+  if(busy||over||turn!==0||pot===0)return;
+  var gain=pot;tot[0]+=pot;
+  if(tot[0]>=GOAL){draw();win(0);return}
+  endTurn('你收入 '+gain+' 分,总分 '+tot[0]+'。轮到电脑。');
+};
+function aiAct(){
+  if(over)return;
+  anim(function(a,b){
+    var boom=judge(a,b,1);
+    if(boom)return;
+    var want=22+Math.floor(Math.random()*8);
+    if(tot[1]+pot>=GOAL||pot>=want){
+      var gain=pot;tot[1]+=pot;
+      if(tot[1]>=GOAL){draw();win(1);return}
+      endTurn('电脑收下 '+gain+' 分,总分 '+tot[1]+'。轮到你!');
+    }else{ setTimeout(aiAct,600); }
+  });
+}
+$('again').onclick=function(){
+  tot=[0,0];pot=0;turn=0;busy=false;over=false;
+  $('overlay').classList.remove('show');
+  setDie($('d1'),1);setDie($('d2'),1);draw();setBtns();
+  say('新的一局,你先手。点「继续掷」开始!');
+};
+setDie($('d1'),1);setDie($('d2'),1);draw();setBtns();
+</script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹力跳床</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹力跳床</h1>
+  <p class="hint">空格 / 点击 / 触屏 = 弹跳助力 · 地面是跳床,天花板才是死亡!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹力跳床</h2>
+      <p id="ovDesc">反常规玩法:地面不是绝路,而是一张巨大的跳床——掉下去会被高高弹起!真正的威胁在头顶:致命尖刺天花板、下垂冰锥和悬浮尖方块。点按给球一次额外弹力,控制起跳时机穿行。每过一个冰锥阵 +1 分!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始弹跳</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=600,GROUND=556,GRAV=1420,BOOST=-370,BX=120,BR=13,SPEED=142,SPACE=262;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elBest=$("best"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu",ball,cols,blocks,rings,popups,score,best=0,tick,squash;
+function newCol(x){return{x:x,w:62,len:130+Math.random()*200,passed:false};}
+function reset(){
+  ball={y:300,vy:0};
+  cols=[newCol(W+160)];
+  blocks=[];rings=[];popups=[];
+  score=0;tick=0;squash=0;
+  elScore.textContent="0";
+}
+function act(){
+  if(state!=="playing")return;
+  ball.vy=BOOST;
+}
+function die(msg){
+  state="over";
+  if(score>best){best=score;elBest.textContent=String(best);}
+  ovTitle.textContent="游戏结束";
+  ovTitle.style.color="#f87171";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function circleRect(cx,cy,r,rx,ry,rw,rh){
+  var nx=Math.max(rx,Math.min(cx,rx+rw)),ny=Math.max(ry,Math.min(cy,ry+rh));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var i,c;
+  tick+=dt;
+  squash=Math.max(0,squash-dt*5);
+  ball.vy+=GRAV*dt;
+  ball.y+=ball.vy*dt;
+  if(ball.y<BR+26){die("弹得太高,扎进了天花板尖刺!");return;}
+  if(ball.y>GROUND-BR){
+    ball.y=GROUND-BR;
+    ball.vy=-Math.max(445,Math.abs(ball.vy)*0.85);
+    squash=1;
+    rings.push({x:BX,y:GROUND,r:6,life:0.5});
+  }
+  for(i=0;i<cols.length;i++)cols[i].x-=SPEED*dt;
+  if(cols[cols.length-1].x<W-SPACE){
+    cols.push(newCol(W+24));
+    if(Math.random()<0.5)blocks.push({x:W+24+150,y:GROUND-310+Math.random()*150,s:46});
+  }
+  if(cols[0].x<-80)cols.shift();
+  for(i=blocks.length-1;i>=0;i--){
+    blocks[i].x-=SPEED*dt;
+    if(blocks[i].x<-80)blocks.splice(i,1);
+  }
+  for(i=0;i<cols.length;i++){
+    c=cols[i];
+    if(!c.passed&&c.x+c.w<BX-BR){
+      c.passed=true;score++;
+      elScore.textContent=String(score);
+      popups.push({x:BX+34,y:ball.y-26,txt:"+1",life:0.8});
+    }
+    if(circleRect(BX,ball.y,BR,c.x,26,c.w,c.len)){die("被下垂冰锥扎中了!");return;}
+  }
+  for(i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    if(circleRect(BX,ball.y,BR,b.x,b.y,b.s,b.s)){die("撞上了悬浮尖方块!");return;}
+  }
+  for(i=rings.length-1;i>=0;i--){
+    rings[i].r+=220*dt;rings[i].life-=dt;
+    if(rings[i].life<=0)rings.splice(i,1);
+  }
+  for(i=popups.length-1;i>=0;i--){
+    popups[i].y-=42*dt;popups[i].life-=dt;
+    if(popups[i].life<=0)popups.splice(i,1);
+  }
+}
+function draw(){
+  var i,c;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0c1a12";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(190,255,210,0.3)";
+  for(i=0;i<35;i++)ctx.fillRect((i*149)%W,(i*233)%GROUND,1.3,1.3);
+  for(i=0;i<cols.length;i++){
+    c=cols[i];
+    ctx.fillStyle="#0e7490";
+    ctx.fillRect(c.x,26,c.w,c.len-24);
+    ctx.fillStyle="#22d3ee";
+    ctx.fillRect(c.x+6,26,7,c.len-24);
+    ctx.fillStyle="#67e8f9";
+    var k,n=5;
+    for(k=0;k<n;k++){
+      ctx.beginPath();
+      ctx.moveTo(c.x+k*(c.w/n),c.len);
+      ctx.lineTo(c.x+k*(c.w/n)+c.w/n/2,c.len+22);
+      ctx.lineTo(c.x+(k+1)*(c.w/n),c.len);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  for(i=0;i<blocks.length;i++){
+    var b=blocks[i];
+    ctx.fillStyle="#0e7490";
+    ctx.fillRect(b.x,b.y,b.s,b.s);
+    ctx.fillStyle="#67e8f9";
+    ctx.beginPath();ctx.arc(b.x+b.s/2,b.y+b.s/2,7,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#22d3ee";ctx.lineWidth=2;
+    ctx.strokeRect(b.x,b.y,b.s,b.s);
+  }
+  ctx.fillStyle="#143324";
+  ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.strokeStyle="#4ade80";ctx.lineWidth=2.5;
+  var off=(tick*SPEED)%26;
+  for(i=-1;i<W/26+1;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*26-off,GROUND+6);
+    ctx.lineTo(i*26-off+13,GROUND+16);
+    ctx.lineTo(i*26-off,GROUND+26);
+    ctx.stroke();
+  }
+  ctx.fillStyle="#4ade80";
+  ctx.fillRect(0,GROUND-4,W,4);
+  for(i=0;i<rings.length;i++){
+    ctx.strokeStyle="rgba(74,222,128,"+rings[i].life*2+")";
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(rings[i].x,rings[i].y,rings[i].r,Math.PI,Math.PI*2);ctx.stroke();
+  }
+  ctx.strokeStyle="#5eead4";ctx.lineWidth=2;
+  for(i=0;i<W/40;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*40+((tick*SPEED)%40)-20,4);
+    ctx.lineTo(i*40+((tick*SPEED)%40)-10,14);
+    ctx.lineTo(i*40+((tick*SPEED)%40)-20,22);
+    ctx.stroke();
+  }
+  var sy=1+squash*0.35,sx=1-squash*0.3;
+  ctx.save();
+  ctx.translate(BX,ball.y);
+  ctx.scale(sx,sy);
+  ctx.fillStyle="#86efac";
+  ctx.beginPath();ctx.arc(0,0,BR,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#4ade80";
+  ctx.beginPath();ctx.arc(-4,4,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#0c1a12";
+  ctx.beginPath();ctx.arc(5,-4,3.2,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  ctx.font="bold 16px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<popups.length;i++){
+    ctx.fillStyle="rgba(134,239,172,"+popups[i].life+")";
+    ctx.fillText(popups[i].txt,popups[i].x,popups[i].y);
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){e.preventDefault();if(!e.repeat)act();}
+});
+cv.addEventListener("mousedown",function(e){e.preventDefault();act();});
+cv.addEventListener("touchstart",function(e){e.preventDefault();act();},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

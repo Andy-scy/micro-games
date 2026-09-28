@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>巨篮养成</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>巨篮养成</h1>
+  <p class="tips">小篮子越接越大:每接 8 颗能量豆升 1 级,篮子变宽变高,但球也越落越快!← → 或 A/D 移篮,触屏拖动;练到 6 级巨篮即通关,漏接 3 次失败。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">篮子等级</div><div class="big" id="lv">1/6</div></div>
+    <div class="stat"><div class="mut">升级进度</div><div class="big" id="pg">0/8</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">巨篮养成</h2><p id="ovp">玩法:边接边成长,养成为胜。<br>· 初始小篮 Lv1,每接 8 颗能量豆升 1 级<br>· 篮子每级变宽变高,接球分 = 10×等级<br>· 球速随等级与时间加快,难度同步涨<br>· 升到 Lv6 巨篮:通关胜利!<br>· 漏接 -1 生命共 3 条;键盘/触屏移篮皆可</p><button class="btn" id="obtn">开始养成</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,lives:3,level:1,prog:0,need:8,st:0.75,t:0,items:[],pops:[],bx:W/2,flash:0,keys:{}}}
+reset();
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function bw(){return 56+(S.level-1)*18}
+function bh(){return 14+S.level*3}
+function startGame(){reset();S.on=true;$('lv').textContent='1/6';$('pg').textContent='0/8';$('sc').textContent='0';$('hp').textContent='♥♥♥';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:1})}
+function update(dt){
+  S.t+=dt;
+  if(S.flash>0)S.flash-=dt;
+  var sp=340,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  var hw=bw()/2;
+  S.bx=Math.max(hw,Math.min(W-hw,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.4,0.8-S.t*0.01)*(0.75+Math.random()*0.5);
+    var v=(150+S.t*3.5+Math.random()*55)*(1+(S.level-1)*0.08);
+    S.items.push({x:28+Math.random()*(W-56),y:-16,v:v,rot:Math.random()*6});
+  }
+  var by=H-46,ww=bw();
+  for(var i=S.items.length-1;i>=0;i--){
+    var it=S.items[i];
+    it.y+=it.v*dt;it.rot+=dt*3;
+    if(it.y>=by-16&&it.y<=by+10&&Math.abs(it.x-S.bx)<ww/2+8){
+      S.prog++;
+      var pts=10*S.level;
+      S.score+=pts;$('sc').textContent=S.score;
+      $('lv').textContent=S.level+'/6';
+      $('pg').textContent=S.prog+'/'+S.need;
+      pop(it.x,by-30,'+'+pts,'#51d88a');
+      if(S.prog>=S.need){
+        if(S.level>=6){S.items.splice(i,1);gameOver(true);return}
+        S.level++;S.prog=0;S.flash=0.5;
+        $('lv').textContent=S.level+'/6';
+        $('pg').textContent='0/'+S.need;
+        pop(S.bx,by-60,'篮子升级!Lv'+S.level,'#ffd166');
+      }
+      S.items.splice(i,1);continue;
+    }
+    if(it.y>H+18){
+      S.items.splice(i,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(it.x,H-100,'漏接!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver(false);
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(win){
+  S.on=false;
+  if(win){
+    $('ovt').textContent='巨篮养成成功!';
+    $('ovp').innerHTML='Lv6 巨篮达成!<br>总得分 <b>'+S.score+'</b><br>从巴掌小篮到六格巨篮,成长感拉满,再养一局!';
+  }else{
+    $('ovt').textContent='养成失败…';
+    $('ovp').innerHTML='止步 Lv'+S.level+',总得分 <b>'+S.score+'</b><br>篮越大越稳,前期别慌!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='rgba(81,216,138,.9)';rr(120,14,240,8,4);ctx.fill();
+  ctx.fillStyle='#ffd166';rr(120,14,240*Math.min(1,S.prog/S.need),8,4);ctx.fill();
+  ctx.fillStyle='#9aa3c0';ctx.font='12px system-ui';ctx.textAlign='center';
+  ctx.fillText('升级进度 Lv'+S.level,W/2,38);
+  for(var i=0;i<S.items.length;i++){
+    var it=S.items[i];
+    ctx.save();ctx.translate(it.x,it.y);ctx.rotate(Math.sin(it.rot)*0.35);
+    ctx.fillStyle='rgba(76,201,240,.2)';
+    ctx.beginPath();ctx.arc(0,0,13,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#4cc9f0';
+    ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#e8fbff';
+    ctx.beginPath();ctx.arc(-2,-2,2.5,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  var by=H-46,ww=bw(),hh=bh();
+  if(S.flash>0){
+    ctx.fillStyle='rgba(255,209,102,'+(S.flash*0.6)+')';
+    rr(S.bx-ww/2-6,by-6,ww+12,hh+12,10);ctx.fill();
+  }
+  ctx.fillStyle='#5a4bb8';rr(S.bx-ww/2,by,ww,hh,7);ctx.fill();
+  ctx.strokeStyle='#b3a6ff';ctx.lineWidth=2;rr(S.bx-ww/2,by,ww,hh,7);ctx.stroke();
+  ctx.fillStyle='#e8eaf6';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('Lv'+S.level,S.bx,by+hh-4);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

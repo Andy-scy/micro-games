@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符号风暴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#151a30;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#6bd6ff}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>符号风暴</h1>
+<div id="tip">标点、数字与符号从天而降：按下键盘上对应的按键（多数需配合 Shift）将其击碎</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var SYMS=[
+{c:'@',n:'艾特'},{c:'#',n:'井号'},{c:'$',n:'美元'},{c:'%',n:'百分号'},{c:'&',n:'和号'},
+{c:'*',n:'星号'},{c:'(',n:'左括号'},{c:')',n:'右括号'},{c:'!',n:'叹号'},{c:'?',n:'问号'},
+{c:';',n:'分号'},{c:':',n:'冒号'},{c:'+',n:'加号'},{c:'=',n:'等号'},{c:'<',n:'小于'},
+{c:'>',n:'大于'},{c:'/',n:'斜杠'},{c:'\\',n:'反斜杠'},{c:'~',n:'波浪号'},{c:'^',n:'脱字符'},
+{c:'1',n:'数字一'},{c:'2',n:'数字二'},{c:'3',n:'数字三'},{c:'4',n:'数字四'},{c:'5',n:'数字五'},
+{c:'6',n:'数字六'},{c:'7',n:'数字七'},{c:'8',n:'数字八'},{c:'9',n:'数字九'},{c:'0',n:'数字零'}
+];
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var syms,parts,score,lives,kills,level,spawnT,elapsed,shake,running,raf,tPrev;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function hudUpd(){hud.textContent='得分 '+score+'　生命 '+lives+'　击碎 '+kills+'　等级 '+level;}
+function reset(){syms=[];parts=[];score=0;lives=3;kills=0;level=1;spawnT=0.5;elapsed=0;shake=0;hudUpd();}
+function spawn(){
+  var s=pick(SYMS);
+  var xx=rnd(30,Math.max(50,cv.width-70));
+  syms.push({c:s.c,n:s.n,x:xx,y:-30,vy:34+level*6+rnd(0,18)});
+}
+function boom(x,y,col){for(var i=0;i<12;i++)parts.push({x:x,y:y,vx:rnd(-100,100),vy:rnd(-150,20),life:rnd(.25,.6),c:col});}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  var hit=-1;
+  for(var i=0;i<syms.length;i++){if(syms[i].c===ch){hit=i;break;}}
+  if(hit>=0){
+    var s=syms[hit];
+    score+=12+level;kills++;
+    if(kills%12===0)level=Math.min(9,level+1);
+    boom(s.x+22,s.y+20,'#6bd6ff');syms.splice(hit,1);hudUpd();
+  }else{
+    shake=Math.max(shake,3);
+  }
+}
+function update(dt){
+  elapsed+=dt;shake=Math.max(0,shake-dt*12);
+  spawnT-=dt;
+  if(spawnT<=0){spawn();spawnT=Math.max(0.7,1.8-level*0.12);}
+  for(var i=syms.length-1;i>=0;i--){
+    var s=syms[i];s.y+=s.vy*dt;
+    if(s.y>cv.height-46){
+      boom(s.x+22,cv.height-40,'#ff6b6b');syms.splice(i,1);
+      lives--;shake=6;hudUpd();
+      if(lives<=0){end(false);return;}
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=330*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  ctx.strokeStyle='rgba(107,214,255,.5)';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(0,cv.height-26);ctx.lineTo(cv.width,cv.height-26);ctx.stroke();
+  ctx.setLineDash([]);
+  for(var i=0;i<syms.length;i++){
+    var s=syms[i];
+    ctx.fillStyle='rgba(107,214,255,.12)';rr(s.x,s.y,46,46,10);ctx.fill();
+    ctx.strokeStyle='rgba(107,214,255,.7)';ctx.lineWidth=2;rr(s.x,s.y,46,46,10);ctx.stroke();
+    ctx.textAlign='center';
+    ctx.font='bold 28px ui-monospace, Consolas, monospace';
+    ctx.fillStyle='#6bd6ff';ctx.fillText(s.c,s.x+23,s.y+32);
+    ctx.font='12px system-ui, sans-serif';
+    ctx.fillStyle='#9aa3c0';ctx.fillText(s.n,s.x+23,s.y+58);
+    ctx.textAlign='left';
+  }
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'风暴平息':'符号过载';
+  ovX.textContent='得分 '+score+'\n击碎符号 '+kills+' 个　等级 '+level+'\n坚持 '+Math.round(elapsed)+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='符号风暴';
+ovX.textContent='标点与数字符号不断坠落，每个方块上标注了它的中文名。\n按下键盘上对应的字符键即可击碎（如 ! ? # @ 多数需按住 Shift）。\n符号落地扣 1 生命，共 3 条命。';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

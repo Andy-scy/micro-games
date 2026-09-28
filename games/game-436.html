@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>子弹时间跑者</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0a1c3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>子弹时间跑者</h1>
+  <p class="hint">空格/↑ 跳 · ↓/S 滑铲 · 按住 Shift/K 或屏幕左半 开启子弹时间(耗能量)· 触屏:点右半跳</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>能量 <b id="en">100</b>%</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">子弹时间跑者</h2>
+      <p id="ovDesc">哨戒炮塔朝你疯狂开火!你可以短暂开启"子弹时间"让世界变慢——但能量有限。跳过木箱、滑铲躲高射弹道,走位与时机缺一不可。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elEn=$("en"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s436");
+var state="menu",dist,score,speed,crates,turrets,bullets,px,py,vy,grounded,slideHeld,slowHeld,energy,slowOn,nextGap,tstartY;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=320;crates=[];turrets=[];bullets=[];
+  px=110;py=GY-42;vy=0;grounded=true;slideHeld=false;slowHeld=false;
+  energy=100;slowOn=false;nextGap=430;tstartY=0;
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elEn.textContent=Math.round(energy);
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s436",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function doJump(){
+  if(state!=="playing")return;
+  if(grounded){vy=-540;grounded=false;}
+}
+function circleHit(cx,cy,r,b){
+  var nx=Math.max(b.x,Math.min(cx,b.x+b.w));
+  var ny=Math.max(b.y,Math.min(cy,b.y+b.h));
+  var dx=cx-nx,dy=cy-ny;
+  return dx*dx+dy*dy<r*r;
+}
+function update(dt){
+  var s=dt/1000,i,o;
+  slowOn=slowHeld&&energy>2;
+  var ts=slowOn?0.35:1;
+  var sw=s*ts;
+  if(slowOn)energy-=30*s;
+  else energy=Math.min(100,energy+14*s);
+  speed=320+dist*0.014;
+  dist+=speed*sw;score=Math.floor(dist/10);
+  var sliding=grounded&&slideHeld;
+  if(!grounded){
+    vy+=2200*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }
+  nextGap-=speed*sw;
+  if(nextGap<=0){
+    var r=Math.random();
+    if(r<0.34)crates.push({x:W+40,w:26,h:32});
+    else if(r<0.62)turrets.push({x:W+40,type:"low",cd:0.5+Math.random()*0.5});
+    else turrets.push({x:W+40,type:"high",cd:0.5+Math.random()*0.5});
+    nextGap=250+Math.random()*280+speed*0.3;
+  }
+  var b=sliding?{x:px-6,y:GY-20,w:38,h:20}:{x:px+3,y:py+3,w:20,h:37};
+  for(i=crates.length-1;i>=0;i--){
+    var c=crates[i];c.x-=speed*sw;
+    if(c.x<-70){crates.splice(i,1);continue;}
+    if(!sliding&&px+23>c.x+3&&px+5<c.x+c.w-3&&py+39>GY-c.h+3){gameOver("撞上了木箱!");return;}
+  }
+  for(i=turrets.length-1;i>=0;i--){
+    var tu=turrets[i];tu.x-=speed*sw;
+    if(tu.x<-70){turrets.splice(i,1);continue;}
+    tu.cd-=sw;
+    if(tu.cd<=0&&tu.x<560&&tu.x>150){
+      if(tu.type==="low"){
+        var dx=px+13-tu.x-13,dy=py+21-(GY-16);
+        var dd=Math.sqrt(dx*dx+dy*dy)||1;
+        bullets.push({x:tu.x+13,y:GY-16,vx:dx/dd*430,vy:dy/dd*430,aim:false});
+      }else{
+        bullets.push({x:tu.x+10,y:GY-36,vx:-470,vy:0,aim:false});
+      }
+      tu.cd=1+Math.random()*0.8;
+    }
+  }
+  for(i=bullets.length-1;i>=0;i--){
+    var bl=bullets[i];
+    bl.x+=bl.vx*sw;bl.y+=bl.vy*sw;
+    if(bl.x<-20||bl.y>H+20||bl.y<-20){bullets.splice(i,1);continue;}
+    if(circleHit(bl.x,bl.y,7,b)){gameOver("被能量弹击中——试着开启子弹时间!");return;}
+  }
+  updateHud();
+}
+function drawTurret(tu){
+  var x=tu.x;
+  if(x<-40||x>W+40)return;
+  if(tu.type==="high"){
+    ctx.fillStyle="#3b4664";
+    ctx.fillRect(x+4,GY-72,18,72);
+    ctx.fillStyle="#4c5a80";
+    rr(x-2,GY-96,30,26,7);ctx.fill();
+    ctx.fillStyle="#60a5fa";
+    ctx.fillRect(x+6,GY-90,14,6);
+    ctx.fillStyle="#93c5fd";
+    ctx.fillRect(x-2,GY-46,30,4);
+  }else{
+    ctx.fillStyle="#4c5a80";
+    rr(x,GY-28,26,28,6);ctx.fill();
+    ctx.fillStyle="#60a5fa";
+    ctx.beginPath();ctx.arc(x+13,GY-28,9,Math.PI,0);ctx.fill();
+    ctx.fillStyle="#0a1c3d";
+    ctx.fillRect(x+8,GY-32,10,4);
+  }
+}
+function draw(){
+  var i,grd,bl;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#101827");grd.addColorStop(1,"#172033");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  if(slowOn){
+    ctx.fillStyle="rgba(96,165,250,.07)";ctx.fillRect(0,0,W,H);
+  }
+  ctx.strokeStyle="rgba(96,165,250,.06)";
+  for(i=1;i<7;i++){ctx.beginPath();ctx.moveTo(0,i*46);ctx.lineTo(W,i*46);ctx.stroke();}
+  ctx.fillStyle="#1c2536";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#60a5fa";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%70;
+  ctx.fillStyle="rgba(255,255,255,.08)";
+  for(i=0;i<11;i++)ctx.fillRect(i*70-dsh,GY+14,30,3);
+  for(i=0;i<crates.length;i++){
+    var c=crates[i];
+    ctx.fillStyle="#4c5a7c";
+    rr(c.x,GY-c.h,c.w,c.h,4);ctx.fill();
+    ctx.fillStyle="#37425c";
+    ctx.fillRect(c.x+3,GY-c.h+4,c.w-6,3);
+  }
+  for(i=0;i<turrets.length;i++)drawTurret(turrets[i]);
+  for(i=0;i<bullets.length;i++){
+    bl=bullets[i];
+    ctx.strokeStyle="rgba(250,204,21,.5)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(bl.x-bl.vx*0.03,bl.y-bl.vy*0.03);ctx.lineTo(bl.x,bl.y);ctx.stroke();
+    ctx.lineWidth=1;
+    ctx.fillStyle="#facc15";
+    ctx.beginPath();ctx.arc(bl.x,bl.y,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#fef9c3";
+    ctx.beginPath();ctx.arc(bl.x,bl.y,2.6,0,Math.PI*2);ctx.fill();
+  }
+  var sliding=grounded&&slideHeld;
+  if(sliding){
+    ctx.fillStyle="#60a5fa";
+    rr(px-6,GY-18,40,16,7);ctx.fill();
+    ctx.fillStyle="#0a1c3d";
+    ctx.fillRect(px+22,GY-15,6,3);
+  }else{
+    ctx.fillStyle="#60a5fa";
+    rr(px,py+12,26,28,6);ctx.fill();
+    rr(px+7,py,19,17,5);ctx.fill();
+    ctx.fillStyle="#0a1c3d";
+    ctx.fillRect(px+16,py+5,3,4);
+    ctx.fillStyle="#3b5f9e";
+    ctx.fillRect(px+4,py+38,8,5);ctx.fillRect(px+15,py+38,8,5);
+  }
+  ctx.fillStyle="rgba(10,14,26,.75)";
+  rr(12,12,144,16,6);ctx.fill();
+  ctx.fillStyle=slowOn?"#facc15":"#60a5fa";
+  ctx.fillRect(15,15,138*energy/100,10);
+  if(slowOn){
+    ctx.strokeStyle="rgba(96,165,250,.5)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(W-36,32,13,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(W-36,32);ctx.lineTo(W-36,23);ctx.moveTo(W-36,32);ctx.lineTo(W-29,35);ctx.stroke();
+    ctx.lineWidth=1;
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+function jumpKey(k){return k===" "||k==="ArrowUp"||k==="w"||k==="W";}
+function slideKey(k){return k==="ArrowDown"||k==="s"||k==="S";}
+function slowKey(k){return k==="Shift"||k==="k"||k==="K";}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(jumpKey(k)&&!e.repeat)doJump();
+  if(slideKey(k))slideHeld=true;
+  if(slowKey(k))slowHeld=true;
+});
+document.addEventListener("keyup",function(e){
+  var k=e.key;
+  if(slideKey(k))slideHeld=false;
+  if(slowKey(k))slowHeld=false;
+});
+function zoneJump(t){
+  var rect=cv.getBoundingClientRect();
+  return (t.clientX-rect.left)>rect.width*0.4;
+}
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  tstartY=t.clientY;
+  if(zoneJump(t))doJump();
+  else slowHeld=true;
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0];
+  if(t.clientY-tstartY>36)slideHeld=true;
+},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();slowHeld=false;slideHeld=false;},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  if(zoneJump(e))doJump();
+  else slowHeld=true;
+});
+document.addEventListener("mouseup",function(){slowHeld=false;});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

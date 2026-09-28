@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渔村致富经</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#shop{width:min(480px,96vw);display:flex;flex-direction:column;gap:8px;margin-top:10px}
+#cast{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.urow{display:flex;justify-content:space-between;align-items:center;background:rgba(30,40,66,.85);border:1px solid rgba(127,212,255,.25);border-radius:10px;padding:8px 12px;font-size:14px;gap:10px}
+.urow button{background:#2f8fe0;color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.urow button:disabled{background:#3a4258;color:#8a93a8;cursor:default}
+#log{text-align:center;color:#9aa3b5;font-size:13px;min-height:20px}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>渔村致富经</h1>
+<p class="tip">抛竿捕鱼自动卖钱;赚了金币就升级钓具——鱼竿提速、鱼线解锁大鱼、秘饵抬价。120 秒攒够 600 金!</p>
+<div id="hud"><span>金币 <b id="s1">0</b></span><span>时间 <b id="s2">120</b> 秒</span><span>目标 <b>600</b> 金</span></div>
+<canvas id="cv" width="480" height="200"></canvas>
+<div id="shop">
+  <button id="cast">抛竿捕鱼</button>
+  <div class="urow"><span>鱼竿 Lv<span id="l1">0</span> · 咬钩更快</span><button id="u1">升级 60金</button></div>
+  <div class="urow"><span>鱼线 Lv<span id="l2">0</span> · 解锁湖鳢青鱼</span><button id="u2">升级 80金</button></div>
+  <div class="urow"><span>秘饵 Lv<span id="l3">0</span> · 鱼价 +30%/级</span><button id="u3">升级 50金</button></div>
+  <div id="log">攒钱升级,做大做强!</div>
+</div>
+<div id="ov"><h2 id="ot">渔村致富经</h2><p id="op">先靠小鱼小虾攒本钱,再升级鱼竿鱼线秘饵,<br>大鱼一条顶十条!<br>120 秒内攒到 600 金,成为渔村首富。</p><button id="ob">开始经营</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eT=document.getElementById('s2');
+var bCast=document.getElementById('cast'),bU=[document.getElementById('u1'),document.getElementById('u2'),document.getElementById('u3')];
+var eL=[document.getElementById('l1'),document.getElementById('l2'),document.getElementById('l3')];
+var log=document.getElementById('log');
+var W=cv.width,H=cv.height;
+var state='ready',tl=120,gold=0,lv=[0,0,0],msg='';
+var phase='idle',pt=0,waitT=0,cur=null,jump=null,jv=0;
+var cost=[[60,120,200],[80,160],[50,100,180]];
+var maxLv=[3,2,3];
+var small=[['小银鱼',10],['鲫鱼',25],['鲤鱼',60]];
+var big=[['湖鳢',120],['青鱼',160]];
+function rnd(a,b){return a+Math.random()*(b-a)}
+function refreshShop(){
+  var i;
+  for(i=0;i<3;i++){
+    eL[i].textContent=String(lv[i]);
+    if(lv[i]>=maxLv[i]){bU[i].textContent='已满级';bU[i].disabled=true}
+    else{
+      bU[i].textContent='升级 '+cost[i][lv[i]]+'金';
+      bU[i].disabled=gold<cost[i][lv[i]];
+    }
+  }
+}
+function doCast(){
+  if(state!=='play'||phase!=='idle')return;
+  phase='wait';pt=0;cur=null;
+  waitT=Math.max(0.7,2.6-lv[0]*0.5)+rnd(0,0.8);
+  log.textContent='抛竿中,鱼竿越好咬钩越快…';
+}
+function buy(i){
+  if(state!=='play')return;
+  if(lv[i]>=maxLv[i]||gold<cost[i][lv[i]])return;
+  gold-=cost[i][lv[i]];lv[i]++;
+  log.textContent=['鱼竿','鱼线','秘饵'][i]+'升级成功!';
+  refreshShop();
+}
+function finish(win){
+  state='over';ob.textContent='再开一局';
+  ot.textContent=win?'渔村首富!':'差一点就回本…';
+  op.innerHTML='最终金币 <b style="color:#ffd75e">'+gold+'</b> / 目标 600 金<br>'+(win?'码头都改用你家的渔具了!':'会赚更要会花,升级顺序有讲究。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=120;gold=0;lv=[0,0,0];phase='idle';pt=0;cur=null;jump=null;msg='';log.textContent='先抛几竿,攒出第一笔升级钱!';
+  refreshShop();state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(jump){jump.t+=dt;if(jump.t>0.9)jump=null}
+  if(state!=='play')return;
+  tl-=dt;if(tl<=0){tl=0;finish(gold>=600);return}
+  if(phase==='wait'){
+    pt+=dt;
+    if(pt>=waitT){
+      var f,rate;
+      if(lv[1]>=1&&Math.random()<0.15+0.05*lv[1])f=big[Math.floor(Math.random()*2)];
+      else f=small[Math.floor(Math.random()*3)];
+      var v=Math.round(f[1]*(1+0.3*lv[2]));
+      gold+=v;cur=f[0];jv=v;jump={t:0};
+      log.textContent='钓到 '+f[0]+',卖得 '+v+' 金!';
+      phase='idle';
+      if(gold>=600){finish(true);return}
+    }
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,60);g.addColorStop(0,'#151c36');g.addColorStop(1,'#232a4d');
+  X.fillStyle=g;X.fillRect(0,0,W,60);
+  var g2=X.createLinearGradient(0,60,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#091631');
+  X.fillStyle=g2;X.fillRect(0,60,W,H-60);
+  var t=Date.now()*0.001,i,xx,yy;
+  X.strokeStyle='rgba(127,212,255,.16)';X.lineWidth=2;
+  for(i=0;i<2;i++){X.beginPath();for(xx=0;xx<=W;xx+=16){yy=95+i*55+Math.sin(xx*0.05+t*(1+i*0.3))*4;if(xx===0)X.moveTo(xx,yy);else X.lineTo(xx,yy)}X.stroke()}
+  X.fillStyle='#4a3a26';X.fillRect(W-90,52,90,10);
+  X.fillStyle='#dfe6f2';X.fillRect(W-70,20,6,36);
+  var bx=W/2,dip=phase==='wait'?Math.sin(pt*14)*3+(pt>waitT*0.6?6:0):2;
+  X.strokeStyle='rgba(230,238,246,.6)';X.lineWidth=1.5;
+  X.beginPath();X.moveTo(W-66,24);X.quadraticCurveTo(W-200,10,bx,72+dip);X.stroke();
+  X.fillStyle='#ff5f5f';X.beginPath();X.arc(bx,74+dip,6,Math.PI,Math.PI*2);X.fill();
+  X.fillStyle='#eef3fa';X.beginPath();X.arc(bx,74+dip,6,0,Math.PI);X.fill();
+  if(phase==='wait'){X.fillStyle='#ffe9a3';X.font='14px system-ui';X.textAlign='center';X.fillText('…',bx,58)}
+  if(jump){
+    var k=jump.t/0.9,fy=40-Math.sin(k*Math.PI)*40;
+    X.fillStyle='#ffd75e';X.beginPath();X.ellipse(bx,fy,22,9,-0.4,0,7);X.fill();
+    X.fillStyle='#ffffff';X.font='bold 15px system-ui';X.textAlign='center';
+    X.fillText(cur+' +'+jv,bx+10,fy-16);
+  }
+}
+bCast.addEventListener('click',doCast);
+bU[0].addEventListener('click',function(){buy(0)});
+bU[1].addEventListener('click',function(){buy(1)});
+bU[2].addEventListener('click',function(){buy(2)});
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else doCast();
+  }
+  if(state==='play'){
+    if(e.key==='1')buy(0);
+    if(e.key==='2')buy(1);
+    if(e.key==='3')buy(2);
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=gold;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+refreshShop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>破甲行动</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>破甲行动</h1>
+  <p class="tips">带护甲的泡泡升空了!外圈护甲要连续点好几下才能击破,甲越薄飞得越快。别让任何泡泡溜出顶部,一轮波比一轮硬!</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+      <div class="stat"><div class="mut">波数</div><div class="big" id="wv">1</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="cb">x1</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">破甲行动</h2><p id="ovp">玩法说明:<br>· 泡泡带 1~3 层护甲,点一下削掉一层<br>· 护甲全破才炸裂,得分 = 10 × 初始甲层数 × 倍率<br>· 甲被打薄后泡泡会加速上逃<br>· 每破一个泡 1.5 秒内继续得分可叠连击(最高 x4)<br>· 泡泡溜出顶部 -1 条生命,共 3 条<br>· 每破 8 个进入下一波,护甲整体更强</p><button class="btn" id="obtn">开始破甲</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff'];
+var bubbles=[],parts=[],floats=[];
+var score=0,lives=3,waveN=1,combo=0,comboT=0,waveKills=0;
+var spawnT=0,elapsed=0,running=false,lastT=0,flashT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+  $i('wv').textContent=waveN;
+  $i('cb').textContent='x'+Math.min(4,1+Math.floor(combo/3));
+}
+function reset(){
+  bubbles=[];parts=[];floats=[];
+  score=0;lives=3;waveN=1;combo=0;comboT=0;waveKills=0;
+  spawnT=0;elapsed=0;flashT=0;
+  for(var i=0;i<4;i++)spawnBubble();
+  upd();
+}
+function maxArmor(){return Math.min(3,1+Math.floor((waveN-1)/2))}
+function spawnBubble(){
+  var m=maxArmor();
+  var hp=1+Math.floor(Math.random()*m);
+  bubbles.push({x:rnd(40,W-40),y:H+24,r:24,hp:hp,armor:hp,
+    vy:-(rnd(26,40)+elapsed*0.3),
+    sw:rnd(0,6.28),sp:rnd(1,2),amp:rnd(8,18),
+    c:COLORS[Math.floor(Math.random()*COLORS.length)]});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(60,200);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.3,0.6)});}
+}
+function update(dt){
+  if(!running)return;
+  elapsed+=dt;
+  if(comboT>0){comboT-=dt;if(comboT<=0)combo=0;}
+  if(flashT>0)flashT-=dt;
+  spawnT-=dt;
+  if(spawnT<=0&&bubbles.length<6){spawnBubble();spawnT=1.2;}
+  var i;
+  for(i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    var spd=1+(b.armor-b.hp)*0.35;
+    b.y+=b.vy*spd*dt;b.sw+=b.sp*dt;b.x+=Math.sin(b.sw)*b.amp*dt;
+    if(b.x<b.r)b.x=b.r;if(b.x>W-b.r)b.x=W-b.r;
+    if(b.y<-b.r-4){
+      bubbles.splice(i,1);
+      hurt('有泡泡溜走了!');
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=150*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+  upd();
+}
+function hurt(msg){
+  lives--;combo=0;flashT=0.35;
+  addFloat(W/2,120,msg,'#ff5c5c');
+  if(lives<=0){
+    lives=0;running=false;
+    $i('ovt').textContent='破甲失败…';
+    $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>到达波数:第 '+waveN+' 波';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+  }
+  upd();
+}
+function drawBubble(x,y,r,c,alpha){
+  ctx.globalAlpha=alpha;
+  ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fillStyle=c;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.35)';ctx.stroke();
+  ctx.beginPath();ctx.arc(x-r*0.32,y-r*0.32,r*0.26,0,6.2832);ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i,b;
+  for(i=0;i<bubbles.length;i++){
+    b=bubbles[i];
+    drawBubble(b.x,b.y,b.r,b.c,1);
+    for(var k=0;k<b.hp;k++){
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r+5+k*5,0,6.2832);
+      ctx.strokeStyle='rgba(200,215,255,'+(0.65-k*0.18)+')';
+      ctx.lineWidth=3;ctx.stroke();
+    }
+    if(b.hp<b.armor){
+      ctx.font='bold 12px system-ui';ctx.textAlign='center';
+      ctx.fillStyle='#fff';ctx.fillText(''+b.hp,b.x,b.y+4);
+    }
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  if(flashT>0){
+    ctx.globalAlpha=flashT*1.6;ctx.fillStyle='#ff5c5c';
+    ctx.fillRect(0,0,W,6);ctx.fillRect(0,H-6,W,6);ctx.globalAlpha=1;
+  }
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),hit=-1;
+  for(var i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y;
+    var rr=b.r+10;
+    if(dx*dx+dy*dy<=rr*rr){hit=i;break;}
+  }
+  if(hit<0)return;
+  var b=bubbles[hit];
+  b.hp--;
+  if(b.hp<=0){
+    bubbles.splice(hit,1);
+    combo++;comboT=1.5;
+    var mult=Math.min(4,1+Math.floor(combo/3));
+    var gain=10*b.armor*mult;
+    score+=gain;
+    addFloat(b.x,b.y,'+'+gain,'#51d88a');
+    burst(b.x,b.y,b.c,12);
+    waveKills++;
+    if(waveKills>=8){
+      waveKills=0;waveN++;
+      addFloat(W/2,150,'第 '+waveN+' 波来袭!','#ffd166');
+      for(var q=0;q<2;q++)spawnBubble();
+    }
+  }else{
+    addFloat(p.x,p.y-14,'甲 -1','#9aa3c0');
+    burst(p.x,p.y,'#c8d7ff',4);
+  }
+  upd();
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

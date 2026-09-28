@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接龙字梯</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#grid{display:grid;gap:3px;background:#151a30;border-radius:14px;padding:10px;margin-bottom:8px}
+.cell{width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:bold;font-family:Consolas,monospace;background:#1a2040;border-radius:6px;color:#fff;cursor:pointer;user-select:none}
+.cell.fixed{background:#2a3160;color:#8ecae6;cursor:default}
+.cell.lock{background:#2ec27e;color:#08131c;cursor:default}
+.cell.sel{background:#4cc9f0;color:#08131c}
+.cell.bad{background:#ff6b8a;color:#1a1d33}
+#hints{font-size:12.5px;color:#9aa3c7;line-height:1.9;background:#151a30;border-radius:12px;padding:8px 12px;margin-bottom:8px}
+#hints b{color:#8ecae6}
+#kb{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;background:#151a30;border-radius:14px;padding:10px;margin-bottom:8px}
+#kb button{width:9.5%;min-width:30px;padding:9px 0;border:none;border-radius:6px;background:#232a4d;color:#e8eaf6;font-size:13px;font-weight:bold;cursor:pointer;font-family:Consolas,monospace}
+#act{display:flex;gap:10px;justify-content:center}
+#act button{padding:9px 26px;font-size:14px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px;margin-top:6px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>接龙字梯</h1>
+<p id="tip">每一行的单词以上一行的尾字母开头 · 灰色字母已锁定 填完其余空格 · 依据中文提示,填对锁定,全对进入下一关</p>
+<div id="wrap">
+<div id="hud"><span>第 <b id="lvlN">1</b>/3 关</span><span>剩余 <b id="time">150</b> 秒</span></div>
+<div id="grid"></div>
+<div id="hints"></div>
+<div id="kb"></div>
+<div id="act"><button id="chkB">检查</button></div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">接龙字梯</h2><p id="ovP">五级字梯 层层咬合
+上一行的尾字母是下一行的开头字母
+按中文提示填出所有单词</p><button id="ovB">开始攀登</button></div>
+</div>
+<script>
+"use strict";
+var LEVELS = [
+  { words: [["cat", "猫"], ["top", "顶部"], ["pig", "猪"], ["goat", "山羊"], ["tea", "茶"]] },
+  { words: [["snow", "雪"], ["wind", "风"], ["dark", "黑暗"], ["king", "国王"], ["gold", "黄金"]] },
+  { words: [["apple", "苹果"], ["eagle", "老鹰"], ["earth", "地球"], ["house", "房子"], ["email", "电子邮件"]] }
+];
+var TOTAL = 150;
+var lvlNEl = document.getElementById("lvlN");
+var timeEl = document.getElementById("time");
+var gridEl = document.getElementById("grid");
+var hintsEl = document.getElementById("hints");
+var kbEl = document.getElementById("kb");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var lv = 0, cells = [], rows = 0, cols = 0;
+var selKey = -1, playing = false, timeLeft = TOTAL, lastTs = 0, rafId = 0;
+
+function loadLevel() {
+  var words = LEVELS[lv].words;
+  rows = words.length;
+  cols = 0;
+  for (var i = 0; i < rows; i++) {
+    cols = Math.max(cols, words[i][0].length + i);
+  }
+  cells = [];
+  for (var r = 0; r < rows; r++) {
+    var row = [];
+    for (var c = 0; c < cols; c++) row.push(null);
+    var word = words[r][0];
+    for (var p = 0; p < word.length; p++) {
+      row[r + p] = {
+        ch: word[p],
+        fixed: r > 0 && p === 0,
+        input: "",
+        locked: false,
+        bad: false,
+        word: r
+      };
+    }
+    cells.push(row);
+  }
+  var h = "";
+  for (var k = 0; k < rows; k++) {
+    h += "<b>" + (k + 1) + "</b> " + words[k][1] + "(" + words[k][0].length + " 字母) ";
+  }
+  hintsEl.innerHTML = h;
+  lvlNEl.textContent = lv + 1;
+  selKey = -1;
+  render();
+  selectFirstEmpty();
+}
+
+function keyOf(r, c) { return r * cols + c; }
+
+function render() {
+  gridEl.style.gridTemplateColumns = "repeat(" + cols + ",1fr)";
+  gridEl.innerHTML = "";
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var cell = cells[r][c];
+      var d = document.createElement("div");
+      if (!cell) { d.className = "cell"; d.style.visibility = "hidden"; d.textContent = "·"; }
+      else {
+        d.className = "cell";
+        if (cell.fixed) d.classList.add("fixed");
+        if (cell.locked) d.classList.add("lock");
+        if (cell.bad) d.classList.add("bad");
+        if (keyOf(r, c) === selKey && !cell.fixed && !cell.locked) d.classList.add("sel");
+        d.textContent = cell.fixed ? cell.ch.toUpperCase() : (cell.input ? cell.input.toUpperCase() : "");
+        (function (key) {
+          d.onclick = function () {
+            if (playing) {
+              var t = cells[Math.floor(key / cols)][key % cols];
+              if (t && !t.fixed && !t.locked) { selKey = key; render(); }
+            }
+          };
+        })(keyOf(r, c));
+      }
+      gridEl.appendChild(d);
+    }
+  }
+}
+
+function selectFirstEmpty() {
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var cell = cells[r][c];
+      if (cell && !cell.fixed && !cell.locked && !cell.input) { selKey = keyOf(r, c); render(); return; }
+    }
+  }
+}
+
+function typeCh(ch) {
+  if (!playing || selKey < 0) return;
+  var r = Math.floor(selKey / cols), c = selKey % cols;
+  var cell = cells[r][c];
+  if (!cell || cell.fixed || cell.locked) return;
+  cell.input = ch;
+  cell.bad = false;
+  var nr = r, nc = c + 1;
+  var found = false;
+  outer:
+  for (var rr = nr; rr < rows; rr++) {
+    for (var cc = (rr === nr ? nc : rr); cc < cols; cc++) {
+      var t = cells[rr][cc];
+      if (t && !t.fixed && !t.locked) { selKey = keyOf(rr, cc); found = true; break outer; }
+    }
+  }
+  if (!found) {
+    for (var r2 = 0; r2 < rows && !found; r2++) {
+      for (var c2 = r2; c2 < cols && !found; c2++) {
+        var t2 = cells[r2][c2];
+        if (t2 && !t2.fixed && !t2.locked) { selKey = keyOf(r2, c2); found = true; }
+      }
+    }
+  }
+  render();
+}
+
+function delCh() {
+  if (!playing || selKey < 0) return;
+  var r = Math.floor(selKey / cols), c = selKey % cols;
+  var cell = cells[r][c];
+  if (!cell || cell.fixed || cell.locked) return;
+  cell.input = "";
+  cell.bad = false;
+  render();
+}
+
+function check() {
+  if (!playing) return;
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var cell = cells[r][c];
+      if (!cell || cell.fixed || cell.locked) continue;
+      if (cell.input === cell.ch) { cell.locked = true; cell.bad = false; }
+      else if (cell.input) { cell.bad = true; }
+    }
+  }
+  render();
+  if (complete()) {
+    playing = false;
+    if (lv >= LEVELS.length - 1) {
+      ovT.textContent = "字梯登顶!";
+      ovP.textContent = "3 关全部完成\n剩余 " + Math.ceil(timeLeft) + " 秒";
+      ovB.textContent = "再来一局";
+      ovB.onclick = fullStart;
+    } else {
+      lv++;
+      ovT.textContent = "第 " + lv + " 关完成!";
+      ovP.textContent = "梯子还在继续";
+      ovB.textContent = "下一关";
+      ovB.onclick = resume;
+    }
+    ov.classList.remove("hide");
+  } else {
+    msgEl.textContent = "错误的字母已被标红,点击修改";
+    setTimeout(function () { msgEl.textContent = ""; }, 1600);
+  }
+}
+
+function complete() {
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var cell = cells[r][c];
+      if (cell && !cell.fixed && !cell.locked) return false;
+    }
+  }
+  return true;
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    playing = false;
+    ovT.textContent = "时间到";
+    ovP.textContent = "停在第 " + (lv + 1) + " 关";
+    ovB.textContent = "再来一局";
+    ovB.onclick = fullStart;
+    ov.classList.remove("hide");
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  rafId = requestAnimationFrame(loop);
+}
+
+(function buildKb() {
+  for (var i = 0; i < 26; i++) {
+    (function (ch) {
+      var b = document.createElement("button");
+      b.textContent = ch.toUpperCase();
+      b.onclick = function () { typeCh(ch); };
+      kbEl.appendChild(b);
+    })(String.fromCharCode(97 + i));
+  }
+  var del = document.createElement("button");
+  del.textContent = "⌫";
+  del.style.width = "20%";
+  del.onclick = delCh;
+  kbEl.appendChild(del);
+})();
+
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Backspace") { delCh(); e.preventDefault(); return; }
+  var k = e.key.toLowerCase();
+  if (k.length === 1 && k >= "a" && k <= "z") typeCh(k);
+});
+
+document.getElementById("chkB").onclick = check;
+
+function resume() {
+  ov.classList.add("hide");
+  loadLevel();
+  playing = true;
+  lastTs = 0;
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+function fullStart() {
+  lv = 0;
+  timeLeft = TOTAL;
+  timeEl.textContent = TOTAL;
+  msgEl.textContent = "";
+  resume();
+}
+ovB.onclick = fullStart;
+</script>
+</body>
+</html>

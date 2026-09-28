@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三线快跑</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#818cf8;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#818cf8;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#818cf8}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#818cf8;color:#141433;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>三线快跑</h1>
+  <p class="hint">↑/↓ 或 W/S 在三条赛道间切换 · 触屏:点击目标赛道或上下滑 · 三条路都有路障,选对车道才能活!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>车道 <b id="ln">中</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">三线快跑</h2>
+      <p id="ovDesc">磁悬浮轨道上有三条并行车道,路障此起彼伏,有时两条道同时被封死!上下切换车道,永远留一条活路给自己。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elLn=$("ln"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s440");
+var LY=[96,168,240];
+var LANE_N=["上","中","下"];
+var state="menu",dist,score,speed,obs,lane,py,nextGap,tAt;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=300;obs=[];lane=1;py=LY[1]-36;nextGap=480;tAt=0;
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLn.textContent=LANE_N[lane];
+}
+function move(d){
+  if(state!=="playing")return;
+  var n=lane+d;
+  if(n<0)n=0;
+  if(n>2)n=2;
+  lane=n;
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s440",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,o;
+  tAt+=s;
+  speed=Math.min(600,300+dist*0.02);
+  dist+=speed*s;score=Math.floor(dist/10);
+  py+=((LY[lane]-36)-py)*Math.min(1,13*s);
+  nextGap-=speed*s;
+  if(nextGap<=0){
+    var two=Math.random()<0.32;
+    var l1=(Math.random()*3)|0;
+    var l2=(l1+1+((Math.random()*2)|0))%3;
+    obs.push({x:W+30,lane:l1,w:26,h:34});
+    if(two)obs.push({x:W+30,lane:l2,w:26,h:34});
+    nextGap=240+Math.random()*240+speed*0.28;
+  }
+  var b={x:96,y:py,w:24,h:34};
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-70){obs.splice(i,1);continue;}
+    var oy=LY[o.lane]-o.h;
+    if(b.x+b.w>o.x+3&&b.x<o.x+o.w-3&&b.y+b.h>oy+3&&b.y<LY[o.lane]-3){
+      gameOver("在"+LANE_N[o.lane]+"道撞上了路障——提前变道!");
+      return;
+    }
+  }
+  updateHud();
+}
+function draw(){
+  var i,o,l,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#131328");grd.addColorStop(1,"#1b1c38");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  for(l=0;l<3;l++){
+    grd=ctx.createLinearGradient(0,LY[l]-52,0,LY[l]);
+    grd.addColorStop(0,"rgba(129,140,248,.02)");
+    grd.addColorStop(1,"rgba(129,140,248,.1)");
+    ctx.fillStyle=grd;
+    ctx.fillRect(0,LY[l]-52,W,52);
+    ctx.fillStyle="rgba(129,140,248,.35)";
+    ctx.fillRect(0,LY[l],W,2);
+    var dsh=dist%90;
+    ctx.fillStyle="rgba(255,255,255,.07)";
+    for(i=0;i<9;i++)ctx.fillRect(i*90-dsh,LY[l]+8,40,3);
+    if(lane===l){
+      ctx.fillStyle="rgba(129,140,248,.75)";
+      ctx.font="bold 12px system-ui";ctx.textAlign="left";
+      ctx.fillText("▶",8,LY[l]-24);
+      ctx.textAlign="left";
+    }
+  }
+  ctx.strokeStyle="rgba(129,140,248,.12)";
+  for(i=0;i<4;i++){ctx.beginPath();ctx.moveTo(0,i*75);ctx.lineTo(W,i*75);ctx.stroke();}
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    ctx.fillStyle="#3c3f66";
+    rr(o.x,LY[o.lane]-o.h,o.w,o.h,4);ctx.fill();
+    ctx.fillStyle="#fbbf24";
+    var sy;
+    for(sy=LY[o.lane]-o.h+4;sy<LY[o.lane]-6;sy+=9)ctx.fillRect(o.x+2,sy,o.w-4,3);
+    ctx.fillStyle="#23253f";
+    ctx.fillRect(o.x-2,LY[o.lane]-o.h-3,o.w+4,3);
+  }
+  ctx.fillStyle="#818cf8";
+  rr(96,py+8,24,28,6);ctx.fill();
+  rr(96+4,py-4,16,14,5);ctx.fill();
+  ctx.fillStyle="#141433";
+  ctx.fillRect(96+12,py+1,5,3);
+  ctx.fillStyle="#5a5fc0";
+  ctx.fillRect(96+3,py+34,7,4);ctx.fillRect(96+14,py+34,7,4);
+  ctx.fillStyle="rgba(255,255,255,.3)";
+  ctx.fillRect(96+6,py+12,12,2);
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="ArrowDown")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if(k==="ArrowUp"||k==="w"||k==="W"){if(!e.repeat)move(-1);}
+  if(k==="ArrowDown"||k==="s"||k==="S"){if(!e.repeat)move(1);}
+});
+var tsy=0,tsActive=false;
+cv.addEventListener("touchstart",function(e){
+  e.preventDefault();
+  var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+  tsy=t.clientY;tsActive=true;
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  if(!tsActive)return;
+  var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+  var dy=t.clientY-tsy;
+  if(dy<-30){move(-1);tsActive=false;}
+  else if(dy>30){move(1);tsActive=false;}
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  e.preventDefault();
+  if(tsActive){
+    var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
+    var ry=(t.clientY-rect.top)/rect.height;
+    var target=ry<0.34?0:(ry<0.67?1:2);
+    while(lane<target)move(1);
+    while(lane>target)move(-1);
+  }
+  tsActive=false;
+},{passive:false});
+cv.addEventListener("mousedown",function(e){
+  var rect=cv.getBoundingClientRect();
+  var ry=(e.clientY-rect.top)/rect.height;
+  var target=ry<0.34?0:(ry<0.67?1:2);
+  while(lane<target)move(1);
+  while(lane>target)move(-1);
+});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

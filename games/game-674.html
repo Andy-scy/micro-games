@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重箱轻羽</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>重箱轻羽</h1>
+  <p class="tips">木箱又重又值钱:接住 +30,但之后 1.3 秒移速减半!羽毛又轻又快:+10 无负担。← → 或 A/D 移篮,触屏拖动;漏接任何东西 -1 生命,共 3 条。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">负重状态</div><div class="big" id="ld">轻盈</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">重箱轻羽</h2><p id="ovp">玩法:重量取舍,贪大要付代价。<br>· 木箱慢悠悠:+30 分,接后负重 1.3 秒移速减半<br>· 羽毛飘忽下坠:+10 分,接了没负担<br>· 箱与羽都可能漏:-1 生命,共 3 条<br>· 负重时别去追远处的羽毛!<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始搬运</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,lives:3,slowT:0,st:0.75,t:0,things:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('ld').textContent='轻盈';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function update(dt){
+  S.t+=dt;
+  if(S.slowT>0){
+    S.slowT-=dt;
+    if(S.slowT<=0)$('ld').textContent='轻盈';
+  }
+  var sp=S.slowT>0?150:340;
+  var l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.7+Math.random()*0.4;
+    if(Math.random()<0.45){
+      S.things.push({k:'c',x:34+Math.random()*(W-68),y:-26,v:118+Math.random()*42,rot:0});
+    }else{
+      S.things.push({k:'f',x0:40+Math.random()*(W-80),y:-12,v:232+Math.random()*45,ph:Math.random()*6,amp:24+Math.random()*14,age:0,x:0});
+    }
+  }
+  var by=H-46;
+  for(var i=S.things.length-1;i>=0;i--){
+    var it=S.things[i];
+    if(it.k==='c'){
+      it.y+=it.v*dt;it.rot+=dt*0.8;
+      if(it.y>=by-24&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+16){
+        S.score+=30;$('sc').textContent=S.score;
+        S.slowT=1.3;$('ld').textContent='负重!';
+        pop(it.x,by-36,'+30 好重!移速减半','#ffb84d');
+        S.things.splice(i,1);continue;
+      }
+    }else{
+      it.age+=dt;
+      it.x=it.x0+Math.sin(it.age*2.1+it.ph)*it.amp;
+      it.y+=it.v*dt;
+      if(it.y>=by-16&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+8){
+        S.score+=10;$('sc').textContent=S.score;
+        pop(it.x,by-30,'+10 轻巧!','#ff8fab');
+        S.things.splice(i,1);continue;
+      }
+    }
+    if(it.y>H+22){
+      S.things.splice(i,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(it.x,H-100,(it.k==='c'?'箱子':'羽毛')+'漏接!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='东西掉了一地…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>重箱 30 分但压慢脚步,轻羽 10 分但不好追——取舍是门学问!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  for(var i=0;i<S.things.length;i++){
+    var it=S.things[i];
+    if(it.k==='c'){
+      ctx.save();ctx.translate(it.x,it.y);ctx.rotate(it.rot);
+      ctx.fillStyle='#b5854e';rr(-22,-22,44,44,5);ctx.fill();
+      ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(-22,-22,44,44,5);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-22,-7);ctx.lineTo(22,-7);ctx.moveTo(-22,7);ctx.lineTo(22,7);ctx.stroke();
+      ctx.fillStyle='#5c3a17';ctx.font='bold 13px system-ui';ctx.textAlign='center';
+      ctx.fillText('重',0,5);
+      ctx.restore();
+    }else{
+      ctx.save();ctx.translate(it.x,it.y);
+      ctx.rotate(Math.sin(it.age*2.1+it.ph)*0.5);
+      ctx.fillStyle='#f3e7f5';
+      ctx.beginPath();ctx.ellipse(0,0,5,13,0,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#c9a3d1';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(0,-13);ctx.lineTo(0,13);ctx.stroke();
+      ctx.restore();
+    }
+  }
+  var by=H-46;
+  ctx.fillStyle=S.slowT>0?'#8a6a3a':'#c98a4b';
+  rr(S.bx-S.bw/2,by,S.bw,S.slowT>0?28:24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;
+  rr(S.bx-S.bw/2,by,S.bw,S.slowT>0?28:24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText(S.slowT>0?'负重缓行':'轻装上阵',S.bx,by+17);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

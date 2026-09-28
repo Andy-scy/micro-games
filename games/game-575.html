@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>骰子扑克</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#ff9f1c;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#ff9f1c;color:#1c1033;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:48px;height:48px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.die.foe{background:linear-gradient(145deg,#ffe8cc,#ffd6a1)}
+.die.back{display:flex;align-items:center;justify-content:center;color:#8a5a00;font-weight:900;font-size:22px}
+.die.pick{cursor:pointer}
+.die.hold{outline:3px solid #ff9f1c}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:20px;font-weight:800;color:#ff9f1c}
+.mut{color:#9aa3c0;font-size:13px}
+.sc{flex:1;text-align:center;min-width:140px}
+.nm{font-size:14px;color:#cdd6f4;margin-bottom:2px}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ff9f1c;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>骰子扑克</h1>
+  <p class="tips">五骰扑克三局两胜!你掷 5 骰后可锁定任意骰子重掷(最多补掷 2 次),随后与电脑比牌型:<b>五连 &gt; 四条 &gt; 葫芦 &gt; 顺子 &gt; 三条 &gt; 两对 &gt; 一对 &gt; 散牌</b>;同型比点数,完全相同判你险胜。</p>
+  <div class="row">
+    <div class="card sc"><div class="nm">你</div><div class="big" id="w0">0 胜</div></div>
+    <div class="card sc"><div class="nm">第 <b id="rd">1</b> 局</div><div class="big" id="phase">掷骰!</div></div>
+    <div class="card sc"><div class="nm">电脑</div><div class="big" id="w1">0 胜</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="mut">电脑的骰(未开)</div>
+    <div class="row" id="edice"></div>
+    <div class="mut" style="margin-top:10px">你的骰(点骰锁定,亮框保留)</div>
+    <div class="row" id="pdice"></div>
+    <div class="big" id="mytype"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="act">掷骰</button>
+      <button class="btn sec" id="stay" disabled>定型开牌</button>
+    </div>
+  </div>
+  <div class="card log" id="log">点「掷骰」开始第一局!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var NAMES=['','','散牌','一对','两对','三条','顺子','葫芦','四条','五连'];
+var pd=[1,1,1,1,1],ad=[1,1,1,1,1],lock=[false,false,false,false,false];
+var rerolls=2,wins=[0,0],round=1,phase='roll',over=false,busy=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function mkDie(v,cls,txt){
+  var d=document.createElement('div');
+  d.className='die'+(cls?' '+cls:'');
+  if(txt)d.textContent=txt;else setDie(d,v);
+  return d;
+}
+function evalP(d){
+  var c=[0,0,0,0,0,0,0],i;
+  for(i=0;i<5;i++)c[d[i]]++;
+  var cnts=[];
+  for(i=1;i<=6;i++)if(c[i]>0)cnts.push([c[i],i]);
+  cnts.sort(function(a,b){return b[0]-a[0]||b[1]-a[1]});
+  var r=2;
+  if(cnts[0][0]===5)r=9;
+  else if(cnts[0][0]===4)r=8;
+  else if(cnts[0][0]===3&&cnts[1][0]===2)r=7;
+  else if(cnts[0][0]===3)r=5;
+  else if(cnts[0][0]===2&&cnts[1][0]===2)r=4;
+  else if(cnts[0][0]===2)r=3;
+  if(cnts.length===5){
+    var has=[],run=0,best=0;
+    for(i=0;i<5;i++)has[d[i]]=1;
+    for(i=1;i<=6;i++){if(has[i]){run++;if(run>best)best=run}else run=0}
+    if(best===5)r=6;
+  }
+  var t=[];
+  for(i=0;i<cnts.length;i++)t.push(cnts[i][1]);
+  return{r:r,t:t};
+}
+function cmp(a,b){
+  if(a.r!==b.r)return a.r-b.r;
+  for(var i=0;i<a.t.length&&i<b.t.length;i++){
+    if(a.t[i]!==b.t[i])return a.t[i]-b.t[i];
+  }
+  return 1;
+}
+function drawP(){
+  var P=$('pdice');P.innerHTML='';
+  for(var i=0;i<5;i++){
+    var d=mkDie(pd[i],'pick'+(lock[i]?' hold':''));
+    (function(k){d.onclick=function(){
+      if(phase!=='hold'||over)return;
+      lock[k]=!lock[k];drawP();
+    }})(i);
+    P.appendChild(d);
+  }
+  var ev=evalP(pd);
+  $('mytype').textContent='你的牌型:'+NAMES[ev.r];
+}
+function drawE(face){
+  var E=$('edice');E.innerHTML='';
+  for(var i=0;i<5;i++){
+    if(face)E.appendChild(mkDie(ad[i],'foe'));
+    else E.appendChild(mkDie(0,'foe back','?'));
+  }
+}
+function drawTop(){
+  $('w0').textContent=wins[0]+' 胜';
+  $('w1').textContent=wins[1]+' 胜';
+  $('rd').textContent=Math.min(round,3);
+  $('phase').textContent=over?'终局':(phase==='roll'?'掷骰!':phase==='hold'?'锁骰/补掷':'开牌中');
+}
+function say(m){$('log').textContent=m}
+function anim(target,cb){
+  busy=true;
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<620){
+      if(t-last>80){last=t;
+        var tmp=[];
+        for(var i=0;i<5;i++)tmp.push(rnd());
+        if(target==='p'){for(i=0;i<5;i++)if(!lock[i])setDie($('pdice').children[i],tmp[i]);}
+      }
+      requestAnimationFrame(step);
+    }else{
+      busy=false;
+      cb();
+    }
+  }
+  requestAnimationFrame(step);
+}
+function rollAllP(){
+  phase='rolling';drawTop();
+  anim('p',function(){
+    for(var i=0;i<5;i++)if(!lock[i])pd[i]=rnd();
+    lock=[false,false,false,false,false];
+    rerolls=2;phase='hold';
+    drawP();drawTop();
+    $('act').disabled=false;$('act').textContent='补掷未锁骰';
+    $('stay').disabled=false;
+    say('锁定想保留的骰子,补掷或直接定型开牌!');
+  });
+}
+function rerollP(){
+  if(busy||phase!=='hold')return;
+  var any=false;
+  for(var i=0;i<5;i++)if(!lock[i])any=true;
+  if(!any){say('全部锁定了,直接定型开牌吧。');return}
+  phase='rolling';$('act').disabled=true;$('stay').disabled=true;
+  anim('p',function(){
+    for(var i=0;i<5;i++)if(!lock[i])pd[i]=rnd();
+    rerolls--;lock=[false,false,false,false,false];
+    phase='hold';
+    drawP();drawTop();
+    if(rerolls>0){$('act').disabled=false;say('还可补掷 '+rerolls+' 次。')}
+    else{$('act').disabled=true;say('补掷次数用完,定型开牌!')}
+  });
+}
+function showdown(){
+  if(busy||over)return;
+  phase='show';drawTop();
+  $('act').disabled=true;$('stay').disabled=true;
+  var pe=evalP(pd);
+  say('你亮出「'+NAMES[pe.r]+'」,电脑正在掷骰……');
+  setTimeout(function(){
+    var i;
+    for(i=0;i<5;i++)ad[i]=rnd();
+    var c=[0,0,0,0,0,0,0],keepIdx=[];
+    for(i=0;i<5;i++)c[ad[i]]++;
+    for(i=0;i<5;i++){
+      var v=ad[i];
+      if(c[v]>=2)keepIdx.push(i);
+    }
+    if(keepIdx.length===0){
+      var best=0;
+      for(i=1;i<5;i++)if(ad[i]>ad[best])best=i;
+      keepIdx=[best];
+    }
+    for(i=0;i<5;i++)if(keepIdx.indexOf(i)<0)ad[i]=rnd();
+    drawE(true);
+    var ae=evalP(ad);
+    var r=cmp(pe,ae);
+    setTimeout(function(){
+      if(r>0){wins[0]++;say('你的「'+NAMES[pe.r]+'」胜过电脑的「'+NAMES[ae.r]+'」!')}
+      else{wins[1]++;say('电脑的「'+NAMES[ae.r]+'」压过你的「'+NAMES[pe.r]+'」……')}
+      drawTop();
+      if(wins[0]>=2||wins[1]>=2){finish();return}
+      round++;
+      setTimeout(nextRound,900);
+    },900);
+  },800);
+}
+function nextRound(){
+  pd=[1,1,1,1,1];ad=[1,1,1,1,1];lock=[false,false,false,false,false];
+  rerolls=2;phase='roll';
+  drawP();drawE(false);drawTop();
+  $('act').disabled=false;$('act').textContent='掷骰';$('stay').disabled=true;
+  $('mytype').textContent='';
+  say('第 '+round+' 局,点「掷骰」!');
+}
+function finish(){
+  over=true;drawTop();
+  var good=wins[0]>=2;
+  $('ovt').textContent=good?'牌桌之王!':'技不如骰';
+  $('ovp').innerHTML='终局比分 — 你 <b>'+wins[0]+'</b> : 电脑 <b>'+wins[1]+'</b><br>'+(good?'连胜两局,五骰在你手中听话极了!':'电脑先拿两胜,回去研究一下留骰策略吧。');
+  $('overlay').classList.add('show');
+}
+$('act').onclick=function(){
+  if(busy||over)return;
+  if(phase==='roll')rollAllP();
+  else if(phase==='hold'&&rerolls>0)rerollP();
+};
+$('stay').onclick=showdown;
+$('again').onclick=function(){
+  pd=[1,1,1,1,1];ad=[1,1,1,1,1];lock=[false,false,false,false,false];
+  rerolls=2;wins=[0,0];round=1;phase='roll';over=false;busy=false;
+  $('overlay').classList.remove('show');
+  drawP();drawE(false);drawTop();
+  $('act').disabled=false;$('act').textContent='掷骰';$('stay').disabled=true;
+  $('mytype').textContent='';
+  say('新的三局两胜,点「掷骰」!');
+};
+drawP();drawE(false);drawTop();
+</script>
+</body>
+</html>

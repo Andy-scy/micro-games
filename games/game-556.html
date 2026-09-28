@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>算牌24 巧算大师</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:720px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:640px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#tiles{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;min-height:104px}
+.tile{width:62px;height:88px;border-radius:9px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.45);user-select:none}
+.tile .v{font-size:24px;font-weight:800}
+.tile .e{font-size:9px;color:#556;max-width:56px;text-align:center;word-break:break-all;line-height:1.1}
+.tile.sel{outline:3px solid #4cc9f0;transform:translateY(-6px)}
+.tile.used{opacity:.18;cursor:default}
+#ops{display:flex;gap:10px}
+.op{width:52px;height:52px;border-radius:50%;font-size:24px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#1a1f35;border:2px solid #3d4570;user-select:none}
+.op:hover{border-color:#4cc9f0}
+.op.on{border-color:#ffd166;box-shadow:0 0 0 2px rgba(255,209,102,.4)}
+#msg{min-height:22px;font-size:15px;color:#ffd166;text-align:center;font-weight:700}
+#timebar{width:100%;max-width:420px;height:10px;border-radius:6px;background:#0a0d18;overflow:hidden}
+#tfill{height:100%;width:100%;background:linear-gradient(90deg,#ff6b6b,#ffd166)}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>算牌 24 · 巧算大师</h1>
+<p id="how">四张牌各代表一个数（A=1，J=11，Q=12，K=13）。点一张牌、点一个运算符、再点另一张牌完成一次合并，把四张牌算成 24 即得 100 分。6 题内拿 400 分算胜利，卡住可重算或跳题。</p>
+<div id="bar"><span>得分 <b id="sc">0</b></span><span>第 <b id="rn">1</b>/6 题</span><span>剩余 <b id="tm">240</b> 秒</span><span>胜利线 400</span></div>
+<div id="table">
+  <div id="timebar"><div id="tfill"></div></div>
+  <div id="tiles"></div>
+  <div id="ops">
+    <div class="op" data-o="+">+</div><div class="op" data-o="-">−</div>
+    <div class="op" data-o="*">×</div><div class="op" data-o="/">÷</div>
+  </div>
+  <div id="msg"></div>
+  <div id="btns" style="display:flex;gap:10px">
+    <button id="reset2">重算本题</button><button id="skip">跳过这题</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'];
+var tiles=[],orig=[],firstSel=null,opSel=null,score=0,round=1,solved=0,timeLeft=240,phase='run',raf=null,lastTs=0,shownSec=240;
+function $(id){return document.getElementById(id);}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function numStr(v){
+  var r=Math.round(v*100)/100;
+  return (''+r);
+}
+function rankOf(v){return v===1?'A':v===11?'J':v===12?'Q':v===13?'K':(''+v);}
+function solvable(nums){
+  if(nums.length===1)return Math.abs(nums[0]-24)<1e-6;
+  for(var i=0;i<nums.length;i++)for(var j=0;j<nums.length;j++){
+    if(i===j)continue;
+    var rest=[];
+    for(var k=0;k<nums.length;k++)if(k!==i&&k!==j)rest.push(nums[k]);
+    var a=nums[i],b=nums[j];
+    var cands=[a+b,a-b,a*b];
+    if(Math.abs(b)>1e-9)cands.push(a/b);
+    for(var m=0;m<cands.length;m++)if(solvable(rest.concat([cands[m]])))return true;
+  }
+  return false;
+}
+function deal(){
+  var nums;
+  do{
+    nums=[];
+    for(var i=0;i<4;i++)nums.push(1+Math.floor(Math.random()*13));
+  }while(!solvable(nums));
+  orig=nums.slice();
+  tiles=[];
+  for(var k=0;k<4;k++){
+    var s=SUITS[Math.floor(Math.random()*4)];
+    tiles.push({v:nums[k],e:'',used:false,s:s});
+  }
+  firstSel=null;opSel=null;
+  render();
+}
+function render(){
+  $('sc').textContent=score;$('rn').textContent=Math.min(round,6);
+  var box=$('tiles');box.innerHTML='';
+  for(var i=0;i<tiles.length;i++){
+    var t=tiles[i];
+    var d=document.createElement('div');
+    var isCard=t.v>=1&&t.v<=13&&t.v===Math.floor(t.v)&&t.s;
+    var red=(t.s==='♥'||t.s==='♦');
+    d.className='tile'+(t.used?' used':'')+(firstSel===i?' sel':'');
+    var head=isCard?rankOf(t.v):numStr(t.v);
+    d.innerHTML='<div class="v" style="color:'+(isCard&&red?'#d62839':'#1c2030')+'">'+head+'</div><div class="e">'+(t.e||('&#8207;'))+'</div>';
+    d.setAttribute('data-i',i);
+    box.appendChild(d);
+  }
+  var ops=document.querySelectorAll('.op');
+  for(var m=0;m<ops.length;m++){
+    var o=ops[m].getAttribute('data-o');
+    ops[m].className='op'+(opSel===o?' on':'');
+  }
+  $('reset2').disabled=(phase!=='run');
+  $('skip').disabled=(phase!=='run');
+}
+function msg(s){$('msg').textContent=s;}
+function combine(i){
+  var a=tiles[firstSel],b=tiles[i];
+  var va=a.v,vb=b.v,res=0,osym=opSel;
+  if(opSel==='+')res=va+vb;
+  else if(opSel==='-')res=va-vb;
+  else if(opSel==='*')res=va*vb;
+  else{
+    if(Math.abs(vb)<1e-9){msg('不能除以零，换张牌试试');return;}
+    res=va/vb;
+  }
+  var expr='('+a.e+osym.replace('*','×').replace('/','÷')+b.e+')';
+  if(a.e==='')expr='('+numStr(va)+osym.replace('*','×').replace('/','÷')+b.e+')';
+  if(b.e==='')expr='('+a.e+osym.replace('*','×').replace('/','÷')+numStr(vb)+')';
+  if(a.e===''&&b.e==='')expr='('+numStr(va)+osym.replace('*','×').replace('/','÷')+numStr(vb)+')';
+  a.used=true;b.used=true;
+  tiles.push({v:res,e:expr,used:false,s:''});
+  firstSel=null;opSel=null;
+  render();
+  var left=0,lastIdx=-1;
+  for(var k=0;k<tiles.length;k++)if(!tiles[k].used){left++;lastIdx=k;}
+  if(left===1){
+    var finalV=tiles[lastIdx].v;
+    if(Math.abs(finalV-24)<1e-6){
+      score+=100;solved++;
+      msg('漂亮！算出 24，+100 分');
+      nextRound();
+    }else{
+      msg('结果是 '+numStr(finalV)+'，不是 24，已重算本题');
+      resetRound();
+    }
+  }else{
+    msg('继续合并，目标 24');
+  }
+}
+function resetRound(){
+  tiles=[];
+  for(var k=0;k<4;k++){var s=SUITS[Math.floor(Math.random()*4)];tiles.push({v:orig[k],e:'',used:false,s:s});}
+  firstSel=null;opSel=null;render();
+}
+function nextRound(){
+  if(round>=6){end(true,'六题打完，共解出 '+solved+' 题');return;}
+  round++;
+  timer2=setTimeout(function(){deal();msg('第 '+round+' 题来了');},900);
+}
+var timer2=null;
+$('tiles').addEventListener('click',function(e){
+  if(phase!=='run')return;
+  var t=e.target;
+  while(t&&!t.classList.contains('tile'))t=t.parentElement;
+  if(!t)return;
+  var i=parseInt(t.getAttribute('data-i'),10);
+  if(tiles[i].used)return;
+  if(firstSel===null){firstSel=i;render();msg('选好了 '+numStr(tiles[i].v)+'，再点一个运算符');return;}
+  if(firstSel===i){firstSel=null;render();return;}
+  if(opSel===null){msg('先点一个运算符再点另一张牌');firstSel=i;render();return;}
+  combine(i);
+});
+$('ops').addEventListener('click',function(e){
+  if(phase!=='run')return;
+  var t=e.target;
+  while(t&&!t.classList.contains('op'))t=t.parentElement;
+  if(!t)return;
+  if(firstSel===null){msg('先点一张牌，再点运算符');return;}
+  opSel=t.getAttribute('data-o');
+  render();msg('再点另一张牌完成合并');
+});
+$('reset2').onclick=function(){if(phase==='run'){resetRound();msg('本题已重置');}};
+$('skip').onclick=function(){
+  if(phase!=='run')return;
+  msg('跳过，这题 0 分');
+  nextRound();
+};
+function master(ts){
+  raf=requestAnimationFrame(master);
+  if(phase!=='run')return;
+  if(lastTs===0)lastTs=ts;
+  var dt=(ts-lastTs)/1000;lastTs=ts;
+  if(dt>0.2)dt=0.2;
+  timeLeft-=dt;
+  var sec=Math.max(0,Math.ceil(timeLeft));
+  if(sec!==shownSec){shownSec=sec;$('tm').textContent=sec;}
+  $('tfill').style.width=Math.max(0,timeLeft/240*100)+'%';
+  if(timeLeft<=0)end(false,'时间耗尽，共解出 '+solved+' 题');
+}
+function end(win,info){
+  if(phase==='done')return;
+  phase='done';if(timer2){clearTimeout(timer2);timer2=null;}
+  $('ovt').textContent=win?'胜利':'游戏结束';
+  $('ovi').textContent=info+'，最终得分 '+score;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(raf)cancelAnimationFrame(raf);
+  if(timer2){clearTimeout(timer2);timer2=null;}
+  score=0;round=1;solved=0;timeLeft=240;phase='run';lastTs=0;shownSec=240;
+  $('over').classList.add('hide');
+  deal();msg('第 1 题：把四张牌算成 24');
+  raf=requestAnimationFrame(master);
+}
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

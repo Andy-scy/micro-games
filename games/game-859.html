@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>二十四点</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:440px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:14px;margin-bottom:10px}
+#tiles{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;min-height:70px;align-items:center}
+.tile{width:66px;height:70px;background:#2a3157;border:2px solid #3a4470;border-radius:12px;color:#e8eaf6;font-size:24px;font-weight:800;cursor:pointer;font-family:inherit}
+.tile:hover{background:#343d6e}
+.tile.sel{border-color:#ffd668;background:#4a3f1e}
+#ops{display:flex;gap:10px;justify-content:center;margin-top:14px}
+.op{width:52px;height:46px;background:#3d2a55;border:2px solid #5a4478;border-radius:10px;color:#d9b8ff;font-size:22px;font-weight:800;cursor:pointer;font-family:inherit}
+.op.sel{border-color:#ffd668;background:#5a4478;color:#fff}
+#log{margin-top:12px;font-size:13px;color:#8fe3b0;line-height:1.9;min-height:22px;text-align:center}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#ff9aa8;margin-top:6px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 32px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.9;word-break:break-all}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>二十四点</h1>
+<p class="tip">用给出的 4 个数和 + − × ÷ 算出 24。<br>先点一个数,再点运算符,再点另一个数。减法取大减小,除法必须整除。</p>
+<div class="hud"><span id="hQ">第 1 题</span><span>目标 24</span></div>
+<div class="panel">
+  <div id="tiles"></div>
+  <div id="ops"></div>
+  <div id="log"></div>
+  <div id="msg"></div>
+</div>
+<div class="btnrow"><button class="btn" id="bUndo">撤销</button><button class="btn" id="bSkip">换一题</button><button class="btn" id="bGive">放弃</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+let tiles=[],log=[],round=1,solution="",selT=-1,selOp="",over=false;
+const snaps=[];
+function rand13(){return 1+Math.floor(Math.random()*13);}
+function solve24(nums){
+  let res=null;
+  (function dfs(items){
+    if(res)return;
+    if(items.length===1){if(items[0].v===24)res=items[0].e;return;}
+    for(let i=0;i<items.length&&!res;i++)for(let j=0;j<items.length&&!res;j++){
+      if(i===j)continue;
+      const a=items[i],b=items[j],rest=[];
+      for(let k=0;k<items.length;k++)if(k!==i&&k!==j)rest.push(items[k]);
+      const tries=[];
+      if(i<j){
+        tries.push({v:a.v+b.v,e:"("+a.e+"+"+b.e+")"});
+        tries.push({v:a.v*b.v,e:"("+a.e+"×"+b.e+")"});
+      }
+      const hi=a.v>=b.v?a:b,lo=a.v>=b.v?b:a;
+      tries.push({v:hi.v-lo.v,e:"("+hi.e+"−"+lo.e+")"});
+      if(lo.v>0&&hi.v%lo.v===0)tries.push({v:hi.v/lo.v,e:"("+hi.e+"÷"+lo.e+")"});
+      for(const t of tries){if(res)break;rest.push(t);dfs(rest);rest.pop();}
+    }
+  })(nums.map(n=>({v:n,e:String(n)})));
+  return res;
+}
+function newPuzzle(){
+  let nums=null;
+  for(let t=0;t<500;t++){
+    const cand=[rand13(),rand13(),rand13(),rand13()];
+    const s=solve24(cand);
+    if(s){nums=cand;solution=s;break;}
+  }
+  if(!nums){nums=[4,6,1,1];solution="(1+1)×(6+6)";}
+  tiles=nums.map(n=>({v:n,e:String(n)}));
+  log=[];snaps.length=0;selT=-1;selOp="";over=false;
+  document.getElementById("msg").textContent="";
+  document.getElementById("hQ").textContent="第 "+round+" 题";
+  document.getElementById("ov").classList.add("hide");
+  render();
+}
+function render(){
+  const tl=document.getElementById("tiles");
+  tl.innerHTML="";
+  tiles.forEach((t,i)=>{
+    const b=document.createElement("button");
+    b.className="tile"+(selT===i?" sel":"");
+    b.textContent=String(t.v);
+    b.addEventListener("click",()=>tileClick(i));
+    tl.appendChild(b);
+  });
+  document.getElementById("log").innerHTML=log.join("<br>");
+  document.querySelectorAll(".op").forEach(x=>x.classList.toggle("sel",x.dataset.op===selOp));
+}
+function tileClick(i){
+  if(over)return;
+  const msg=document.getElementById("msg");
+  if(selT<0||!selOp){selT=(selT===i)?-1:i;msg.textContent="";render();return;}
+  if(i===selT){msg.textContent="选两个不同的数";return;}
+  combine(selT,i);
+}
+function combine(i,j){
+  const a=tiles[i],b=tiles[j],msg=document.getElementById("msg");
+  let v=0,e="",line="";
+  if(selOp==="+"){v=a.v+b.v;e="("+a.e+"+"+b.e+")";line=a.e+" + "+b.e+" = "+v;}
+  else if(selOp==="×"){v=a.v*b.v;e="("+a.e+"×"+b.e+")";line=a.e+" × "+b.e+" = "+v;}
+  else if(selOp==="−"){
+    const hi=a.v>=b.v?a:b,lo=a.v>=b.v?b:a;
+    v=hi.v-lo.v;e="("+hi.e+"−"+lo.e+")";line=hi.e+" − "+lo.e+" = "+v;
+  }else{
+    const hi=a.v>=b.v?a:b,lo=a.v>=b.v?b:a;
+    if(lo.v===0){msg.textContent="不能除以 0";return;}
+    if(hi.v%lo.v!==0){msg.textContent="除法必须整除(试试别的顺序或运算)";return;}
+    v=hi.v/lo.v;e="("+hi.e+"÷"+lo.e+")";line=hi.e+" ÷ "+lo.e+" = "+v;
+  }
+  snaps.push({tiles:tiles.map(t=>({v:t.v,e:t.e})),log:log.slice()});
+  const nt={v:v,e:e};
+  const ntiles=[];
+  tiles.forEach((t,k)=>{if(k!==i&&k!==j)ntiles.push(t);});
+  ntiles.push(nt);
+  tiles=ntiles;
+  log.push(line);
+  selT=-1;selOp="";msg.textContent="";
+  render();
+  if(tiles.length===1){
+    if(tiles[0].v===24){
+      over=true;
+      show("算出 24!","你的算式:<br>"+log.join("<br>"));
+    }else{
+      over=true;
+      show("此路不通","最后得到 "+tiles[0].v+"。参考解法:<br>"+solution);
+    }
+  }
+}
+function undo(){
+  if(over||!snaps.length)return;
+  const s=snaps.pop();
+  tiles=s.tiles;log=s.log;selT=-1;selOp="";
+  document.getElementById("msg").textContent="";
+  render();
+}
+function giveUp(){
+  if(over)return;
+  over=true;
+  show("再想想?","参考解法:<br>"+solution);
+}
+function show(t,p){document.getElementById("ovT").innerHTML=t;document.getElementById("ovP").innerHTML=p;document.getElementById("ov").classList.remove("hide");}
+const opsEl=document.getElementById("ops");
+["+","−","×","÷"].forEach(o=>{
+  const b=document.createElement("button");
+  b.className="op";b.dataset.op=o;b.textContent=o;
+  b.addEventListener("click",()=>{
+    if(over)return;
+    if(selT<0){document.getElementById("msg").textContent="先点一个数,再点运算符";return;}
+    selOp=(selOp===o)?"":o;
+    render();
+  });
+  opsEl.appendChild(b);
+});
+document.getElementById("bUndo").addEventListener("click",undo);
+document.getElementById("bSkip").addEventListener("click",()=>{round++;newPuzzle();});
+document.getElementById("bGive").addEventListener("click",giveUp);
+document.getElementById("ovB").addEventListener("click",()=>{round++;newPuzzle();});
+newPuzzle();
+</script>
+</body>
+</html>

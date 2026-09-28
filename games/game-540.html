@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>乾坤挪移</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#f4a261;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#f4a261;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f4a261}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#f4a261;color:#3d1e05;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>乾坤挪移</h1>
+  <p class="hint">点击 ↺/↻ 旋转重力,全体方块滚向新的大地<br>相邻同数自动合一,每挪 2 次天降新块,合出 256 乾坤珠!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>挪移 <b id="turns">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="300" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">乾坤挪移</h2>
+      <p id="ovP">不用滑块,转动世界!\n重力一变,连锁自成,一盘活棋</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button id="pCCW">↺ 逆旋</button>
+    <button id="pCW">顺旋 ↻</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var N=5,CELL=54,BX=15,BY=15;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#ffd166'];
+var DNAME=['重力向下','重力向左','重力向上','重力向右'];
+var grid=[],dir=0,turns=0,score=0,best=0,state='ready',flashes=[];
+function val(e){return Math.pow(2,e);}
+function newGrid(){var g=[],r,c;for(r=0;r<N;r++){g.push([]);for(c=0;c<N;c++)g[r].push(0);}return g;}
+function addScore(n){score+=n;if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function flash(r,c,e){flashes.push({r:r,c:c,t:0,e:e});}
+function lines(){
+  var out=[],i,j,line;
+  if(dir===0||dir===2){
+    for(i=0;i<N;i++){
+      line=[];
+      if(dir===0){for(j=N-1;j>=0;j--)line.push([j,i]);}
+      else{for(j=0;j<N;j++)line.push([j,i]);}
+      out.push(line);
+    }
+  }else{
+    for(i=0;i<N;i++){
+      line=[];
+      if(dir===1){for(j=0;j<N;j++)line.push([i,j]);}
+      else{for(j=N-1;j>=0;j--)line.push([i,j]);}
+      out.push(line);
+    }
+  }
+  return out;
+}
+function grav(){
+  var ls=lines(),i,k,line,vals;
+  for(i=0;i<ls.length;i++){
+    line=ls[i];vals=[];
+    for(k=0;k<line.length;k++)if(grid[line[k][0]][line[k][1]]>0)vals.push(grid[line[k][0]][line[k][1]]);
+    for(k=0;k<line.length;k++){
+      if(k<vals.length)grid[line[k][0]][line[k][1]]=vals[k];
+      else grid[line[k][0]][line[k][1]]=0;
+    }
+  }
+}
+function sweep(){
+  var ls=lines(),found=false,i,k,line;
+  for(i=0;i<ls.length;i++){
+    line=ls[i];
+    for(k=0;k<line.length-1;k++){
+      var a=grid[line[k][0]][line[k][1]],b=grid[line[k+1][0]][line[k+1][1]];
+      if(a>0&&a===b){
+        grid[line[k][0]][line[k][1]]=a+1;
+        grid[line[k+1][0]][line[k+1][1]]=0;
+        addScore(val(a+1)*5);
+        flash(line[k][0],line[k][1],a+1);
+        found=true;
+        k++;
+      }
+    }
+  }
+  return found;
+}
+function resolve(){
+  var guard=0,m=true;
+  while(m&&guard<60){guard++;grav();m=sweep();}
+  var r,c;
+  for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]>=8)win();
+}
+function emptyCells(){
+  var out=[],r,c;
+  for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]===0)out.push([r,c]);
+  return out;
+}
+function rotate(d){
+  if(state!=='play')return;
+  dir=(dir+d+4)%4;
+  turns++;
+  $('turns').textContent=String(turns);
+  resolve();
+  if(state!=='play')return;
+  if(turns%2===0&&state==='play'){
+    var ec=emptyCells();
+    if(ec.length===0){fail();return;}
+    var pick=ec[Math.floor(Math.random()*ec.length)];
+    grid[pick[0]][pick[1]]=Math.random()<0.75?1:2;
+    flash(pick[0],pick[1],grid[pick[0]][pick[1]]);
+    resolve();
+    if(state==='play'&&emptyCells().length===0&&maxOn()<8)fail();
+  }
+}
+function maxOn(){var m=0,r,c;for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]>m)m=grid[r][c];return m;}
+function win(){
+  state='over';
+  $('ovT').textContent='乾坤珠出世!';
+  $('ovP').textContent='转动乾坤,合出 256,天 地 人 和!';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function fail(){
+  state='over';
+  $('ovT').textContent='盘满则溢';
+  $('ovP').textContent='乾坤已被填满,还差 '+val(8)+' 未能合成';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  grid=newGrid();dir=0;turns=0;score=0;flashes=[];
+  var i=0,guard=0;
+  while(i<6&&guard<200){
+    guard++;
+    var rr=Math.floor(Math.random()*N),cc=Math.floor(Math.random()*N);
+    if(grid[rr][cc]===0){grid[rr][cc]=Math.random()<0.7?1:2;i++;}
+  }
+  $('score').textContent='0';$('turns').textContent='0';$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+$('pCCW').addEventListener('click',function(){rotate(3);});
+$('pCW').addEventListener('click',function(){rotate(1);});
+window.addEventListener('keydown',function(e){
+  if(state!=='play')return;
+  if(e.keyCode===37||e.keyCode===81){rotate(3);e.preventDefault();}
+  else if(e.keyCode===39||e.keyCode===69){rotate(1);e.preventDefault();}
+});
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,300,300);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,300,300);
+  var r,c,i;
+  ctx.strokeStyle='rgba(255,255,255,.06)';
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+N*CELL);ctx.stroke();}
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+N*CELL,BY+i*CELL);ctx.stroke();}
+  for(r=0;r<N;r++)for(c=0;c<N;c++){
+    var e=grid.length?grid[r][c]:0;
+    if(e>0){
+      ctx.fillStyle=CCOL[Math.min(e,8)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,10);ctx.fill();
+      if(e>=8){
+        ctx.save();ctx.strokeStyle='rgba(255,209,102,'+(0.5+0.4*Math.sin(Date.now()/150))+')';
+        ctx.lineWidth=3;roundRect(BX+c*CELL+1,BY+r*CELL+1,CELL-2,CELL-2,11);ctx.stroke();ctx.restore();
+      }
+      ctx.fillStyle='rgba(255,255,255,.92)';
+      ctx.font='700 '+Math.min(22,12+e)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(val(e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*6,BY+f.r*CELL+3-pr*6,CELL-6+pr*12,CELL-6+pr*12,10);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'){
+    var mx=150,my=150,ax=0,ay=0;
+    if(dir===0)ay=118;if(dir===2)ay=-118;if(dir===1)ax=-118;if(dir===3)ax=118;
+    ctx.save();
+    ctx.strokeStyle='rgba(244,162,97,.6)';ctx.lineWidth=2.5;ctx.setLineDash([5,5]);
+    ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx+ax,my+ay);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(244,162,97,.85)';
+    ctx.beginPath();
+    ctx.moveTo(mx+ax*1.08,my+ay*1.08);
+    ctx.lineTo(mx+ax*0.9-(ay!==0?7:0),my+ay*0.9-(ax!==0?7:0));
+    ctx.lineTo(mx+ax*0.9+(ay!==0?7:0),my+ay*0.9+(ax!==0?7:0));
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+    ctx.fillStyle='rgba(244,162,97,.7)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText(DNAME[dir],150,294);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  var i,k=[];
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

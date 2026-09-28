@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三桶分色</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>三桶分色</h1>
+  <p class="tips">红绿蓝三只桶连成一排,只能整体左右移动!彩球要落进同色桶:+10;放错桶或落地都 -1 生命,共 3 条。想好再动,一步到位!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">正确分桶</div><div class="big" id="ok">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">三桶分色</h2><p id="ovp">玩法:三桶联动,同色归桶。<br>· 红绿蓝三桶固定排一组,← → 或 A/D 整体移动<br>· 触屏按住拖动,桶组跟随<br>· 彩球落进同色桶 +10<br>· 落进异色桶或直接落地:-1 生命<br>· 共 3 条生命,分桶正确率就是分数!</p><button class="btn" id="obtn">开始分拣</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var BC=[{n:'红',c:'#ff5c5c'},{n:'绿',c:'#51d88a'},{n:'蓝',c:'#4da3ff'}];
+var S=null;
+function reset(){S={on:false,score:0,lives:3,ok:0,bx:W/2,st:0.85,t:0,balls:[],pops:[],keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('ok').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function bucketX(k){return S.bx+(k-1)*84}
+function update(dt){
+  S.t+=dt;
+  var sp=300,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(84+31,Math.min(W-84-31,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=Math.max(0.5,1.0-S.t*0.012)*(0.75+Math.random()*0.5);
+    S.balls.push({x:30+Math.random()*(W-60),y:-14,v:185+S.t*3.5+Math.random()*60,ci:Math.floor(Math.random()*3),rot:Math.random()*6});
+  }
+  var by=H-50;
+  for(var i=S.balls.length-1;i>=0;i--){
+    var b=S.balls[i];
+    b.y+=b.v*dt;b.rot+=dt*3;
+    var done=false;
+    if(b.y>=by-16&&b.y<=by+10){
+      for(var k=0;k<3;k++){
+        if(Math.abs(b.x-bucketX(k))<31){
+          if(k===b.ci){
+            S.score+=10;S.ok++;$('sc').textContent=S.score;$('ok').textContent=S.ok;
+            pop(b.x,by-28,'+10 同色!','#51d88a');
+          }else{
+            S.lives--;$('hp').textContent=hearts();
+            pop(b.x,by-28,'放错桶!-1 生命','#ff6b6b');
+            if(S.lives<=0){S.balls.splice(i,1);gameOver();done=true}
+          }
+          if(!done)S.balls.splice(i,1);
+          done=true;break;
+        }
+      }
+    }
+    if(done)continue;
+    if(b.y>H+16){
+      S.balls.splice(i,1);
+      S.lives--;$('hp').textContent=hearts();
+      pop(b.x,H-100,'球落地!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+    }
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='游戏结束';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>正确分桶 <b>'+S.ok+'</b> 次<br>记住桶的顺序,先想后动!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  for(var i=0;i<S.balls.length;i++){
+    var b=S.balls[i];
+    ctx.fillStyle=BC[b.ci].c;
+    ctx.beginPath();ctx.arc(b.x,b.y,11,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.35)';
+    ctx.beginPath();ctx.arc(b.x-4,b.y-4,3.5,0,Math.PI*2);ctx.fill();
+  }
+  var by=H-50;
+  for(var k=0;k<3;k++){
+    var bx=bucketX(k);
+    ctx.fillStyle='rgba(255,255,255,.08)';rr(bx-31,by,62,30,6);ctx.fill();
+    ctx.strokeStyle=BC[k].c;ctx.lineWidth=3;rr(bx-31,by,62,30,6);ctx.stroke();
+    ctx.fillStyle=BC[k].c;ctx.font='bold 14px system-ui';ctx.textAlign='center';
+    ctx.fillText(BC[k].n+'桶',bx,by+20);
+  }
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

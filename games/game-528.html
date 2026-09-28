@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星途滑块</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#ffd166;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#ffd166;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#ffd166}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#ffd166;color:#3d2c05;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:12px 0;font-size:17px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星途滑块</h1>
+  <p class="hint">点击空格放置数字块(耗 1 步)· 方向键推动它滑行<br>撞上同数即合一,五关各合出目标数字!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>目标 <b id="goal">8</b></span>
+    <span>步数 <b id="steps">16</b></span>
+    <span>第 <b id="level">1</b>/5 关</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="320" height="330"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">星途滑块</h2>
+      <p id="ovP">放置一块,然后用方向键把它推出去\n滑行撞上同数合并,一路滑到关卡目标!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button id="pU">▲</button>
+    <button id="pL">◀</button>
+    <button id="pD">▼</button>
+    <button id="pR">▶</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var N=6,CELL=50,BX=10,BY=14;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#e56399','#ffd166'];
+var GOALS=[4,5,6,7,8],STEPS=[16,18,20,22,24];
+var DIRS={u:[-1,0],d:[1,0],l:[0,-1],r:[0,1]};
+var grid=[],level=0,steps=16,goal=4,score=0,state='ready';
+var active=null,slide=null,flashes=[];
+function val(e){return Math.pow(2,e);}
+function addScore(n){score+=n;$('score').textContent=score;}
+function newLevel(){
+  var r,c;
+  grid=[];
+  for(r=0;r<N;r++){grid.push([]);for(c=0;c<N;c++)grid[r].push(0);}
+  for(var i=0;i<4;i++){
+    var rr=Math.floor(Math.random()*N),cc=Math.floor(Math.random()*N);
+    if(grid[rr][cc]===0)grid[rr][cc]=1;
+  }
+  steps=STEPS[level];goal=GOALS[level];active=null;slide=null;flashes=[];
+  $('steps').textContent=String(steps);$('goal').textContent=String(val(goal));$('level').textContent=String(level+1);
+}
+function maxOn(){var m=0,r,c;for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]>m)m=grid[r][c];return m;}
+function checkWin(){
+  var m=maxOn();
+  if(active&&active.e>m)m=active.e;
+  return m>=goal;
+}
+function levelClear(){
+  state='between';
+  if(level>=4){
+    $('ovT').textContent='五关全部通过!';
+    $('ovP').textContent='从初阶滑块一路合出乾坤之星,登顶!';
+    $('btn').textContent='再来一局';
+  }else{
+    $('ovT').textContent='第 '+(level+1)+' 关达成';
+    $('ovP').textContent='下一关目标:'+val(GOALS[level+1])+' · 步数 '+STEPS[level+1];
+    $('btn').textContent='下一关';
+  }
+  $('ovS').textContent='得分 '+score;
+  $('ov').classList.remove('hide');
+}
+function fail(){
+  state='over';
+  $('ovT').textContent='星途中断';
+  $('ovP').textContent='步数耗尽,还差 '+val(goal)+' 没能合成';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  score=0;level=0;newLevel();
+  $('score').textContent='0';
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',function(){
+  if(state==='between'){level++;newLevel();$('ov').classList.add('hide');state='play';}
+  else start();
+});
+function placeAt(r,c){
+  if(state!=='play'||slide||active)return;
+  if(grid[r][c]!==0)return;
+  if(steps<=0)return;
+  active={r:r,c:c,e:Math.random()<0.75?1:2};
+  steps--;$('steps').textContent=String(steps);
+}
+function push(dir){
+  if(state!=='play'||slide||!active)return;
+  var d=DIRS[dir],r=active.r,c=active.c;
+  var path=[{r:r,c:c}],merged=false,guard=0;
+  while(guard<40){
+    guard++;
+    var nr=r+d[0],nc=c+d[1];
+    if(nr<0||nr>=N||nc<0||nc>=N)break;
+    if(grid[nr][nc]===0){path.push({r:nr,c:nc});r=nr;c=nc;continue;}
+    if(grid[nr][nc]===active.e){path.push({r:nr,c:nc});merged=true;r=nr;c=nc;}
+    break;
+  }
+  if(path.length===1&&!merged)return;
+  slide={path:path,pi:0,t:0,merged:merged,er:r,ec:c};
+}
+function slideDone(){
+  var end=slide.path[slide.path.length-1];
+  if(slide.merged){
+    grid[end.r][end.c]=0;
+    addScore(val(active.e+1)*4);
+    flashes.push({r:end.r,c:end.c,t:0});
+    active.e=active.e+1;
+  }
+  active.r=end.r;active.c=end.c;
+  grid[end.r][end.c]=active.e;
+  active=null;
+  slide=null;
+  if(checkWin()){levelClear();return;}
+  if(steps<=0)fail();
+}
+function update(dt){
+  var i;
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  var k=[];
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  if(slide){
+    slide.t+=dt/0.07;
+    if(slide.t>=1){
+      slide.t=0;slide.pi++;
+      if(slide.pi>=slide.path.length-1)slideDone();
+    }
+  }
+}
+$('pU').addEventListener('click',function(){push('u');});
+$('pD').addEventListener('click',function(){push('d');});
+$('pL').addEventListener('click',function(){push('l');});
+$('pR').addEventListener('click',function(){push('r');});
+window.addEventListener('keydown',function(e){
+  var m={37:'l',38:'u',39:'r',40:'d'};
+  if(m[e.keyCode]!==undefined){push(m[e.keyCode]);e.preventDefault();}
+});
+function clickAt(x,y){
+  var c=Math.floor((x-BX)/CELL),r=Math.floor((y-BY)/CELL);
+  if(r<0||r>=N||c<0||c>=N)return;
+  placeAt(r,c);
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*320/rc.width,(e.clientY-rc.top)*330/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*320/rc.width,(t.clientY-rc.top)*330/rc.height);
+  e.preventDefault();
+},{passive:false});
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawNum(x,y,e,alpha,scale){
+  ctx.save();ctx.globalAlpha=alpha;
+  ctx.fillStyle=CCOL[Math.min(e,9)];
+  var pad=(1-(scale||1))*CELL/2;
+  roundRect(x+3+pad,y+3+pad,(CELL-6)*(scale||1),(CELL-6)*(scale||1),9);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  ctx.font='700 '+Math.min(22,11+e*2)+'px system-ui';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(String(val(e)),x+CELL/2,y+CELL/2+1);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,320,330);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,320,330);
+  var r,c,i;
+  ctx.strokeStyle='rgba(255,255,255,.06)';
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+N*CELL);ctx.stroke();}
+  for(i=0;i<=N;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+N*CELL,BY+i*CELL);ctx.stroke();}
+  for(r=0;r<N;r++)for(c=0;c<N;c++)if(grid[r][c]>0)drawNum(BX+c*CELL,BY+r*CELL,grid[r][c],1,1);
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+3-pr*6,BY+f.r*CELL+3-pr*6,CELL-6+pr*12,CELL-6+pr*12,9);ctx.stroke();
+    ctx.restore();
+  }
+  if(active&&state==='play'&&!slide){
+    drawNum(BX+active.c*CELL,BY+active.r*CELL,active.e,1,1);
+    ctx.save();ctx.strokeStyle='#ffd166';ctx.lineWidth=2.5;ctx.setLineDash([5,4]);
+    ctx.strokeRect(BX+active.c*CELL+2,BY+active.r*CELL+2,CELL-4,CELL-4);
+    ctx.restore();
+  }
+  if(slide&&active){
+    var a=slide.path[slide.pi],b=slide.path[Math.min(slide.pi+1,slide.path.length-1)];
+    var tt=slide.pi>=slide.path.length-1?1:slide.t;
+    var px=BX+(a.c+(b.c-a.c)*tt)*CELL,py=BY+(a.r+(b.r-a.r)*tt)*CELL;
+    drawNum(px,py,active.e,1,1);
+  }
+  if(state==='play'&&!active){
+    ctx.fillStyle='rgba(255,209,102,.8)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('点击空格放置数字块(步数 -1)',160,BY-3);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  if(state==='play')update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

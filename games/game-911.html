@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞盘穿环</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:20px;color:#ba68c8;margin:4px 0}
+.tip{font-size:13px;color:#9fa8da;text-align:center;margin-bottom:8px}
+#stage{position:relative;line-height:0}
+canvas{background:#161b30;border-radius:14px;max-width:96vw;height:auto;touch-action:none;display:block}
+#overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;border-radius:14px}
+#overlay.hidden{display:none}
+.card{background:#232946;border:1px solid #4a5290;border-radius:14px;padding:20px 30px;text-align:center;max-width:80%;line-height:1.6}
+.card h2{color:#ba68c8;margin-bottom:8px;font-size:22px}
+.card p{font-size:15px;color:#c5cae9}
+.card button{margin-top:14px;padding:9px 30px;font-size:16px;font-weight:700;border:none;border-radius:9px;background:#ba68c8;color:#2e0b34;cursor:pointer}
+.card button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>飞盘穿环</h1>
+<p class="tip">第一次按住锁角度，松开前再看准力度松手掷盘 · 飞行中按住屏幕左/右侧（或 ←/→）侧旋拐弯 · 5 次投掷穿越 9 个圆环获胜</p>
+<div id="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="overlay" class="hidden"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p><button id="btnRe">再来一局</button></div></div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),ovB=document.getElementById('btnRe');
+var W=480,H=640,G=330,RY=46;
+var throws,total,throwGot,rings,disc,trail,phase,aimT,ang,power,pt,msg,msgT,keys,holdL,holdR,spX;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function buildRings(){
+  rings=[];
+  var xs=[205,315,425],ys=[rnd(360,430),rnd(260,330),rnd(160,230)];
+  for(var i=0;i<3;i++)rings.push({x:xs[i]+rnd(-15,15),y:ys[i],done:false,hit:false,glow:0});
+}
+function reset(){
+  throws=1;total=0;throwGot=0;rings=[];disc=null;trail=[];phase='aim';aimT=0;power=0;pt=0;msg='';msgT=0;keys={};holdL=false;holdR=false;spX=0;
+  buildRings();
+}
+function press(){
+  if(phase==='aim'){phase='charge';pt=0;power=0;}
+}
+function release(){
+  if(phase!=='charge')return;
+  var sp=300+power*380;
+  disc={x:60,y:560,vx:sp*Math.cos(ang),vy:-sp*Math.sin(ang),rot:0};
+  trail=[];spX=0;phase='fly';
+}
+function endThrow(){
+  total+=throwGot;
+  msg=throwGot>0?('本投穿越 '+throwGot+' 环'):'本投 0 环';
+  msgT=1.1;phase='res';
+  disc=null;trail=[];
+}
+function endGame(){
+  phase='over';
+  ovT.textContent=total>=9?'穿环大师！':'比赛结束';
+  ovX.textContent='五投共穿越 '+total+' 个圆环'+(total>=9?'，人盘合一！':'（获胜需 9 环）。飞行中按住一侧可以让飞盘拐弯补救。');
+  ov.classList.remove('hidden');
+}
+function update(dt){
+  msgT-=dt;
+  for(var i=0;i<3;i++)if(rings[i].glow>0)rings[i].glow-=dt;
+  if(phase==='aim'){aimT+=dt;ang=(88-76*(0.5+0.5*Math.sin(aimT*1.7)))*Math.PI/180;}
+  if(phase==='charge'){pt+=dt;power=0.5-0.5*Math.cos(pt*6);}
+  if(phase==='fly'&&disc){
+    var ax=0;
+    if(holdL||keys.ArrowLeft||keys.KeyA)ax-=310;
+    if(holdR||keys.ArrowRight||keys.KeyD)ax+=310;
+    var steps=Math.max(1,Math.ceil(dt/0.006)),sd=dt/steps;
+    for(var s=0;s<steps;s++){
+      var prevX=disc.x;
+      disc.vy+=G*sd;disc.vx+=ax*sd;
+      disc.x+=disc.vx*sd;disc.y+=disc.vy*sd;disc.rot+=sd*20;
+      for(var r2=0;r2<3;r2++){
+        var rg=rings[r2];
+        if(rg.done)continue;
+        if(prevX<rg.x&&disc.x>=rg.x){
+          rg.done=true;
+          var dy=disc.y-rg.y;
+          if(Math.abs(dy)<RY-10){rg.hit=true;rg.glow=0.8;throwGot++;disc.vx*=1.02;}
+          else if(Math.abs(dy)<RY+16){disc.vx*=0.45;disc.vy*=0.45;}
+        }
+      }
+      if(disc.x>W+30||disc.y>H+30||disc.y<-80||disc.vx<20){endThrow();return;}
+    }
+    trail.push({x:disc.x,y:disc.y});
+    if(trail.length>16)trail.shift();
+  }
+  if(phase==='res'){
+    if(msgT<=0){
+      if(throws>=5){endGame();return;}
+      throws++;throwGot=0;buildRings();phase='aim';aimT=0;
+    }
+  }
+}
+function drawRing(rg){
+  var hit=rg.hit;
+  ctx.strokeStyle=rg.glow>0?'#ffd54f':(hit?'#aed581':'rgba(186,104,200,.9)');
+  ctx.lineWidth=6;
+  ctx.beginPath();ctx.ellipse(rg.x,rg.y,14,RY,0,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(rg.x,rg.y-RY);ctx.lineTo(rg.x,0);ctx.stroke();
+  if(rg.glow>0){
+    ctx.fillStyle='rgba(255,213,79,'+rg.glow+')';ctx.font='16px system-ui,sans-serif';ctx.textAlign='center';
+    ctx.fillText('+1',rg.x,rg.y-RY-14);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2240';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.04)';
+  for(var i=0;i<8;i++)ctx.fillRect(0,60+i*72,W,2);
+  for(var r2=0;r2<3;r2++)drawRing(rings[r2]);
+  ctx.fillStyle='#3e2723';ctx.fillRect(20,566,80,12);
+  if(phase==='aim'||phase==='charge'){
+    var d=phase==='aim'?ang:ang;
+    ctx.strokeStyle='#ba68c8';ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(60,560);ctx.lineTo(60+Math.cos(d)*70,560-Math.sin(d)*70);ctx.stroke();
+    ctx.fillStyle='#ba68c8';ctx.beginPath();ctx.ellipse(60,560,16,5,0,0,7);ctx.fill();
+  }
+  for(var t2=0;t2<trail.length;t2++){
+    ctx.fillStyle='rgba(186,104,200,'+(t2/trail.length*0.4)+')';
+    ctx.beginPath();ctx.ellipse(trail[t2].x,trail[t2].y,10,4,trail[t2].x*0.05,0,7);ctx.fill();
+  }
+  if(disc){
+    ctx.save();ctx.translate(disc.x,disc.y);ctx.rotate(Math.max(-0.5,Math.min(0.5,disc.vy*0.002)));
+    ctx.fillStyle='#e1bee7';ctx.beginPath();ctx.ellipse(0,0,14,5,0,0,7);ctx.fill();
+    ctx.fillStyle='#8e24aa';ctx.beginPath();ctx.ellipse(0,-1,8,2.5,0,0,7);ctx.fill();
+    ctx.restore();
+  }
+  if(phase==='charge'){
+    var bx=140,bw=200;
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(bx,614,bw,14);
+    ctx.fillStyle='#ba68c8';ctx.fillRect(bx,614,bw*power,14);
+    ctx.strokeStyle='#9fa8da';ctx.strokeRect(bx,614,bw,14);
+  }
+  ctx.fillStyle='#e8eaf6';ctx.font='16px system-ui,sans-serif';ctx.textAlign='left';
+  ctx.fillText('第 '+throws+' / 5 投',14,28);
+  ctx.fillText('穿越 '+total+' / 9 环',14,52);
+  ctx.fillStyle='#9fa8da';ctx.font='13px system-ui,sans-serif';ctx.textAlign='center';
+  if(phase==='aim')ctx.fillText('按住 锁定角度',W/2,620);
+  if(phase==='charge')ctx.fillText('松手 掷出！',W/2,600);
+  if(phase==='fly')ctx.fillText('按住左右两侧 侧旋拐弯',W/2,620);
+  if(msgT>0){ctx.fillStyle='#ffd54f';ctx.font='20px system-ui,sans-serif';ctx.fillText(msg,W/2,110);}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect();
+  var px=(e.clientX-r.left)*(W/r.width);
+  if(phase==='fly'){if(px<W/2)holdL=true;else holdR=true;return;}
+  if(phase==='aim'||phase==='charge')press();
+});
+window.addEventListener('pointerup',function(){holdL=false;holdR=false;release();});
+window.addEventListener('keydown',function(e){
+  keys[e.code]=true;
+  if(e.code==='Space'){e.preventDefault();if(!e.repeat)press();}
+});
+window.addEventListener('keyup',function(e){keys[e.code]=false;if(e.code==='Space')release();});
+ovB.addEventListener('click',function(){ov.classList.add('hidden');reset();});
+var last=performance.now();
+function loop(t){var dt=Math.min(0.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop);}
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>蛇王争霸</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#4ade80;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#4ade80;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>蛇王争霸</h1>
+  <p class="hint">方向键 / WASD 转向 · 触屏滑动 · 先到 200 分者称王</p>
+  <div class="hud">
+    <span>我方 <b id="score">0</b></span>
+    <span>对手 <b id="ai">0</b></span>
+    <span>目标 <b>200</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">蛇王争霸</h2>
+      <p id="ovDesc">与橙色 AI 蛇争夺同一片果实!吃果 +10,猎杀对手 +40,率先拿到 200 分称王。撞上蛇身(自己的或对手的)即出局;正面迎头相撞,对手会当场毙命!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=20,ROWS=20,CELL=24,W=480,H=480,TARGET=200;
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elAi=$("ai");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var state="menu";
+var snake,dir,queue,food,ai,score,stepMs,acc,lastT,pulse,fx;
+
+function inList(list,x,y){
+  var i;
+  for(i=0;i<list.length;i++){if(list[i].x===x&&list[i].y===y)return true;}
+  return false;
+}
+function hitsSelf(list,x,y){
+  var i;
+  for(i=1;i<list.length;i++){if(list[i].x===x&&list[i].y===y)return true;}
+  return false;
+}
+function occupied(x,y){
+  if(inList(snake,x,y))return true;
+  if(ai.alive&&inList(ai.body,x,y))return true;
+  if(food&&food.x===x&&food.y===y)return true;
+  return false;
+}
+function freeCell(){
+  var p;
+  while(true){
+    p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0};
+    if(!occupied(p.x,p.y))return p;
+  }
+}
+function wdist(ax,ay,bx,by){
+  var dx=Math.abs(ax-bx);dx=Math.min(dx,COLS-dx);
+  var dy=Math.abs(ay-by);dy=Math.min(dy,ROWS-dy);
+  return dx+dy;
+}
+function spawnFood(){food=freeCell();}
+function spawnAI(){
+  var tries=0;
+  while(tries<80){
+    tries++;
+    var y=(Math.random()*ROWS)|0;
+    var x=(Math.random()*(COLS-3))|0;
+    if(wdist(x,y,snake[0].x,snake[0].y)<8)continue;
+    if(occupied(x,y)||occupied(x+1,y)||occupied(x+2,y))continue;
+    ai.body=[{x:x+2,y:y},{x:x+1,y:y},{x:x,y:y}];
+    ai.dir={x:1,y:0};
+    ai.alive=true;
+    return;
+  }
+  ai.body=[{x:1,y:1},{x:0,y:1},{x:0,y:0}];
+  ai.dir={x:1,y:0};
+  ai.alive=true;
+}
+function reset(){
+  snake=[{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+  dir={x:1,y:0};queue=[];
+  ai={body:[],dir:{x:1,y:0},alive:false,respT:0,score:0};
+  score=0;stepMs=115;acc=0;pulse=0;fx=[];
+  spawnFood();
+  spawnAI();
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elAi.textContent=ai.score;
+}
+function queueDir(d){
+  var last=queue.length?queue[queue.length-1]:dir;
+  if(d.x===-last.x&&d.y===-last.y)return;
+  if(d.x===last.x&&d.y===last.y)return;
+  if(queue.length<2)queue.push(d);
+}
+function addFx(text,x,y){
+  fx.push({text:text,x:x,y:y,t:1200});
+}
+function finishPlayer(win){
+  state="over";
+  ovTitle.textContent=win?"胜利!蛇王是你!":"失败";
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=win?"你率先达到 200 分,加冕蛇王!":(ai.score>=TARGET?"对手率先达到 200 分。":"你撞上了蛇身。");
+  ovScore.style.display="block";
+  ovScore.textContent="我方 "+score+" 分 · 对手 "+ai.score+" 分";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function playerLose(msg){finishPlayer(false);}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h=snake[0];
+  var nh={x:(h.x+dir.x+COLS)%COLS,y:(h.y+dir.y+ROWS)%ROWS};
+  snake.unshift(nh);
+  if(nh.x===food.x&&nh.y===food.y){
+    score+=10;
+    spawnFood();
+    if(score>=TARGET){updateHud();finishPlayer(true);return;}
+  }
+  else snake.pop();
+  if(hitsSelf(snake,nh.x,nh.y)){playerLose();return;}
+  if(ai.alive&&hitsSelf(ai.body,nh.x,nh.y)){playerLose();return;}
+  aiStep();
+}
+function aiStep(){
+  var i;
+  if(!ai.alive){
+    ai.respT-=stepMs;
+    if(ai.respT<=0)spawnAI();
+    return;
+  }
+  var h=ai.body[0];
+  var dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+  var opts=[];
+  for(i=0;i<4;i++){
+    if(dirs[i].x===-ai.dir.x&&dirs[i].y===-ai.dir.y)continue;
+    var nx=(h.x+dirs[i].x+COLS)%COLS;
+    var ny=(h.y+dirs[i].y+ROWS)%ROWS;
+    if(inList(ai.body,nx,ny))continue;
+    if(inList(snake,nx,ny)&&!(snake[0].x===nx&&snake[0].y===ny))continue;
+    opts.push({d:dirs[i],x:nx,y:ny,dist:wdist(nx,ny,food.x,food.y)});
+  }
+  if(!opts.length){aiDies();return;}
+  opts.sort(function(a,b){return a.dist-b.dist;});
+  var pick=opts[0];
+  if(opts.length>1&&Math.random()<0.18)pick=opts[1];
+  ai.dir=pick.d;
+  ai.body.unshift({x:pick.x,y:pick.y});
+  if(pick.x===food.x&&pick.y===food.y){
+    ai.score+=10;
+    spawnFood();
+  }
+  else ai.body.pop();
+  if(pick.x===snake[0].x&&pick.y===snake[0].y){aiDies();return;}
+}
+function aiDies(){
+  ai.alive=false;
+  ai.respT=2600;
+  score+=40;
+  addFx("猎杀对手 +40",snake[0].x*CELL+CELL/2,snake[0].y*CELL);
+  if(score>=TARGET){updateHud();finishPlayer(true);return;}
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function drawBody(list,headColor,bodyColor){
+  var i;
+  for(i=list.length-1;i>=0;i--){
+    ctx.fillStyle=i===0?headColor:bodyColor;
+    rr(list[i].x*CELL+2,list[i].y*CELL+2,CELL-4,CELL-4,6);ctx.fill();
+  }
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="rgba(255,255,255,0.03)";
+  var x,y;
+  for(x=0;x<COLS;x++)for(y=0;y<ROWS;y++){if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);}
+  var pr=6.5+Math.sin(pulse)*1.8;
+  ctx.fillStyle="#f87171";
+  ctx.shadowColor="#f87171";ctx.shadowBlur=14;
+  ctx.beginPath();ctx.arc(food.x*CELL+CELL/2,food.y*CELL+CELL/2,pr,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(ai.alive)drawBody(ai.body,"#fdba74","#fb923c");
+  else{
+    ctx.fillStyle="rgba(251,146,60,0.35)";
+    ctx.font="13px system-ui";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText("对手重生中…",W/2,H-20);
+  }
+  drawBody(snake,"#86efac","#4ade80");
+  for(i=fx.length-1;i>=0;i--){
+    var f=fx[i];
+    f.t-=16;f.y-=0.4;
+    if(f.t<=0){fx.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,f.t/600);
+    ctx.fillStyle="#fbbf24";
+    ctx.font="bold 14px system-ui";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(f.text,f.x,f.y);
+    ctx.globalAlpha=1;
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.006;
+  if(state==="playing"){
+    acc+=dt;
+    var guard=0;
+    while(acc>=stepMs&&state==="playing"&&guard<5){acc-=stepMs;step();guard++;}
+  }
+  draw();
+}
+function keyDir(e){
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W")return{x:0,y:-1};
+  if(k==="ArrowDown"||k==="s"||k==="S")return{x:0,y:1};
+  if(k==="ArrowLeft"||k==="a"||k==="A")return{x:-1,y:0};
+  if(k==="ArrowRight"||k==="d"||k==="D")return{x:1,y:0};
+  return null;
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var d=keyDir(e);
+  if(d){e.preventDefault();queueDir(d);}
+  else if(e.key===" ")e.preventDefault();
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){
+  var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))queueDir({x:dx>0?1:-1,y:0});
+  else queueDir({x:0,y:dy>0?1:-1});
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

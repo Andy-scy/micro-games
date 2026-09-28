@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双雄对决</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8ecff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;gap:8px}
+h1{font-size:20px;letter-spacing:2px;color:#ffd76a}
+#hud{display:flex;gap:18px;font-size:15px;background:#181d33;border:1px solid #2a3155;border-radius:10px;padding:6px 16px}
+#hud b{color:#7fe08a}
+#stage{position:relative}
+canvas{display:block;background:#10142a;border:1px solid #2a3155;border-radius:12px;max-width:96vw;height:auto}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;border-radius:12px;padding:14px}
+#ov h2{font-size:24px;color:#ffd76a}
+#ov p{font-size:13px;color:#aab3d8;line-height:1.9;max-width:460px}
+.btn{background:#ffd76a;color:#1a1c2e;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:700;cursor:pointer}
+.btn:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<h1>双雄对决</h1>
+<div id="hud"><span style="color:#7fe08a">P1 <b id="hA">0</b></span><span>先胜 5 回合</span><span style="color:#f0a35e">P2 <b id="hB">0</b></span></div>
+<div id="stage">
+<canvas id="cv" width="480" height="416"></canvas>
+<div id="ov">
+  <h2>双雄对决</h2>
+  <p id="ovP">玩家1(W/S 前进后退,A/D 转向,空格开火)<br>玩家2(↑/↓ 前进后退,←/→ 转向,回车开火)<br>砖墙可被打穿,先击毁对手 5 次者获胜!</p>
+  <button class="btn" id="ovB">开始游戏</button>
+</div>
+</div>
+<script>
+"use strict";
+const TS=32,COLS=15,ROWS=13;
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const ov=document.getElementById('ov'),ovP=document.getElementById('ovP'),ovB=document.getElementById('ovB');
+const hA=document.getElementById('hA'),hB=document.getElementById('hB');
+const MAP=[
+"...............",
+".B..........B..",
+".B..S......S.B.",
+".B....B..B....B",
+"......B..B.....",
+"..S..........S.",
+".BB...S..S...BB",
+".BB...S..S...BB",
+"..S..........S.",
+"......B..B.....",
+".B....B..B....B",
+".B..S......S.B.",
+".B..........B.."
+];
+let grid,p1,p2,bullets,parts,s1,s2,resp1,resp2,frame=0,state='start';
+const keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code.indexOf('Arrow')===0||e.code==='Space'||e.code==='Enter')e.preventDefault();
+});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
+function buildGrid(){return MAP.map(r=>r.split('').map(c=>c==='B'?1:(c==='S'?2:0)));}
+function mkTank(x,y,ang){
+  return {x:x,y:y,ang:ang,cd:0,inv:60};
+}
+function circleHit(x,y){
+  if(x-13<0||y-13<0||x+13>cv.width||y+13>cv.height)return true;
+  const x0=Math.floor((x-13)/TS),y0=Math.floor((y-13)/TS),x1=Math.floor((x+13)/TS),y1=Math.floor((y+13)/TS);
+  for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){
+    if(tx<0||ty<0||tx>=COLS||ty>=ROWS)return true;
+    if(grid[ty][tx]!==0)return true;
+  }
+  return false;
+}
+function tryMove(t,v){
+  const nx=t.x+Math.cos(t.ang)*v,ny=t.y+Math.sin(t.ang)*v;
+  if(!circleHit(nx,t.y))t.x=nx;
+  if(!circleHit(t.x,ny))t.y=ny;
+}
+function fire(t){
+  bullets.push({x:t.x+Math.cos(t.ang)*18,y:t.y+Math.sin(t.ang)*18,vx:Math.cos(t.ang)*6,vy:Math.sin(t.ang)*6,owner:t,life:140});
+}
+function boom(x,y,n,c){for(let i=0;i<n;i++)parts.push({x:x,y:y,vx:(Math.random()-0.5)*3.4,vy:(Math.random()-0.5)*3.4,life:22+Math.random()*14,max:36,c:c});}
+function initGame(){
+  grid=buildGrid();s1=0;s2=0;bullets=[];parts=[];frame=0;
+  p1=mkTank(1.5*TS,6.5*TS,0);
+  p2=mkTank(13.5*TS,6.5*TS,Math.PI);
+  updHud();
+}
+function startGame(){initGame();state='play';ov.style.display='none';}
+ovB.addEventListener('click',startGame);
+function updTank(t,fwd,back,left,right,shoot){
+  if(!t)return;
+  if(keys[fwd])tryMove(t,2.0);
+  if(keys[back])tryMove(t,-1.4);
+  if(keys[left])t.ang-=0.055;
+  if(keys[right])t.ang+=0.055;
+  if(t.inv>0)t.inv--;
+  t.cd--;
+  if(keys[shoot]&&t.cd<=0){
+    let n=0;for(const b of bullets)if(b.owner===t)n++;
+    if(n<2){fire(t);t.cd=22;}
+  }
+}
+function killTank(t){
+  boom(t.x,t.y,22,t===p1?'#7fe08a':'#f0a35e');
+  if(t===p1){s2++;resp1=80;updHud();if(s2>=5)end('玩家 2 获胜!','最终比分 '+s1+' : '+s2);}
+  else{s1++;resp2=80;updHud();if(s1>=5)end('玩家 1 获胜!','最终比分 '+s1+' : '+s2);}
+}
+function end(msg,detail){
+  state='over';
+  ov.children[0].textContent=msg;
+  ovP.innerHTML=detail;
+  ovB.textContent='再来一局';
+  ov.style.display='flex';
+}
+function updParts(){
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx;p.y+=p.vy;p.life--;if(p.life<=0)parts.splice(i,1);}
+}
+function updBullets(){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];let dead=false;
+    b.x+=b.vx;b.y+=b.vy;b.life--;
+    if(b.life<=0)dead=true;
+    if(b.x<0||b.y<0||b.x>cv.width||b.y>cv.height)dead=true;
+    if(!dead){
+      const tx=Math.floor(b.x/TS),ty=Math.floor(b.y/TS);
+      if(tx>=0&&ty>=0&&tx<COLS&&ty<ROWS){
+        const t=grid[ty][tx];
+        if(t===1){grid[ty][tx]=0;dead=true;boom(b.x,b.y,4,'#d08a50');}
+        else if(t===2){dead=true;boom(b.x,b.y,3,'#cfd6ee');}
+      }
+    }
+    if(!dead){
+      for(const t of [p1,p2]){
+        if(!t||t===b.owner||t.inv>0)continue;
+        if(Math.hypot(b.x-t.x,b.y-t.y)<15){
+          dead=true;killTank(t);break;
+        }
+      }
+    }
+    if(dead)bullets.splice(i,1);
+  }
+}
+function respawn(){
+  if(!p1&&resp1<=0){p1=mkTank(1.5*TS,6.5*TS,0);}
+  if(!p2&&resp2<=0){p2=mkTank(13.5*TS,6.5*TS,Math.PI);}
+  if(resp1>0)resp1--;
+  if(resp2>0)resp2--;
+}
+function updHud(){hA.textContent=s1;hB.textContent=s2;}
+function drawTank(t,color){
+  if(!t)return;
+  if(t.inv>0&&frame%6<3)return;
+  ctx.save();
+  ctx.translate(t.x,t.y);
+  ctx.rotate(t.ang);
+  ctx.fillStyle='#171b2e';ctx.fillRect(-13,-13,26,26);
+  ctx.fillStyle=color;ctx.fillRect(-9,-9,18,18);
+  ctx.fillStyle='#0e1122';ctx.fillRect(4,-2,15,4);
+  ctx.fillStyle=color;ctx.fillRect(-4,-4,8,8);
+  ctx.restore();
+}
+function draw(){
+  ctx.fillStyle='#10142a';ctx.fillRect(0,0,cv.width,cv.height);
+  for(let ty=0;ty<ROWS;ty++)for(let tx=0;tx<COLS;tx++){
+    const t=grid[ty][tx],X=tx*TS,Y=ty*TS;
+    if(t===1){
+      ctx.fillStyle='#8a4a28';ctx.fillRect(X,Y,TS,TS);
+      ctx.fillStyle='#5c2f18';ctx.fillRect(X,Y+15,TS,2);
+      ctx.fillStyle='#a55c32';ctx.fillRect(X+1,Y+1,14,13);ctx.fillRect(X+17,Y+1,14,13);
+    }else if(t===2){
+      ctx.fillStyle='#6b7694';ctx.fillRect(X+1,Y+1,TS-2,TS-2);
+      ctx.fillStyle='#9aa6c4';ctx.fillRect(X+5,Y+5,TS-10,TS-10);
+    }
+  }
+  for(let i=0;i<5;i++){
+    ctx.fillStyle='rgba(255,215,106,'+(s1>i?0.9:0.18)+')';
+    ctx.beginPath();ctx.arc(30+i*20,20,6,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(240,163,94,'+(s2>i?0.9:0.18)+')';
+    ctx.beginPath();ctx.arc(cv.width-30-i*20,20,6,0,Math.PI*2);ctx.fill();
+  }
+  drawTank(p1,'#5fbf68');
+  drawTank(p2,'#f0a35e');
+  for(const b of bullets){ctx.fillStyle='#ffe9a0';ctx.fillRect(b.x-3,b.y-3,6,6);}
+  for(const p of parts){
+    ctx.globalAlpha=Math.max(p.life/p.max,0);
+    ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(!p1){
+    ctx.fillStyle='#7fe08a';ctx.font='bold 16px system-ui';ctx.textAlign='center';
+    ctx.fillText('玩家1 重生中...',80,cv.height-16);
+  }
+  if(!p2){
+    ctx.fillStyle='#f0a35e';ctx.font='bold 16px system-ui';ctx.textAlign='center';
+    ctx.fillText('玩家2 重生中...',cv.width-80,cv.height-16);
+  }
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==='play'){
+    frame++;
+    updTank(p1,'KeyW','KeyS','KeyA','KeyD','Space');
+    updTank(p2,'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter');
+    respawn();
+    updBullets();
+    updParts();
+  }
+  draw();
+}
+initGame();
+loop();
+</script>
+</body>
+</html>

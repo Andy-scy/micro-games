@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>速射风暴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ff8a65;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ff8a65;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ff8a65}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ff8a65;color:#3d1608;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>速射风暴</h1>
+  <p class="hint">按住不放连发 · 射越久散布越大,松手收拢 · 40 秒冲 260 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">40</b>秒</span>
+    <span>连击 <b id="cb">0</b></span>
+    <span>目标 <b>260</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">速射风暴</h2>
+      <p id="ovD">这是一场与散布的搏斗:按住不放会连续发射,可射得越久,箭落点散得越开(准星外的圆圈就是散布范围);松手休息,散布又会收拢。连发刷连击、间歇收散布,快慢节奏由你调配。侧翼的小型金靶值 30 分,还会来回移动。40 秒冲 260 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">进入风暴</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elCb=$("cb"),elMsg=$("msg");
+const GOAL=260,DUR=40,CX=240,CY=255,CR=92;
+let state="menu",score=0,timeLeft=DUR,tp=0;
+let firing=false,fireCd=0,spread=4,combo=0,comboT=0;
+let mouse={x:240,y:255},bonuses=[],shots=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function makeBonus(x,dir){
+  return{x:x,y:120+Math.random()*320,r:30,vx:dir*(45+Math.random()*35)};
+}
+function oneShot(){
+  const a=Math.random()*6.28,m=Math.sqrt(Math.random())*spread;
+  const lx=mouse.x+Math.cos(a)*m,ly=mouse.y+Math.sin(a)*m;
+  shots.push({x:lx,y:ly,l:0.22});
+  let hit=null;
+  for(let i=0;i<bonuses.length;i++){
+    if(Math.hypot(lx-bonuses[i].x,ly-bonuses[i].y)<bonuses[i].r+4){hit=bonuses[i];break;}
+  }
+  let gain=0;
+  if(hit){
+    gain=30;
+    bonuses.splice(bonuses.indexOf(hit),1);
+    bonuses.push(makeBonus(hit.vx>0?-40:520,hit.vx>0?1:-1));
+  }else{
+    const d=Math.hypot(lx-CX,ly-CY);
+    if(d<CR){
+      let v=10-Math.floor(d/(CR/5))*2;
+      if(v<2)v=2;
+      gain=v;
+    }
+  }
+  if(gain>0){
+    combo++;comboT=1.2;
+    const mult=1+Math.min(1,combo*0.1);
+    const pts=Math.round(gain*mult);
+    score+=pts;
+    elMsg.textContent="+"+pts+(combo>1?" · 连击 x"+combo:"");
+  }else{
+    combo=0;
+    elMsg.textContent="这一箭落空了";
+  }
+  elSc.textContent=score;elCb.textContent=combo;
+}
+function setFiring(v){
+  if(state!=="play")return;
+  firing=v;
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;
+  firing=false;fireCd=0;spread=4;combo=0;comboT=0;
+  bonuses=[makeBonus(80,1),makeBonus(400,-1)];
+  shots=[];
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;elCb.textContent="0";
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";firing=false;
+  const win=score>=GOAL;
+  ovT.textContent=win?"箭如疾风!":"风暴平息";
+  ovT.style.color=win?"#ff8a65":"#ef9a9a";
+  ovD.textContent=win?"狂风暴雨般的箭雨里,你依然控制着每一支箭的去向。":"连发是双刃剑:散布一大,再快的箭也只是往天上撒。该停就停。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);setFiring(true);});
+window.addEventListener("mouseup",function(){setFiring(false);});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);setFiring(true);e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){mouse=evPos(e.touches[0]);e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(){setFiring(false);});
+cv.addEventListener("touchcancel",function(){setFiring(false);});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(firing){
+      fireCd-=dt;
+      if(fireCd<=0){oneShot();fireCd=0.14;spread=Math.min(55,spread+7);}
+    }else{
+      spread=Math.max(4,spread-26*dt);
+      fireCd=0;
+    }
+    if(comboT>0){comboT-=dt;if(comboT<=0)combo=0;}
+    for(let i=0;i<bonuses.length;i++){
+      const b=bonuses[i];
+      b.x+=b.vx*dt;
+      if(b.x<40&&b.vx<0)b.vx=-b.vx;
+      if(b.x>440&&b.vx>0)b.vx=-b.vx;
+      b.y+=Math.sin(tp*1.5+b.x*0.01)*12*dt;
+    }
+    for(let i=shots.length-1;i>=0;i--){
+      shots[i].l-=dt;
+      if(shots[i].l<=0)shots.splice(i,1);
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#33201c");g.addColorStop(1,"#1a1210");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(255,138,101,0.07)";ctx.lineWidth=1;
+  for(let i=0;i<6;i++){
+    ctx.beginPath();ctx.arc(CX,CY,110+i*40,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+  const cols=["#eceff1","#e53935","#ffc107"];
+  const rs=[1,0.6,0.28];
+  for(let i=0;i<3;i++){
+    ctx.fillStyle=cols[i];
+    ctx.beginPath();ctx.arc(CX,CY,CR*rs[i],0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  for(let i=0;i<bonuses.length;i++){
+    const b=bonuses[i];
+    ctx.fillStyle="#ffd740";
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#8a6d1f";ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle="#5d4a10";ctx.font="bold 12px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText("30",b.x,b.y);
+  }
+  for(let i=0;i<shots.length;i++){
+    const s=shots[i];
+    ctx.globalAlpha=Math.max(0,s.l/0.22);
+    ctx.strokeStyle="#ffe0b2";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x,s.y,5,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  if(state==="play"){
+    ctx.strokeStyle="rgba(255,138,101,0.6)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,Math.max(3,spread),0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle="#ff8a65";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,2.5,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-11,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+    ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+11,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-11);ctx.lineTo(mouse.x,mouse.y-5);
+    ctx.moveTo(mouse.x,mouse.y+5);ctx.lineTo(mouse.x,mouse.y+11);ctx.stroke();
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

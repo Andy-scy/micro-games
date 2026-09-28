@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>巨锤横扫</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fdba74;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fdba74;font-size:16px}
+.modes{display:flex;gap:8px;justify-content:center;margin-bottom:10px}
+.mb{border:2px solid #fdba74;background:transparent;color:#fdba74;border-radius:10px;padding:7px 18px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+.mb.on{background:#fdba74;color:#3a1c05}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#241a10;border-radius:10px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fdba74}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fdba74;color:#3a1c05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>巨锤横扫</h1>
+  <p class="hint">按 1/2 或点按钮换锤 · 巨锤一敲扫一大片但要冷却</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>横扫 <b id="sweep">0</b></span>
+    <span>时间 <b id="time">50</b> 秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="modes">
+    <button class="mb on" id="bS">小锤·快</button>
+    <button class="mb" id="bB">巨锤·横扫</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">巨锤横扫</h2>
+      <p id="ovDesc">两把锤子随你换:小锤出手快,单只命中 +8;巨锤范围超大,一次扫中圈内所有地鼠每只 +12,但挥完要冷却 1.3 秒。按 1/2 或点上方按钮切换,50 秒打出效率!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=480;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elSweep=$("sweep"),elTime=$("time"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var bS=$("bS"),bB=$("bB");
+var GAME_LEN=50,BIG_R=130,BIG_CD=1300;
+var best=loadBest("mg_s216");
+var state="menu",score=0,hits=0,sweeps=0,timeLeft=GAME_LEN,spawnT=350;
+var mode="small",cd=0;
+var holes=[],moles=[],floats=[],rings=[];
+var lastT=0;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function initHoles(){
+  holes=[];
+  for(var r=0;r<3;r++)for(var c=0;c<3;c++)holes.push({x:90+c*150,y:160+r*132});
+}
+initHoles();
+
+function freeHole(){
+  var used={},i,cand=[];
+  for(i=0;i<moles.length;i++)used[moles[i].hole]=1;
+  for(i=0;i<holes.length;i++)if(!used[i])cand.push(i);
+  if(!cand.length)return -1;
+  return cand[(Math.random()*cand.length)|0];
+}
+function spawnMole(){
+  var h=freeHole();
+  if(h<0)return;
+  moles.push({hole:h,state:"rise",frac:0,t:0,upMs:900+Math.random()*260});
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,t:0});}
+function addRing(x,y,r,c){rings.push({x:x,y:y,r:r,c:c,t:0});}
+
+function setMode(m){
+  if(state==="over")return;
+  mode=m;
+  bS.className=m==="small"?"mb on":"mb";
+  bB.className=m==="big"?"mb on":"mb";
+}
+function reset(){
+  moles=[];floats=[];rings=[];
+  score=0;hits=0;sweeps=0;timeLeft=GAME_LEN;spawnT=350;
+  mode="small";cd=0;
+  setMode("small");
+  updateHud();
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s216",best);}
+  ovTitle.textContent="时间到!";
+  ovDesc.textContent="小锤命中 "+hits+" 次 · 巨锤横扫 "+sweeps+" 次";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;
+  elSweep.textContent=sweeps;
+  elTime.textContent=Math.ceil(timeLeft);
+  elBest.textContent=best;
+}
+
+function update(dt){
+  timeLeft-=dt/1000;
+  if(timeLeft<=0){timeLeft=0;endGame();return;}
+  if(cd>0)cd-=dt;
+  spawnT-=dt;
+  var prog=1-timeLeft/GAME_LEN;
+  if(spawnT<=0){
+    var gap=Math.max(380,660-prog*280);
+    spawnT=gap*(0.8+Math.random()*0.4);
+    spawnMole();
+    if(prog>0.5&&Math.random()<0.45)spawnMole();
+  }
+  var i,m;
+  for(i=moles.length-1;i>=0;i--){
+    m=moles[i];m.t+=dt;
+    if(m.state==="rise"){
+      m.frac=Math.min(1,m.t/130);
+      if(m.frac>=1){m.state="up";m.t=0;}
+    }else if(m.state==="up"){
+      if(m.t>=m.upMs){m.state="down";m.t=0;}
+    }else if(m.state==="down"){
+      m.frac=1-Math.min(1,m.t/150);
+      if(m.frac<=0)moles.splice(i,1);
+    }
+  }
+  for(i=floats.length-1;i>=0;i--){floats[i].t+=dt;if(floats[i].t>800)floats.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){rings[i].t+=dt;if(rings[i].t>380)rings.splice(i,1);}
+}
+
+function whack(p){
+  if(state!=="playing")return;
+  var i,m;
+  if(mode==="small"){
+    for(i=0;i<moles.length;i++){
+      m=moles[i];
+      if(m.state!=="down"&&m.frac>0.3){
+        var hx=holes[m.hole].x,hy=holes[m.hole].y-34*m.frac;
+        var dx=p.x-hx,dy=p.y-hy;
+        if(dx*dx+dy*dy<56*56){
+          moles.splice(i,1);
+          score+=8;hits++;
+          addFloat(hx,hy-46,"+8","#fdba74");
+          addRing(hx,hy,44,"rgba(253,186,116,0.85)");
+          updateHud();
+          return;
+        }
+      }
+    }
+    addRing(p.x,p.y,20,"rgba(139,144,176,0.5)");
+  }else{
+    if(cd>0){
+      addFloat(p.x,p.y-24,"巨锤冷却中…","#8b90b0");
+      return;
+    }
+    cd=BIG_CD;
+    sweeps++;
+    var n=0;
+    for(i=moles.length-1;i>=0;i--){
+      m=moles[i];
+      if(m.state!=="down"&&m.frac>0.3){
+        var hx2=holes[m.hole].x,hy2=holes[m.hole].y-34*m.frac;
+        var dx2=p.x-hx2,dy2=p.y-hy2;
+        if(dx2*dx2+dy2*dy2<BIG_R*BIG_R){
+          moles.splice(i,1);
+          score+=12;n++;
+          addFloat(hx2,hy2-46,"+12","#fb923c");
+        }
+      }
+    }
+    addRing(p.x,p.y,BIG_R,"rgba(251,146,60,0.9)");
+    addRing(p.x,p.y,BIG_R*0.6,"rgba(254,215,170,0.8)");
+    if(n===0)addFloat(p.x,p.y-30,"扫空了…","#8b90b0");
+    updateHud();
+  }
+}
+
+function drawMoleAt(h,frac){
+  var bh=78,base=h.y+10,cy=base-bh*frac;
+  ctx.save();
+  ctx.beginPath();ctx.rect(h.x-72,h.y-172,144,184);ctx.clip();
+  ctx.fillStyle="#9c5a2c";
+  ctx.beginPath();ctx.ellipse(h.x,cy,34,bh/2,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#171008";
+  ctx.beginPath();ctx.arc(h.x-11,cy-8,3.6,0,Math.PI*2);ctx.arc(h.x+11,cy-8,3.6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f472b6";
+  ctx.beginPath();ctx.ellipse(h.x,cy+4,5.5,4,0,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function drawHoleBack(h){
+  ctx.fillStyle="#150d05";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#5c3e1c";ctx.lineWidth=4;ctx.stroke();
+}
+function drawHoleFront(h){
+  ctx.fillStyle="#150d05";
+  ctx.beginPath();ctx.ellipse(h.x,h.y,48,18,0,0,Math.PI);ctx.fill();
+}
+
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2a1d10");g.addColorStop(1,"#160e07");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  if(mode==="big"&&cd<=0){
+    for(i=0;i<holes.length;i++){
+      ctx.strokeStyle="rgba(251,146,60,0.16)";
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(holes[i].x,holes[i].y,58,0,Math.PI*2);ctx.stroke();
+    }
+  }
+  for(i=0;i<holes.length;i++)drawHoleBack(holes[i]);
+  for(i=0;i<moles.length;i++){
+    var m=moles[i];
+    if(m.frac>0.02)drawMoleAt(holes[m.hole],m.frac);
+  }
+  for(i=0;i<holes.length;i++)drawHoleFront(holes[i]);
+  for(i=0;i<rings.length;i++){
+    var r=rings[i],k=r.t/380;
+    ctx.strokeStyle=r.c;ctx.lineWidth=5*(1-k)+1;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*(0.25+k),0,Math.PI*2);ctx.stroke();
+  }
+  ctx.textAlign="center";ctx.textBaseline="middle";
+  for(i=0;i<floats.length;i++){
+    var f=floats[i],fk=f.t/800;
+    ctx.globalAlpha=1-fk;
+    ctx.font="bold 19px sans-serif";
+    ctx.fillStyle=f.c;
+    ctx.fillText(f.txt,f.x,f.y-34*fk);
+    ctx.globalAlpha=1;
+  }
+  ctx.fillStyle="rgba(0,0,0,0.35)";ctx.fillRect(0,0,W,26);
+  ctx.fillStyle="#fdba74";ctx.fillRect(0,0,W*timeLeft/GAME_LEN,26);
+  ctx.font="bold 14px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle";
+  ctx.fillStyle="#0f1220";
+  ctx.fillText("剩余 "+Math.ceil(timeLeft)+" 秒",10,14);
+  ctx.textAlign="right";
+  if(mode==="big"&&cd>0){
+    ctx.fillStyle="#f87171";
+    ctx.fillText("巨锤冷却 "+(cd/1000).toFixed(1)+"s",W-10,14);
+  }else{
+    ctx.fillStyle="#fdba74";
+    ctx.fillText(mode==="small"?"小锤模式(按2换巨锤)":"巨锤就绪!",W-10,14);
+  }
+}
+
+function ptFromEvent(e){
+  var rect=cv.getBoundingClientRect();
+  var cx,cy;
+  if(e.changedTouches&&e.changedTouches.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
+  else{cx=e.clientX;cy=e.clientY;}
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+cv.addEventListener("mousedown",function(e){e.preventDefault();whack(ptFromEvent(e));});
+cv.addEventListener("touchstart",function(e){e.preventDefault();whack(ptFromEvent(e));},{passive:false});
+bS.addEventListener("click",function(){setMode("small");});
+bB.addEventListener("click",function(){setMode("big");});
+btnGo.addEventListener("click",startGame);
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="1")setMode("small");
+  else if(e.key==="2")setMode("big");
+});
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

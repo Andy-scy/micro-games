@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后厨火警</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f87171;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f87171;font-size:16px}
+.stage{position:relative;background:#241414;border:2px solid #47201f;border-radius:12px;padding:14px}
+.grid9{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.cell9{aspect-ratio:1/1;background:#301a1a;border:2px solid #4a2826;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:38px;cursor:pointer;user-select:none}
+.cell9 .fl{display:block;line-height:1}
+.heatbar{height:14px;border-radius:7px;background:#0b0f1e;overflow:hidden;margin-top:12px}
+.heatbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#fbbf24,#f87171)}
+.hlab{display:flex;justify-content:space-between;font-size:12px;color:#8b90b0;margin-top:4px}
+.acts{text-align:center;margin-top:10px}
+.acts button{background:#67e8f9;color:#082830;border:none;border-radius:10px;padding:11px 28px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.acts button:active{transform:scale(.96)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#3a0808;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>后厨火警</h1>
+  <p class="hint">灶台会窜出火苗并不断变大、<b style="color:#f87171">向邻格蔓延</b>!<br>点击泼水灭火(小水桶有短暂回水时间),火势积满整条计量条就爆炸!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>坚持 <b id="surv">0</b>秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="grid9" id="grid9"></div>
+    <div class="heatbar"><i id="heatfill"></i></div>
+    <div class="hlab"><span>火势计量</span><span>满格 = 后厨爆炸</span></div>
+    <div class="acts"><button id="btnWater">🪣 泼水模式:直接点火苗</button></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">后厨火警</h2>
+      <p id="ovDesc">火苗每隔几秒新窜出一个,还会越长越大并向四邻蔓延。点击火苗泼水:小火一泼就灭,大火要泼两下。火势计量积满即失败,撑得越久分越高!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elSurv=$("surv"),elBest=$("best");
+var gridEl=$("grid9"),heatfill=$("heatfill");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s818");
+var state="menu",lv,spawnT,growT,spreadT,cool,elapsed,score,lastT;
+var cellEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function build(){
+  for(var i=0;i<9;i++){
+    var d=document.createElement("div");
+    d.className="cell9";
+    d.setAttribute("data-i",String(i));
+    d.innerHTML='<span class="fl"></span>';
+    gridEl.appendChild(d);
+    cellEls.push(d.children[0]);
+  }
+}
+function reset(){
+  lv=[0,0,0,0,0,0,0,0,0];
+  spawnT=1.2;growT=3;spreadT=6;cool=0;elapsed=0;score=0;
+  render();updateHud();
+}
+function updateHud(){
+  elScore.textContent=Math.floor(score);elSurv.textContent=Math.floor(elapsed);elBest.textContent=best;
+}
+function render(){
+  var sum=0,i;
+  for(i=0;i<9;i++)sum+=lv[i];
+  heatfill.style.width=Math.min(100,sum/27*100)+"%";
+  for(i=0;i<9;i++){
+    var v=lv[i],el=cellEls[i];
+    if(v===0){el.textContent="";el.style.fontSize="38px";continue;}
+    el.textContent="🔥";
+    if(v===1){el.style.opacity=".55";el.style.fontSize="26px";}
+    else if(v===2){el.style.opacity=".85";el.style.fontSize="34px";}
+    else{el.style.opacity="1";el.style.fontSize="44px";el.style.textShadow="0 0 14px #f87171";}
+  }
+}
+function neighbors(i){
+  var r=(i/3)|0,c=i%3,out=[];
+  if(r>0)out.push(i-3);
+  if(r<2)out.push(i+3);
+  if(c>0)out.push(i-1);
+  if(c<2)out.push(i+1);
+  return out;
+}
+function douse(i){
+  if(state!=="playing"||cool>0)return;
+  if(lv[i]<=0)return;
+  cool=0.25;
+  lv[i]=lv[i]>=2?lv[i]-2:0;
+  score+=5;
+  render();updateHud();
+}
+function gameOver(){
+  state="over";
+  var fin=Math.floor(score);
+  if(fin>best){best=fin;saveBest("mg_s818",best);}
+  ovTitle.textContent="轰!后厨爆炸了";
+  ovDesc.textContent="火势彻底失控,你坚持了 "+Math.floor(elapsed)+" 秒。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+fin+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(state!=="playing")return;
+  elapsed+=dts;score+=2*dts;
+  if(cool>0)cool-=dts;
+  spawnT-=dts;
+  if(spawnT<=0){
+    spawnT=Math.max(1.0,2.2-elapsed*0.03);
+    var empty=[],i;
+    for(i=0;i<9;i++)if(lv[i]===0)empty.push(i);
+    if(empty.length)lv[empty[(Math.random()*empty.length)|0]]=1;
+  }
+  growT-=dts;
+  if(growT<=0){
+    growT=3;
+    for(i=0;i<9;i++)if(lv[i]===1||lv[i]===2)lv[i]++;
+  }
+  spreadT-=dts;
+  if(spreadT<=0){
+    spreadT=6;
+    var threes=[];
+    for(i=0;i<9;i++)if(lv[i]===3)threes.push(i);
+    for(i=0;i<threes.length;i++){
+      var nb=neighbors(threes[i]),cand=[];
+      for(var j=0;j<nb.length;j++)if(lv[nb[j]]===0)cand.push(nb[j]);
+      if(cand.length)lv[cand[(Math.random()*cand.length)|0]]=1;
+    }
+  }
+  var sum=0;
+  for(i=0;i<9;i++)sum+=lv[i];
+  if(sum>=27){render();updateHud();gameOver();return;}
+  render();updateHud();
+}
+gridEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==gridEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==gridEl)douse(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var map={"1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6,"8":7,"9":8};
+  if(map[e.key]!==undefined&&state==="playing"){douse(map[e.key]);e.preventDefault();}
+  else if((e.key===" "||e.code==="Space")&&state!=="playing"){e.preventDefault();startGame();}
+});
+btnGo.addEventListener("click",startGame);
+build();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

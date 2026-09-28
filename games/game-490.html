@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金靶指令</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffd740;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffd740;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffd740}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffd740;color:#3d3200;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>金靶指令</h1>
+  <p class="hint">四只靶各有编号 · 必须按 1→2→3→4 顺序击破 · 60 秒冲 240 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>下一靶 <b id="nx">1</b></span>
+    <span>时间 <b id="tm">60</b>秒</span>
+    <span>目标 <b>240</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">金靶指令</h2>
+      <p id="ovD">场上同时立着四只编号靶,考验的不是谁打得准,而是谁分配得快:必须按 1→2→3→4 的顺序逐个击破,射错编号要扣分并清空连击。清空一组立加 20 分并换新阵型。眼疾手快还得心细,60 秒冲 240 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">受领任务</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elNx=$("nx"),elTm=$("tm"),elMsg=$("msg");
+const GOAL=240,DUR=60,OX=240,OY=545;
+let state="menu",score=0,timeLeft=DUR,tp=0,streak=0,next=1,shakeT=0;
+let mouse={x:240,y:280},targets=[],pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function newSet(){
+  targets=[];
+  for(let n=1;n<=4;n++){
+    let placed=false,tries=0;
+    while(!placed&&tries<200){
+      const x=70+Math.random()*340,y=90+Math.random()*380;
+      let ok=true;
+      for(let i=0;i<targets.length;i++){
+        if(Math.hypot(x-targets[i].x,y-targets[i].y)<95){ok=false;break;}
+      }
+      if(ok){targets.push({x:x,y:y,r:30,num:n});placed=true;}
+      tries++;
+    }
+    if(!placed)targets.push({x:60+n*90,y:110+((n*67)%300),r:30,num:n});
+  }
+}
+function fire(){
+  if(state!=="play")return;
+  let hit=null,best=1e9;
+  for(let i=0;i<targets.length;i++){
+    const d=Math.hypot(mouse.x-targets[i].x,mouse.y-targets[i].y);
+    if(d<targets[i].r+8&&d<best){best=d;hit=targets[i];}
+  }
+  if(!hit){
+    streak=0;
+    elMsg.textContent="空箭,连击中断";
+    return;
+  }
+  if(hit.num===next){
+    streak++;
+    const gain=15+streak*3;
+    score+=gain;
+    elMsg.textContent="按令击破 +"+gain+(streak>1?" · 连击 x"+streak:"");
+    for(let i=0;i<10;i++){
+      const a=Math.random()*6.28,s=60+Math.random()*130;
+      pops.push({x:hit.x,y:hit.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:0.5,c:"#ffd740"});
+    }
+    targets.splice(targets.indexOf(hit),1);
+    next++;
+    if(next>4){
+      score+=20;
+      elMsg.textContent="一组肃清!奖励 +20,新阵型已就位";
+      newSet();
+      next=1;
+    }
+    elNx.textContent=next;
+  }else{
+    score=Math.max(0,score-8);
+    streak=0;shakeT=0.35;
+    elMsg.textContent="顺序错误!应射 "+next+" 号";
+  }
+  elSc.textContent=score;
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;streak=0;next=1;shakeT=0;
+  pops=[];newSet();
+  elMsg.textContent="";elSc.textContent="0";elNx.textContent="1";elTm.textContent=DUR;
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"令行禁止!":"阵型未破";
+  ovT.style.color=win?"#ffd740":"#ef9a9a";
+  ovD.textContent=win?"读靶、判序、开火一气呵成,指挥官对你的评价只有一个字:快。":"射错一次,前功尽弃。先扫一眼全部编号,再决定第一箭。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);fire();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);fire();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    if(shakeT>0)shakeT-=dt;
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.l-=dt;
+      if(p.l<=0){pops.splice(i,1);continue;}
+      p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=260*dt;
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(shakeT>0)ctx.translate((Math.random()-0.5)*8,(Math.random()-0.5)*8);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2b2415");g.addColorStop(1,"#15110a");
+  ctx.fillStyle=g;ctx.fillRect(-10,-10,W+20,H+20);
+  ctx.strokeStyle="rgba(255,215,64,0.08)";ctx.lineWidth=1;
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(0,80+i*95);ctx.lineTo(W,80+i*95);ctx.stroke();}
+  ctx.fillStyle="#1e2a18";ctx.fillRect(-10,505,W+20,H-495);
+  for(let i=0;i<targets.length;i++){
+    const t0=targets[i],isNext=t0.num===next;
+    const pulse=isNext?1+Math.sin(tp*6)*0.06:1;
+    ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=1;
+    ctx.fillStyle=isNext?"#8a6d1f":"#546e7a";
+    ctx.beginPath();ctx.arc(t0.x,t0.y,t0.r*pulse,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle=isNext?"#3e2f0a":"#37474f";
+    ctx.beginPath();ctx.arc(t0.x,t0.y,t0.r*0.62*pulse,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=isNext?"#ffe082":"#eceff1";
+    ctx.font="bold 24px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(String(t0.num),t0.x,t0.y+1);
+    if(isNext){
+      ctx.strokeStyle="#ffd740";ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(t0.x,t0.y,t0.r+7+Math.sin(tp*6)*2,0,Math.PI*2);ctx.stroke();
+    }
+  }
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.max(0,p.l/0.5);
+    ctx.fillStyle=p.c;
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(OX,OY+6,14,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#c8a253";ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(OX,OY,26,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  if(state==="play"){
+    ctx.strokeStyle="#ffd740";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+  ctx.restore();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

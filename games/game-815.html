@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>摆盘临摹</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fda4af;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fda4af;font-size:16px}
+.stage{position:relative;background:#231822;border:2px solid #3e2438;border-radius:12px;padding:14px;display:flex;gap:18px;justify-content:center;align-items:center;flex-wrap:wrap}
+.gwrap{text-align:center}
+.glab{font-size:12px;color:#8b90b0;margin-bottom:6px}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#5a4a52;border:4px solid #7a666f;border-radius:50%;padding:8px}
+.cell{width:34px;height:34px;border-radius:6px;background:#efe6df;border:1px solid #cbbfb6;cursor:pointer}
+.cell.small{width:26px;height:26px;cursor:default}
+.c1{background:#ff5f4d}
+.c2{background:#ffd23f}
+.c3{background:#7ed957}
+.platebig .cell{width:40px;height:40px}
+.timebar{height:10px;border-radius:5px;background:#0b0f1e;overflow:hidden;margin:10px auto 0;width:100%;max-width:340px}
+.timebar i{display:block;height:100%;width:100%;background:#fda4af}
+.acts{text-align:center;margin-top:10px}
+.acts button{background:#fda4af;color:#3a0a1a;border:none;border-radius:10px;padding:11px 30px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.acts button:active{transform:scale(.96)}
+.msg{text-align:center;color:#fbbf24;font-size:14px;font-weight:700;height:20px;margin-top:6px}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fda4af}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fda4af;color:#3a0a1a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>摆盘临摹</h1>
+  <p class="hint">左边是主厨的<b style="color:#fda4af">摆盘样板</b>,在右边大盘上点格子上酱临摹<br>反复点击可换酱色/擦除,点「完成」评分,15 秒内完成当前盘!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>完成 <b id="done">0</b>盘</span>
+    <span>时间 <b id="time">70</b>秒</span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <div class="gwrap">
+      <div class="glab">样板(照着摆)</div>
+      <div class="grid" id="gtar"></div>
+    </div>
+    <div class="gwrap platebig">
+      <div class="glab">你的盘子(点击加酱)</div>
+      <div class="grid" id="gplate"></div>
+    </div>
+    <div class="timebar"><i id="tfill"></i></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">摆盘临摹</h2>
+      <p id="ovDesc">每格点击会循环切换:无酱 → 红酱 → 黄酱 → 绿酱 → 无酱。照样板摆好后点「完成摆盘」:位置颜色全对每格 +8,摆错的每格 -3。每 15 秒强制交盘,70 秒内多做几盘!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div class="acts"><button id="btnSub">完成摆盘(回车)</button></div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var SAUCE=["无","红酱","黄酱","绿酱"];
+var CCLS=["","c1","c2","c3"];
+var elScore=$("score"),elDone=$("done"),elTime=$("time"),elBest=$("best");
+var gtar=$("gtar"),gplate=$("gplate"),tfill=$("tfill"),msg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo"),btnSub=$("btnSub");
+var best=loadBest("mg_s815");
+var state="menu",tar,plate,tLeft,total,doneN,score,lastT,msgT;
+var cellEls=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildPlate(){
+  for(var i=0;i<25;i++){
+    var d=document.createElement("div");
+    d.className="cell";
+    d.setAttribute("data-i",String(i));
+    gplate.appendChild(d);
+    cellEls.push(d);
+  }
+}
+function newPattern(){
+  tar=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  plate=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  var n=6+Math.min(4,Math.floor(doneN/2));
+  for(var i=0;i<n;i++){
+    var idx=(Math.random()*25)|0;
+    tar[idx]=1+((Math.random()*3)|0);
+  }
+  var gt=gtar.children;
+  for(i=0;i<25;i++){
+    gt[i].className="cell small"+CCLS[tar[i]];
+    cellEls[i].className="cell"+CCLS[plate[i]];
+  }
+  tLeft=15;
+}
+function reset(){
+  score=0;doneN=0;total=70;
+  msg.textContent="";msgT=0;
+  newPattern();updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elDone.textContent=doneN;elBest.textContent=best;
+  elTime.textContent=Math.max(0,Math.ceil(total));
+}
+function showMsg(t,c){msg.textContent=t;msg.style.color=c||"#fbbf24";msgT=1.3;}
+function submit(){
+  if(state!=="playing")return;
+  var match=0,wrong=0,i;
+  for(i=0;i<25;i++){
+    if(tar[i]!==0&&plate[i]===tar[i])match++;
+    else if(plate[i]!==0)wrong++;
+  }
+  var pts=Math.max(0,8*match-3*wrong);
+  score+=pts;doneN++;
+  showMsg("评分 +"+pts+(match>=tarDoneCount()?" 完美复刻!":""),"#4ade80");
+  updateHud();
+  newPattern();
+}
+function tarDoneCount(){
+  var n=0,i;
+  for(i=0;i<25;i++)if(tar[i]!==0)n++;
+  return n;
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s815",best);}
+  ovTitle.textContent="打烊时间到";
+  ovDesc.textContent="70 秒里你临摹了 "+doneN+" 盘作品。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(msgT>0){msgT-=dts;if(msgT<=0){msg.textContent="";msgT=0;}}
+  if(state!=="playing")return;
+  total-=dts;tLeft-=dts;
+  tfill.style.width=Math.max(0,tLeft/15*100)+"%";
+  if(total<=0){total=0;updateHud();gameOver();return;}
+  if(tLeft<=0){
+    showMsg("时间到,强制交盘!","#f87171");
+    submit();
+  }
+  updateHud();
+}
+gplate.addEventListener("click",function(e){
+  var n=e.target;
+  if(!n.getAttribute||!n.getAttribute("data-i"))return;
+  if(state!=="playing")return;
+  var i=parseInt(n.getAttribute("data-i"),10);
+  plate[i]=(plate[i]+1)%4;
+  cellEls[i].className="cell"+CCLS[plate[i]];
+});
+document.addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+    e.preventDefault();
+    if(state==="playing")submit();
+  }else if(e.key===" "||e.code==="Space"){
+    e.preventDefault();
+    if(state!=="playing")startGame();
+  }
+});
+btnSub.addEventListener("click",submit);
+btnGo.addEventListener("click",startGame);
+buildPlate();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

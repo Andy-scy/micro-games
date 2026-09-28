@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字母链消除</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:10px}
+#fill{height:100%;width:100%;background:#b388ff}
+#now{text-align:center;font-size:20px;font-weight:bold;font-family:Consolas,monospace;min-height:28px;color:#fff}
+#now.good{color:#2ec27e}
+#grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;background:#151a30;border-radius:14px;padding:10px;margin-bottom:10px}
+.cell{aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold;font-family:Consolas,monospace;background:#232a4d;border-radius:10px;cursor:pointer;color:#fff;user-select:none}
+.cell.on{background:#4cc9f0;color:#08131c}
+.cell.dead{background:#1a1f3d;color:#1a1f3d}
+#act{display:flex;gap:10px;justify-content:center}
+#act button{padding:9px 24px;font-size:14px;border:none;border-radius:999px;cursor:pointer;font-family:inherit;font-weight:bold}
+#go{background:#2ec27e;color:#08131c}
+#clr{background:#232a4d;color:#e8eaf6}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px;margin-top:8px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>字母链消除</h1>
+<p id="tip">点击相邻(八方)字母连成一条链 组成词库里的单词(至少 3 个字母) · 提交后字母消除上方补落 · 120 秒内尽量多消</p>
+<div id="wrap">
+<div id="hud"><span>得分 <b id="score">0</b></span><span>消除 <b id="cnt">0</b> 词</span><span>剩余 <b id="time">120</b> 秒</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div id="now">_</div>
+<div id="grid"></div>
+<div id="act"><button id="go">提交</button><button id="clr">清空</button></div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">字母链消除</h2><p id="ovP">像贪吃蛇一样点击相邻字母
+连出 3 个以上字母的单词
+提交成功即消除得分</p><button id="ovB">开始消除</button></div>
+</div>
+<script>
+"use strict";
+var DICT = ["cat","dog","sun","cup","box","car","bus","egg","hat","key","leg","map","pen","pig","run","big","red","hot","ice","ant","bat","bed","bow","cow","fox","hen","jam","jet","owl","rat","ship","shop","sing","sock","star","song","swan","tail","time","tree","wind","wolf","zone","band","bank","bath","boat","bone","book","call","calm","camp","card","city","clap","cool","corn","door","dust","farm","fast","fish","five","frog","gold","game","gift","hand","hole","hook","hope","king","kite","lake","lamp","life","lion","lock","long","moon","milk","nest","nose","note","park","path","pink","play","rain","ring","road","rock","rose","apple","beach","brain","bread","chair","cloud","dance","dream","earth","grape","heart","lemon","mango","night","ocean","plant","river","sleep","storm","table","water","world"];
+var N = 5, TOTAL = 120;
+var BAG = "eeeeaaaaiioonnrsttludgcbmphfvywk";
+var gridEl = document.getElementById("grid");
+var nowEl = document.getElementById("now");
+var scoreEl = document.getElementById("score");
+var cntEl = document.getElementById("cnt");
+var timeEl = document.getElementById("time");
+var fillEl = document.getElementById("fill");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var grid = [], chain = [], score = 0, words = 0;
+var playing = false, timeLeft = TOTAL, lastTs = 0, rafId = 0;
+
+function rndLetter() { return BAG[Math.floor(Math.random() * BAG.length)]; }
+
+function buildGrid() {
+  grid = [];
+  for (var r = 0; r < N; r++) {
+    var row = [];
+    for (var c = 0; c < N; c++) row.push(rndLetter());
+    grid.push(row);
+  }
+}
+
+function render() {
+  gridEl.innerHTML = "";
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      (function (rr, cc) {
+        var idx = rr * N + cc;
+        var d = document.createElement("div");
+        d.className = "cell";
+        if (!grid[rr][cc]) { d.classList.add("dead"); d.textContent = "·"; }
+        else {
+          d.textContent = grid[rr][cc].toUpperCase();
+          if (chain.indexOf(idx) >= 0) d.classList.add("on");
+          d.onclick = function () { tap(rr, cc); };
+        }
+        gridEl.appendChild(d);
+      })(r, c);
+    }
+  }
+  var s = "";
+  for (var i = 0; i < chain.length; i++) {
+    var idx2 = chain[i];
+    s += grid[Math.floor(idx2 / N)][idx2 % N];
+  }
+  nowEl.textContent = chain.length ? s.toUpperCase() : "_";
+  nowEl.className = valid(s) ? "good" : "";
+}
+
+function inDict(w) { return DICT.indexOf(w) >= 0; }
+
+function valid(w) { return w.length >= 3 && inDict(w); }
+
+function adjacent(a, b) {
+  var dr = Math.abs(Math.floor(a / N) - Math.floor(b / N));
+  var dc = Math.abs(a % N - b % N);
+  return dr <= 1 && dc <= 1 && (dr + dc > 0);
+}
+
+function tap(r, c) {
+  if (!playing || !grid[r][c]) return;
+  var idx = r * N + c;
+  var pos = chain.indexOf(idx);
+  if (pos >= 0) {
+    chain = chain.slice(0, pos);
+  } else if (chain.length === 0 || adjacent(chain[chain.length - 1], idx)) {
+    chain.push(idx);
+  } else {
+    chain = [idx];
+  }
+  render();
+}
+
+function submit() {
+  if (!playing) return;
+  var s = "";
+  for (var i = 0; i < chain.length; i++) {
+    var idx = chain[i];
+    s += grid[Math.floor(idx / N)][idx % N];
+  }
+  if (!valid(s)) {
+    msgEl.textContent = s.length < 3 ? "至少 3 个字母" : "词库里没有 " + s.toUpperCase();
+    setTimeout(function () { msgEl.textContent = ""; }, 1000);
+    chain = [];
+    render();
+    return;
+  }
+  var gain = s.length * 5 + (s.length >= 5 ? 10 : 0);
+  score += gain;
+  words++;
+  scoreEl.textContent = score;
+  cntEl.textContent = words;
+  msgEl.textContent = s.toUpperCase() + " + " + gain + " 分";
+  setTimeout(function () { msgEl.textContent = ""; }, 900);
+  for (var k = 0; k < chain.length; k++) {
+    var idx2 = chain[k];
+    grid[Math.floor(idx2 / N)][idx2 % N] = null;
+  }
+  chain = [];
+  for (var c = 0; c < N; c++) {
+    var col = [];
+    for (var r2 = N - 1; r2 >= 0; r2--) if (grid[r2][c]) col.push(grid[r2][c]);
+    for (var r3 = N - 1; r3 >= 0; r3--) {
+      var from = N - 1 - r3;
+      grid[r3][c] = from < col.length ? col[from] : rndLetter();
+    }
+  }
+  render();
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    playing = false;
+    ovT.textContent = "时间到";
+    ovP.textContent = "消除 " + words + " 个单词\n得分 " + score;
+    ovB.textContent = "再来一局";
+    ov.classList.remove("hide");
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  fillEl.style.width = (timeLeft / TOTAL * 100) + "%";
+  rafId = requestAnimationFrame(loop);
+}
+
+function start() {
+  score = 0; words = 0; timeLeft = TOTAL; lastTs = 0;
+  chain = [];
+  scoreEl.textContent = "0";
+  cntEl.textContent = "0";
+  playing = true;
+  buildGrid();
+  render();
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+document.getElementById("go").onclick = submit;
+document.getElementById("clr").onclick = function () { if (playing) { chain = []; render(); } };
+ovB.onclick = start;
+</script>
+</body>
+</html>

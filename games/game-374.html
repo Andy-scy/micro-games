@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双音和弦</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#60a5fa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#60a5fa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#60a5fa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#60a5fa;color:#0a1d3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双音和弦</h1>
+  <p class="hint">左 F 右 J · 横跨双轨的长条是和弦,必须两手同时按下!· 触屏双手齐点</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">5</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双音和弦</h2>
+      <p id="ovDesc">普通音符按下对应键即可;
+横跨左右两条轨道的发光长条是和弦音符,
+必须 F 与 J 几乎同时按下才能奏响!
+只按一只手会漏拍,漏 5 个游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,LANES=2,LW=W/LANES,JY=470,APPROACH=1400;
+var BPM=104,beatInt=60000/BPM;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g374");
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function noiseHit(dur,vol,freq){
+  var ac=audio();if(!ac)return;
+  var n=(ac.sampleRate*dur)|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0),i;
+  for(i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n);
+  var s=ac.createBufferSource();s.buffer=b;
+  var f=ac.createBiquadFilter();f.type="highpass";f.frequency.value=freq;
+  var g=ac.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(ac.destination);s.start();
+}
+function sSingle(l){tone("triangle",l===0?523:659,0,0.12,0.22);}
+function sChord(){tone("triangle",392,392,0.2,0.25);tone("triangle",523,523,0.2,0.25);noiseHit(0.06,0.1,4000);}
+function sTick(){noiseHit(0.04,0.07,7000);}
+function sMiss(){tone("sawtooth",200,100,0.2,0.16);}
+
+var state="menu",notes,pops,score,combo,life,maxCombo,hits,schedBeat,schedCount,tickBeat,flash;
+function reset(){
+  notes=[];pops=[];flash=[0,0];
+  score=0;combo=0;life=5;maxCombo=0;hits=0;
+  schedBeat=performance.now()+2000;
+  tickBeat=schedBeat;
+  schedCount=0;
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(x,y,txt,color){pops.push({x:x,y:y,txt:txt,color:color,t0:performance.now()});}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g374",best);}
+  upd();
+  ovTitle.textContent="和弦散架";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="共奏响 "+hits+" 个音 · 最高连击 "+maxCombo+"\n两手齐按,再来一遍!";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  if(schedBeat-now>4000)schedBeat=now+2000;
+  while(schedBeat-now<APPROACH){
+    var r=Math.random(),type;
+    if(r<0.24)type=2;
+    else if(r<0.82)type=(Math.random()*2)|0;
+    else type=-1;
+    if(type>=0){
+      notes.push({type:type,t:schedBeat,judged:false,p0:0,p1:0});
+    }
+    schedCount++;
+    schedBeat+=beatInt;
+  }
+  if(tickBeat-now>4000)tickBeat=now+200;
+  while(now>=tickBeat){sTick();tickBeat+=beatInt;}
+}
+function down(l){
+  if(state!=="play")return;
+  var now=performance.now();
+  flash[l]=now;
+  var i,n,dt;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    if(n.type!==2||n.judged)continue;
+    dt=now-n.t;
+    if(dt<-220||dt>220)continue;
+    if(l===0){if(!n.p0)n.p0=now;}
+    else{if(!n.p1)n.p1=now;}
+    if(n.p0&&n.p1){
+      n.judged=true;hits++;
+      var off=Math.max(Math.abs(n.p0-n.t),Math.abs(n.p1-n.t));
+      if(off<=85){
+        combo++;if(combo>maxCombo)maxCombo=combo;
+        score+=400+combo*10;
+        addPop(W/2,JY-50,"齐奏!+"+(400+combo*10),"#fbbf24");
+      }else{
+        combo++;score+=150;
+        addPop(W/2,JY-50,"和弦 +150","#60a5fa");
+      }
+      sChord();upd();
+    }
+    return;
+  }
+  var bi=-1,bd=1e9;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    if(n.type!==l||n.judged)continue;
+    dt=now-n.t;
+    if(dt<-200||dt>200)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0)return;
+  n=notes[bi];n.judged=true;hits++;
+  var x=l*LW+LW/2;
+  if(Math.abs(bd)<=75){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=250+combo*10;
+    addPop(x,JY-50,"完美 +"+(250+combo*10),"#fbbf24");
+  }else{
+    combo++;score+=90;
+    addPop(x,JY-50,"还行 +90","#60a5fa");
+  }
+  sSingle(l);upd();
+}
+function update(now){
+  var i,n,x;
+  for(i=notes.length-1;i>=0;i--){
+    n=notes[i];
+    if(n.judged){notes.splice(i,1);continue;}
+    if(now>n.t+220){
+      notes.splice(i,1);
+      combo=0;life--;sMiss();
+      x=n.type===2?W/2:(n.type===0?LW/2:LW+LW/2);
+      addPop(x,JY-50,"MISS","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+  }
+  for(i=pops.length-1;i>=0;i--){if(now-pops[i].t0>560)pops.splice(i,1);}
+}
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(now){
+  var i,n,y,fl,x;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(96,165,250,0.2)";
+  ctx.beginPath();ctx.moveTo(LW,0);ctx.lineTo(LW,H);ctx.stroke();
+  ctx.strokeStyle="rgba(96,165,250,0.9)";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,JY);ctx.lineTo(W,JY);ctx.stroke();ctx.lineWidth=1;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    y=JY-(n.t-now)*(JY+40)/APPROACH;
+    if(y<-50)continue;
+    if(n.type===2){
+      ctx.fillStyle="rgba(251,191,36,0.85)";
+      rrect(10,y-14,W-20,28,9);ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,0.3)";
+      rrect(16,y-10,W-32,7,4);ctx.fill();
+    }else{
+      x=n.type===0?10:LW+10;
+      ctx.fillStyle=n.type===0?"#60a5fa":"#a78bfa";
+      rrect(x,y-13,LW-20,26,8);ctx.fill();
+    }
+  }
+  for(i=0;i<2;i++){
+    fl=1-(now-flash[i])/160;if(fl<0)fl=0;
+    x=i*LW+40;
+    ctx.fillStyle="rgba(96,165,250,"+(0.15+fl*0.5)+")";
+    rrect(x,496,LW-80,50,10);ctx.fill();
+    ctx.strokeStyle="rgba(96,165,250,0.5)";
+    rrect(x,496,LW-80,50,10);ctx.stroke();
+    ctx.fillStyle="rgba(232,234,246,0.8)";
+    ctx.font="bold 22px system-ui";ctx.textAlign="center";
+    ctx.fillText(i===0?"F":"J",x+(LW-80)/2,529);
+  }
+  for(i=0;i<pops.length;i++){
+    var p=pops[i],pr=(now-p.t0)/560;
+    ctx.fillStyle=p.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y-pr*26);
+    ctx.globalAlpha=1;
+  }
+}
+function toXY(cx,cy){
+  var rect=cv.getBoundingClientRect();
+  return {x:(cx-rect.left)*W/rect.width,y:(cy-rect.top)*H/rect.height};
+}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();var p=toXY(e.clientX,e.clientY);down(p.x<LW?0:1);});
+}else{
+  cv.addEventListener("mousedown",function(e){var p=toXY(e.clientX,e.clientY);down(p.x<LW?0:1);});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();var t=e.changedTouches[0];var p=toXY(t.clientX,t.clientY);down(p.x<LW?0:1);},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    return;
+  }
+  if(e.repeat)return;
+  if(e.code==="KeyF"||e.code==="ArrowLeft"){e.preventDefault();down(0);}
+  else if(e.code==="KeyJ"||e.code==="ArrowRight"){e.preventDefault();down(1);}
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play"){schedule(now);update(now);}
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

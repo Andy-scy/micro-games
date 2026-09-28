@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>打气大师</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>打气大师</h1>
+  <p class="tips">按住屏幕给气球打气,松手的瞬间让它停在目标圈带里!越接近中心分越高,吹过头会当场爆炸。8 轮挑战,气球越吹越刁钻。</p>
+  <div class="card">
+    <div class="row">
+      <div class="mut">目标区间</div><div class="big" id="tg">--</div>
+      <div class="stat"><div class="mut">轮数</div><div class="big" id="rd">1/8</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="500"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">打气大师</h2><p id="ovp">玩法说明:<br>· 每轮出现一个目标尺寸圈带(虚线圆之间)<br>· 按住屏幕或空格键打气,气球慢慢变大<br>· 松手时气球停在圈带内即成功,越靠中心分越高<br>· 超过外圈爆炸 -1 条生命并重试本轮<br>· 后期打气更快,偶数轮气流忽大忽小<br>· 3 条生命,撑过 8 轮即通关!</p><button class="btn" id="obtn">开始打气</button></div></div>
+<script>
+'use strict';
+var W=420,H=500;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var CX=210,CY=250;
+var round=1,score=0,lives=3;
+var size=18,tmin=50,tmax=70,holding=false,rt=0;
+var phase='idle',resT=0,resMsg='';
+var parts=[],running=false,lastT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function rate(){
+  var base=46+round*9;
+  if(round%2===0)base*=0.35+0.65*Math.abs(Math.sin(rt*2.6));
+  return base;
+}
+function newRound(){
+  var half=Math.max(8,26-round*2.4);
+  var center=rnd(54,84);
+  tmin=Math.max(30,center-half);
+  tmax=center+half;
+  size=18;rt=0;holding=false;phase='ready';
+  $i('tg').textContent=Math.round(tmin*2)+'~'+Math.round(tmax*2)+'px';
+  $i('rd').textContent=round+'/8';
+}
+function reset(){
+  round=1;score=0;lives=3;parts=[];resMsg='';
+  newRound();upd();
+}
+function upd(){
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(){
+  for(var k=0;k<26;k++){var a=rnd(0,6.28),s=rnd(80,300);
+    parts.push({x:CX,y:CY,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,6),c:'#ffb3c1',life:rnd(0.4,0.9)});}
+}
+function release(){
+  if(phase!=='ready')return;
+  holding=false;
+  if(size>=tmin&&size<=tmax){
+    var center=(tmin+tmax)/2,half=(tmax-tmin)/2;
+    var prec=1-Math.abs(size-center)/half;
+    var gain=50+Math.round(prec*50);
+    score+=gain;
+    resMsg='漂亮!+'+gain;
+    phase='result';resT=0.9;
+    if(round>=8){phase='win';showWin();return;}
+  }else if(size>tmax){
+    burst();
+    lives--;upd();
+    resMsg='砰!爆炸了!';
+    if(lives<=0){
+      phase='over';
+      $i('ovt').textContent='气球全炸了…';
+      $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>完成到第 '+(round-1)+' 轮';
+      $i('obtn').textContent='再来一局';
+      $i('overlay').classList.remove('hide');
+      return;
+    }
+    phase='result';resT=1.1;
+  }else{
+    resMsg='还不够大,再吹!';
+    phase='result';resT=0.9;
+  }
+}
+function showWin(){
+  $i('ovt').textContent='通关!打气大师!';
+  $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>8 轮全部完成,手感极佳!';
+  $i('obtn').textContent='再玩一次';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=180*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  if(phase==='result'){
+    resT-=dt;
+    if(resT<=0){
+      if(resMsg.indexOf('漂亮')>=0){round++;newRound();}
+      else newRound();
+    }
+    return;
+  }
+  if(phase!=='ready')return;
+  if(holding){
+    rt+=dt;
+    size+=rate()*dt;
+    if(size>tmax+30){
+      burst();lives--;upd();
+      resMsg='吹过头,炸了!';
+      phase='result';resT=1.1;
+      if(lives<=0){
+        phase='over';
+        $i('ovt').textContent='气球全炸了…';
+        $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>完成到第 '+(round-1)+' 轮';
+        $i('obtn').textContent='再来一局';
+        $i('overlay').classList.remove('hide');
+      }
+    }
+  }
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*1.5);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.strokeStyle='rgba(76,201,240,.25)';ctx.lineWidth=10;
+  ctx.beginPath();ctx.arc(CX,CY,(tmin+tmax)/2,0,6.2832);ctx.stroke();
+  ctx.setLineDash([8,8]);
+  ctx.strokeStyle='#4cc9f0';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(CX,CY,tmin,0,6.2832);ctx.stroke();
+  ctx.strokeStyle='#ff9f43';
+  ctx.beginPath();ctx.arc(CX,CY,tmax,0,6.2832);ctx.stroke();
+  ctx.setLineDash([]);
+  if(phase!=='over'&&!(phase==='result'&&resMsg.indexOf('砰')>=0&&resT>0.5)){
+    var wob=size>tmax*0.85?rnd(-2.5,2.5):0;
+    var bx=CX+wob,by=CY+wob*0.6;
+    var col=size>=tmin&&size<=tmax?'#51d88a':(size>tmax?'#ff5c5c':'#ff9fb0');
+    ctx.beginPath();ctx.arc(bx,by,size,0,6.2832);ctx.fillStyle=col;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.4)';ctx.stroke();
+    ctx.beginPath();ctx.arc(bx-size*0.32,by-size*0.32,size*0.24,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.55)';ctx.fill();
+    ctx.beginPath();ctx.moveTo(bx-6,by+size-2);ctx.lineTo(bx+6,by+size-2);ctx.lineTo(bx,by+size+8);ctx.closePath();
+    ctx.fillStyle=col;ctx.fill();
+    ctx.beginPath();ctx.moveTo(bx,by+size+8);
+    ctx.quadraticCurveTo(bx+10,by+size+22,bx,by+size+36);
+    ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1.5;ctx.stroke();
+  }
+  ctx.font='15px system-ui';ctx.textAlign='center';ctx.fillStyle='#9aa3c0';
+  if(phase==='ready'&&!holding)ctx.fillText('按住屏幕或空格打气,松手定格!',CX,H-30);
+  if(phase==='result'){
+    ctx.font='bold 24px system-ui';
+    ctx.fillStyle=resMsg.indexOf('漂亮')>=0?'#51d88a':'#ff5c5c';
+    ctx.fillText(resMsg,CX,70);
+  }
+}
+function down(){if(phase==='ready')holding=true}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();down()});
+window.addEventListener('pointerup',function(){release()});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();if(phase==='ready')holding=true;}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='Space')release();
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

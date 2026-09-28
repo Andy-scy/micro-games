@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>甘霖浇花</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>甘霖浇花</h1>
+  <p class="tips">60 秒内用水壶接住雨滴浇开花!← → 或 A/D 移动水壶,触屏拖动。水滴 +水分,石子 -水分;水分攒满 100 花就开——是胜利条件,不靠分数!</p>
+  <div class="card">
+    <div class="stat"><div class="mut">水分</div><div class="big" id="wt">0%</div></div>
+    <div class="stat"><div class="mut">剩余时间</div><div class="big" id="tm">60s</div></div>
+    <div class="stat"><div class="mut">花龄</div><div class="big" id="stg">种子</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">甘霖浇花</h2><p id="ovp">玩法:限时养成,浇开花即胜利。<br>· 键盘 ← → 或 A/D 移动水壶,触屏拖动<br>· 接住水滴 水分+3.5、得分+5<br>· 接住石子 水分-6,前功尽弃要小心<br>· 水分满 100:种子→发芽→含苞→绽放<br>· 60 秒内绽放即通关,超时判负!</p><button class="btn" id="obtn">开始浇花</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,meter:0,t:60,st:0.5,things:[],pops:[],bx:W/2,bw:84,keys:{}}}
+reset();
+function stageName(){
+  if(S.meter<25)return'种子';
+  if(S.meter<55)return'发芽';
+  if(S.meter<100)return'含苞';
+  return'绽放';
+}
+function startGame(){reset();S.on=true;$('wt').textContent='0%';$('tm').textContent='60s';$('stg').textContent='种子';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function update(dt){
+  S.t-=dt;
+  if(S.t<=0){S.t=0;$('tm').textContent='0s';gameOver(false);return}
+  $('tm').textContent=Math.ceil(S.t)+'s';
+  var sp=350,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.4+Math.random()*0.3;
+    S.things.push({x:30+Math.random()*(W-60),y:-14,v:205+Math.random()*90,stone:Math.random()<0.22,rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.things.length-1;i>=0;i--){
+    var it=S.things[i];
+    it.y+=it.v*dt;it.rot+=dt*3;
+    if(it.y>=by-16&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+8){
+      if(it.stone){
+        S.meter=Math.max(0,S.meter-6);
+        pop(it.x,by-28,'石头!水分-6','#ff6b6b');
+      }else{
+        S.meter=Math.min(100,S.meter+3.5);
+        S.score+=5;
+        pop(it.x,by-28,'水分+3.5','#4cc9f0');
+        if(S.meter>=100){S.things.splice(i,1);gameOver(true);return}
+      }
+      $('wt').textContent=Math.round(S.meter)+'%';
+      $('stg').textContent=stageName();
+      S.things.splice(i,1);continue;
+    }
+    if(it.y>H+14)S.things.splice(i,1);
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(win){
+  S.on=false;
+  if(win){
+    var bonus=Math.round(S.t)*3;
+    S.score+=bonus;
+    $('ovt').textContent='花儿绽放了!';
+    $('ovp').innerHTML='用时 '+Math.round(60-S.t)+' 秒浇开花朵!<br>时间奖励 +'+bonus+'<br>总得分 <b>'+S.score+'</b><br>小心石子,再来更快一次!';
+  }else{
+    $('ovt').textContent='时间到,花还没开…';
+    $('ovp').innerHTML='水分停在 <b>'+Math.round(S.meter)+'%</b>,总得分 <b>'+S.score+'</b><br>别贪快,躲开石子稳稳浇!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function drawFlower(){
+  var fx=W/2,base=H-44;
+  ctx.fillStyle='#b0653a';
+  ctx.beginPath();ctx.moveTo(fx-24,base-18);ctx.lineTo(fx+24,base-18);ctx.lineTo(fx+17,base+2);ctx.lineTo(fx-17,base+2);ctx.closePath();ctx.fill();
+  var h2=18+S.meter*0.55;
+  ctx.strokeStyle='#51d88a';ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(fx,base-18);ctx.quadraticCurveTo(fx+6,base-18-h2*0.6,fx,base-18-h2);ctx.stroke();
+  var ty=base-18-h2;
+  if(S.meter<25){
+    ctx.fillStyle='#7dd87d';
+    ctx.beginPath();ctx.ellipse(fx-8,base-26,7,3.5,-0.6,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(fx+8,base-30,7,3.5,0.6,0,Math.PI*2);ctx.fill();
+  }else{
+    ctx.fillStyle='#7dd87d';
+    ctx.beginPath();ctx.ellipse(fx-11,base-18-h2*0.45,10,4.5,-0.5,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(fx+11,base-18-h2*0.55,10,4.5,0.5,0,Math.PI*2);ctx.fill();
+    if(S.meter<100){
+      ctx.fillStyle='#ff8fab';
+      ctx.beginPath();ctx.ellipse(fx,ty-6,9,12,0,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#e56a8b';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(fx,ty-16);ctx.lineTo(fx,ty+4);ctx.stroke();
+    }else{
+      for(var k=0;k<6;k++){
+        var a=k*Math.PI/3;
+        ctx.fillStyle='#ff8fab';
+        ctx.beginPath();ctx.ellipse(fx+Math.cos(a)*11,ty-6+Math.sin(a)*11,8,8,0,0,Math.PI*2);ctx.fill();
+      }
+      ctx.fillStyle='#ffd166';
+      ctx.beginPath();ctx.arc(fx,ty-6,8,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='rgba(255,209,102,.9)';rr(14,12,150,10,5);ctx.fill();
+  ctx.fillStyle='#4cc9f0';rr(14,12,150*S.meter/100,10,5);ctx.fill();
+  drawFlower();
+  for(var i=0;i<S.things.length;i++){
+    var it=S.things[i];
+    if(it.stone){
+      ctx.save();ctx.translate(it.x,it.y);ctx.rotate(it.rot);
+      ctx.fillStyle='#8d8d9e';
+      ctx.beginPath();ctx.moveTo(-9,5);ctx.lineTo(-4,-7);ctx.lineTo(6,-6);ctx.lineTo(10,3);ctx.closePath();ctx.fill();
+      ctx.restore();
+    }else{
+      ctx.fillStyle='rgba(76,201,240,.85)';
+      ctx.beginPath();ctx.ellipse(it.x,it.y,3.5,8,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.5)';
+      ctx.beginPath();ctx.ellipse(it.x-1,it.y-2,1.2,3,0,0,Math.PI*2);ctx.fill();
+    }
+  }
+  var by=H-46;
+  ctx.fillStyle='#4cc9f0';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#081226';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#081226';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('浇水壶',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

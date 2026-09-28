@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首尾快判</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+#bar{height:8px;background:#1d2342;border-radius:99px;overflow:hidden;margin-bottom:14px}
+#fill{height:100%;width:100%;background:#ff9f43}
+.card{background:#151a30;border-radius:14px;padding:18px;text-align:center}
+#prev{font-size:17px;color:#8ecae6;font-family:Consolas,monospace;margin-bottom:4px}
+#arrow{font-size:20px;color:#5a6189;margin-bottom:10px}
+#cur{font-size:40px;font-weight:bold;color:#fff;font-family:Consolas,monospace;letter-spacing:3px;margin-bottom:18px;min-height:48px}
+#btns{display:flex;gap:14px;justify-content:center}
+#btns button{padding:14px 30px;font-size:17px;font-weight:bold;border:none;border-radius:999px;cursor:pointer;font-family:inherit}
+#yes{background:#2ec27e;color:#08131c}
+#no{background:#ff6b8a;color:#1a1d33}
+#msg{text-align:center;font-size:13px;color:#9aa3c7;min-height:18px;margin-top:12px}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+.flash{animation:fl .4s}
+@keyframes fl{0%{background:#2a3160}100%{background:#151a30}}
+</style>
+</head>
+<body>
+<h1>首尾快判</h1>
+<p id="tip">上面的词尾字母能否接上下面的词?能接上点「接得上」接不上点「接不上」 · 60 秒无限连判,答错扣一颗心</p>
+<div id="wrap">
+<div id="hud"><span>得分 <b id="score">0</b></span><span>连对 <b id="combo">0</b></span><span id="hp" style="color:#ff6b8a">♥♥♥</span><span>剩余 <b id="time">60</b> 秒</span></div>
+<div id="bar"><div id="fill"></div></div>
+<div class="card" id="card">
+<div id="prev"></div>
+<div id="arrow">↓</div>
+<div id="cur"></div>
+<div id="btns">
+<button id="yes">接得上</button>
+<button id="no">接不上</button>
+</div>
+</div>
+<div id="msg"></div>
+<div id="ov"><h2 id="ovT">首尾快判</h2><p id="ovP">上一个词的尾字母
+能不能接上下一个词的开头?
+凭眼力与词汇量快速判断</p><button id="ovB">开始快判</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = ["cat","dog","ant","top","pig","goat","tea","ten","snow","wind","dark","king","gold","duck","kite","egg","gym","moon","north","hen","nut","tiger","rain","nut","apple","ear","rose","eye","earth","horse","eagle","ear","lamp","pot","tree","emu","uvula? no","iron","nose","egg","goose","eat","tongue","east","twin","net","tank","kiwi","ink","key","yak","knee","elbow","wasp","pan","nut","tomato","ocean","nose","emu? no","owl","lamp","pea","ant","tiger","rat","tap","pot","ten","nail","lips","sun","nut","toe","ear","ring","glove","em? no"];
+var CLEAN = [];
+for (var i = 0; i < WORDS.length; i++) {
+  if (WORDS[i].indexOf("?") < 0 && CLEAN.indexOf(WORDS[i]) < 0) CLEAN.push(WORDS[i]);
+}
+var TOTAL = 60;
+var scoreEl = document.getElementById("score");
+var comboEl = document.getElementById("combo");
+var hpEl = document.getElementById("hp");
+var timeEl = document.getElementById("time");
+var fillEl = document.getElementById("fill");
+var prevEl = document.getElementById("prev");
+var curEl = document.getElementById("cur");
+var cardEl = document.getElementById("card");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var score = 0, combo = 0, hp = 3, playing = false;
+var prev = "", cur = "", truth = false;
+var timeLeft = TOTAL, lastTs = 0, rafId = 0;
+
+function rnd() { return CLEAN[Math.floor(Math.random() * CLEAN.length)]; }
+
+function nextPair() {
+  prev = cur || rnd();
+  var roll = Math.random() < 0.5;
+  if (roll) {
+    var fits = [];
+    for (var i = 0; i < CLEAN.length; i++) {
+      if (CLEAN[i][0] === prev[prev.length - 1]) fits.push(CLEAN[i]);
+    }
+    cur = fits.length ? fits[Math.floor(Math.random() * fits.length)] : rnd();
+    truth = fits.length > 0 && cur[0] === prev[prev.length - 1];
+  } else {
+    cur = rnd();
+    var guard = 0;
+    while (cur[0] === prev[prev.length - 1] && guard < 40) { cur = rnd(); guard++; }
+    truth = cur[0] === prev[prev.length - 1];
+  }
+  prevEl.textContent = prev.toUpperCase();
+  prevEl.innerHTML = prev.slice(0, -1) + "<b style='color:#ffd166'>" + prev[prev.length - 1].toUpperCase() + "</b>";
+  curEl.textContent = cur.toUpperCase();
+}
+
+function answer(said) {
+  if (!playing) return;
+  if (said === truth) {
+    combo++;
+    if (combo > best) best = combo;
+    score += 10 + Math.min(20, (combo - 1) * 2);
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    msgEl.textContent = "+ 接龙正确";
+    cardEl.classList.remove("flash");
+    void cardEl.offsetWidth;
+    cardEl.classList.add("flash");
+    nextPair();
+  } else {
+    combo = 0;
+    comboEl.textContent = combo;
+    hp--;
+    hpEl.textContent = hp > 0 ? "♥".repeat(hp) : "—";
+    msgEl.textContent = truth ? "其实接得上(" + prev[prev.length - 1].toUpperCase() + "开头)" : "其实接不上";
+    if (hp <= 0) end();
+    else nextPair();
+  }
+  setTimeout(function () { msgEl.textContent = ""; }, 900);
+}
+
+function loop(ts) {
+  if (!playing) return;
+  if (!lastTs) lastTs = ts;
+  timeLeft -= (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    end();
+    return;
+  }
+  timeEl.textContent = Math.ceil(timeLeft);
+  fillEl.style.width = (timeLeft / TOTAL * 100) + "%";
+  rafId = requestAnimationFrame(loop);
+}
+
+function end() {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  ovT.textContent = hp <= 0 ? "判断翻车" : "时间到";
+  ovP.textContent = "得分 " + score + "\n最高连对 " + best;
+  ovB.textContent = "再来一局";
+  ov.classList.remove("hide");
+}
+
+var best = 0;
+
+function start() {
+  score = 0; combo = 0; hp = 3; timeLeft = TOTAL; lastTs = 0;
+  best = 0;
+  scoreEl.textContent = "0";
+  comboEl.textContent = "0";
+  hpEl.textContent = "♥♥♥";
+  playing = true;
+  prev = "";
+  cur = "";
+  nextPair();
+  msgEl.textContent = "";
+  ov.classList.add("hide");
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+document.getElementById("yes").onclick = function () { answer(true); };
+document.getElementById("no").onclick = function () { answer(false); };
+ovB.onclick = start;
+</script>
+</body>
+</html>

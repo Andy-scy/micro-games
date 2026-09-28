@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>凡人修仙</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{position:relative;background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;line-height:1.5;margin-bottom:8px}
+.hud{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 14px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#a78bfa;font-size:14px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+#panel{background:#131728;border:1px solid #2e3554;border-radius:12px;padding:12px;text-align:center;margin-bottom:8px}
+#realm{font-size:22px;font-weight:800;color:#c4b5fd;letter-spacing:4px}
+#qiBar{height:16px;background:#0b0e1a;border-radius:8px;overflow:hidden;margin:8px 0 4px;border:1px solid #2e3554}
+#qiFill{height:100%;width:0;background:linear-gradient(90deg,#7c3aed,#c4b5fd)}
+#qiTxt{font-size:12px;color:#8b90b0}
+.acts{display:flex;gap:8px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+.btn{background:#2c3352;color:#e8eaf6;border:1px solid #3d4670;border-radius:10px;padding:10px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.gold{background:#ffd76a;color:#4a3405;border-color:#ffe29a;font-weight:700}
+.btn.purple{background:#5b21b6;color:#ede9fe;border-color:#8b5cf6;font-weight:700}
+.shop{display:flex;flex-direction:column;gap:6px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#20263f;border:1px solid #2e3554;border-radius:10px;padding:6px 10px;cursor:pointer}
+.item.off{opacity:.45}
+.item .nm{font-size:13px;font-weight:600}
+.item .ds{font-size:11px;color:#8b90b0;margin-top:1px}
+.item .pr{font-size:12.5px;color:#ffd76a;font-weight:700;white-space:nowrap}
+.item .own{font-size:11px;color:#7dd3fc}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.93);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:9}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#4ade80}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8}
+.overlay .big{font-size:17px;color:#ffd76a;font-weight:700}
+.overlay button{margin-top:6px;background:#4ade80;color:#05230f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>凡人修仙</h1>
+  <p class="hint">点「吐纳」采灵气,弟子自动修炼 · 灵气够就尝试突破境界,失败损失三成灵气 · 修至 <b>化神期</b> 飞升获胜</p>
+  <div class="hud">
+    <span>灵气 <b id="hQi">0</b></span>
+    <span>每秒 <b id="hAps">0</b></span>
+    <span>丹药 <b id="hPill">0</b></span>
+    <span>突破成功率 <b id="hRate">100%</b></span>
+  </div>
+  <div id="msg"></div>
+  <div id="panel">
+    <div id="realm">练气期</div>
+    <div id="qiBar"><div id="qiFill"></div></div>
+    <div id="qiTxt">灵气 0 / 80</div>
+  </div>
+  <div class="acts">
+    <button class="btn gold" id="btnQi">吐 纳</button>
+    <button class="btn purple" id="btnBreak" disabled>突破境界</button>
+  </div>
+  <div class="shop" id="shop"></div>
+  <div class="overlay" id="ov">
+    <h2 id="ovTitle">凡人修仙</h2>
+    <p id="ovDesc">凡人一根,全靠勤勉:点击吐纳聚集灵气,洞府弟子帮你自动修炼。境界五重:练气→筑基→金丹→元婴→化神,境界越高突破越难,失败会震散三成灵气!买丹药护法(每次突破自动服用 +15% 成功率),修到化神即飞升。</p>
+    <p class="big" id="ovScore"></p>
+    <button id="btnGo">拜入山门</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elQi=$("hQi"),elAps=$("hAps"),elPill=$("hPill"),elRate=$("hRate"),elMsg=$("msg");
+var realmEl=$("realm"),qiFill=$("qiFill"),qiTxt=$("qiTxt");
+var btnQi=$("btnQi"),btnBreak=$("btnBreak"),shopEl=$("shop"),ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+var realms=[
+ {nm:"练气期",need:80,rate:1},
+ {nm:"筑基期",need:420,rate:0.8},
+ {nm:"金丹期",need:1600,rate:0.65},
+ {nm:"元婴期",need:5500,rate:0.5},
+ {nm:"化神期",need:0,rate:0}
+];
+var ups=[
+ {nm:"上古功法",ds:"每次吐纳 +2 灵气",base:50,mult:2.2,max:12},
+ {nm:"广收弟子",ds:"每秒 +0.8 灵气",base:90,mult:2.1,max:12},
+ {nm:"聚灵大阵",ds:"全局灵气 x1.35",base:380,mult:2.8,max:3},
+ {nm:"破境丹药",ds:"突破时自动服用 +15%",base:180,mult:1.6,max:20}
+];
+var qi,realm,pills,upLv,state,msgT,rows=[];
+function fmt(n){n=Math.floor(n);if(n>=10000)return (n/10000).toFixed(2)+"万";return String(n);}
+function spiritMult(){return Math.pow(1.35,upLv[2]);}
+function clickGain(){return (1+2*upLv[0])*spiritMult();}
+function autoGain(){return 0.8*upLv[1]*spiritMult();}
+function upCost(i){return Math.floor(ups[i].base*Math.pow(ups[i].mult,upLv[i]));}
+function curNeed(){return realms[realm].need;}
+function successRate(){
+  var r=realms[realm].rate;
+  if(pills>0)r+=0.15;
+  return Math.min(1,r);
+}
+function say(t){elMsg.textContent=t;msgT=3;}
+function buildShop(){
+  shopEl.innerHTML="";rows=[];
+  var i;
+  for(i=0;i<ups.length;i++){
+    var d=document.createElement("div");
+    d.className="item";
+    d.innerHTML='<div><div class="nm">'+ups[i].nm+' <span class="own"></span></div><div class="ds">'+ups[i].ds+'</div></div><div class="pr"></div>';
+    (function(idx){d.addEventListener("click",function(){buyUp(idx);});})(i);
+    shopEl.appendChild(d);
+    rows.push({el:d,own:d.querySelector(".own"),pr:d.querySelector(".pr")});
+  }
+}
+function buyUp(i){
+  if(state!=="play")return;
+  if(upLv[i]>=ups[i].max){say("该宝物已至极境!");return;}
+  var c=upCost(i);
+  if(qi<c){say("灵气不足!");return;}
+  qi-=c;upLv[i]++;
+  if(i===3)pills++;
+  say(ups[i].nm+" 到手!");
+}
+function breathe(){if(state==="play")qi+=clickGain();}
+btnQi.addEventListener("click",breathe);
+btnBreak.addEventListener("click",function(){
+  if(state!=="play"||qi<curNeed())return;
+  var used=pills>0;
+  if(used)pills--;
+  var r=realms[realm].rate+(used?0.15:0);
+  if(Math.random()<r){
+    qi-=curNeed();realm++;
+    if(realm>=4){
+      state="over";
+      showOv("化神飞升!","雷云散尽,霞光万道——你踏碎虚空位列仙班!","五境圆满 · 剩余灵气 "+fmt(qi));
+      return;
+    }
+    say("突破成功!晋升"+realms[realm].nm+"!");
+  }else{
+    qi*=0.7;
+    say("突破失败!灵气震荡,损失三成…"+(used?"丹药救了你一命":"早买丹药就好了"));
+  }
+});
+document.addEventListener("keydown",function(e){
+  if(state==="play"&&e.key===" "){e.preventDefault();breathe();}
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+function showOv(t,d,s){
+  ovT.textContent=t;ovD.textContent=d;ovS.textContent=s;ovS.style.display="block";
+  btn.textContent="再来一局";ov.classList.remove("hide");
+}
+function startGame(){
+  qi=0;realm=0;pills=0;upLv=[0,0,0,0];msgT=0;
+  elMsg.textContent="";ov.classList.add("hide");
+  state="play";render();
+}
+btn.addEventListener("click",startGame);
+function render(){
+  var i;
+  elQi.textContent=fmt(qi);elAps.textContent=autoGain().toFixed(1);
+  elPill.textContent=pills;elRate.textContent=Math.floor(successRate()*100)+"%";
+  realmEl.textContent=realms[realm].nm;
+  qiFill.style.width=Math.min(100,curNeed()>0?qi/curNeed()*100:0)+"%";
+  qiTxt.textContent=curNeed()>0?("灵气 "+fmt(qi)+" / "+fmt(curNeed())):"已至化神";
+  btnBreak.disabled=qi<curNeed()||realm>=4;
+  for(i=0;i<ups.length;i++){
+    var full=upLv[i]>=ups[i].max,c=upCost(i);
+    rows[i].pr.textContent=full?"已满":fmt(c);
+    rows[i].own.textContent=(i===3?("x"+pills):("Lv"+upLv[i]+"/"+ups[i].max));
+    rows[i].el.classList.toggle("off",full||qi<c);
+  }
+}
+var last=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!last)last=t;
+  var dt=Math.min(50,t-last);last=t;
+  if(state!=="play")return;
+  var ds=dt/1000;
+  qi+=autoGain()*ds;
+  if(msgT>0){msgT-=ds;if(msgT<=0)elMsg.textContent="";}
+  render();
+}
+qi=0;realm=0;pills=0;upLv=[0,0,0,0];state="menu";msgT=0;
+buildShop();render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

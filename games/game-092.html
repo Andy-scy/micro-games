@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>编队猎手</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#4fd1c5;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#4fd1c5;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#4fd1c5;color:#07202a;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#4fd1c5;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>编队猎手</h1>
+<p class="tip">←→↑↓/WASD 或按住拖动移动,空格 / 按住屏幕开火。敌机先列队入场,再轮番俯冲突袭;全歼 4 波编队获胜,波次期间不受伤可获得完美加成。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">编队猎手</h2>
+<p id="ovX">敌机以华丽航线入场列阵,随后轮番俯冲猎杀。打乱他们的队形,别被包抄。</p>
+<button id="btn">开始拦截</button>
+</div></div>
+</div>
+<div class="hud"><span>得分<b id="hS">0</b></span><span>波次<b id="hW">1/4</b></span><span>生命<b id="hH">3</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hS=document.getElementById("hS"),hW=document.getElementById("hW"),hH=document.getElementById("hH");
+var TOTAL=4;
+var state="ready",score=0,wave=0,hp=3,inv=0,cool=0,t=0,waveHp=3,diveT=2.5,banner=0;
+var ship={x:W/2,y:H-80};
+var bullets=[],ebullets=[],enemies=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*24+8});}
+function qbez(p0,p1,p2,tt){
+  var a=1-tt;
+  return {
+    x:a*a*p0.x+2*a*tt*p1.x+tt*tt*p2.x,
+    y:a*a*p0.y+2*a*tt*p1.y+tt*tt*p2.y
+  };
+}
+function spawnWave(){
+  wave++;
+  waveHp=hp;
+  var count=6+wave*2;
+  var cols=Math.min(7,count),rows=Math.ceil(count/cols);
+  var idx=0;
+  for(var r=0;r<rows;r++){
+    for(var c=0;c<cols;c++){
+      if(idx>=count)break;
+      var sx=W/2+(c-(cols-1)/2)*54;
+      var sy=100+r*46;
+      var side=idx%2===0?-1:1;
+      enemies.push({
+        sx:sx,sy:sy,x:side<0?-30:W+30,y:60,
+        mode:"enter",t:0,delay:idx*0.22,hp:1,ft:0,fired:false,
+        p0:{x:side<0?-30:W+30,y:60},
+        p1:{x:W/2+side*60,y:H*0.28},
+        p2:{x:sx,y:sy}
+      });
+      idx++;
+    }
+  }
+  diveT=2.2;
+  banner=1.8;
+}
+function reset(){
+  score=0;wave=0;hp=3;inv=0;cool=0;t=0;banner=0;
+  ship.x=W/2;ship.y=H-80;
+  bullets=[];ebullets=[];enemies=[];parts=[];
+  spawnWave();
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"编队全灭":"战机坠毁";
+  ovX.textContent="最终得分:"+score+(win?" · 四波敌阵无一生还,猎手名不虚传。":" · 俯冲的敌机最难缠,提前卡位拦截。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;inv-=dt;cool-=dt;
+  if(banner>0)banner-=dt;
+  var sp=280;
+  if(keys.ArrowLeft||keys.a)ship.x-=sp*dt;
+  if(keys.ArrowRight||keys.d)ship.x+=sp*dt;
+  if(keys.ArrowUp||keys.w)ship.y-=sp*dt;
+  if(keys.ArrowDown||keys.s)ship.y+=sp*dt;
+  if(pressed){
+    ship.x+=(px-ship.x)*Math.min(1,dt*10);
+    ship.y+=(py-ship.y)*Math.min(1,dt*10);
+  }
+  ship.x=Math.max(20,Math.min(W-20,ship.x));
+  ship.y=Math.max(H*0.45,Math.min(H-40,ship.y));
+  if((keys[" "]||keys.z||pressed)&&cool<=0){
+    cool=0.15;
+    bullets.push({x:ship.x,y:ship.y-18});
+  }
+  var holders=0;
+  for(i=0;i<enemies.length;i++)if(enemies[i].mode==="hold")holders++;
+  if(holders>0){
+    diveT-=dt;
+    if(diveT<=0){
+      diveT=Math.max(1.3,2.6-wave*0.25);
+      var tries=wave>=3?2:1;
+      for(var q=0;q<tries&&holders>0;q++){
+        var pick=null;
+        for(var c2=0;c2<enemies.length;c2++){
+          if(enemies[c2].mode==="hold"){
+            pick=enemies[c2];
+            if(Math.random()<0.5)break;
+          }
+        }
+        if(pick){
+          pick.mode="dive";pick.t=0;pick.fired=false;
+          pick.p0={x:pick.x,y:pick.y};
+          pick.p1={x:ship.x+(Math.random()-0.5)*160,y:H*0.7};
+          pick.p2={x:pick.sx+(Math.random()-0.5)*200,y:H+50};
+          holders--;
+        }
+      }
+    }
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    bullets[bi].y-=540*dt;
+    if(bullets[bi].y<-20)bullets.splice(bi,1);
+  }
+  for(i=enemies.length-1;i>=0;i--){
+    var e=enemies[i];
+    if(e.mode==="enter"){
+      if(e.delay>0){e.delay-=dt;continue;}
+      e.t+=dt/1.5;
+      if(e.t>=1){e.t=1;e.mode="hold";}
+      var pe=qbez(e.p0,e.p1,e.p2,e.t);
+      e.x=pe.x;e.y=pe.y;
+    }else if(e.mode==="dive"){
+      e.t+=dt/1.35;
+      if(!e.fired&&e.t>0.45){
+        e.fired=true;
+        var dx=ship.x-e.x,dy=ship.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+        ebullets.push({x:e.x,y:e.y+12,vx:dx/d*210,vy:dy/d*210});
+      }
+      if(e.t>=1){
+        e.mode="enter";e.t=0;e.delay=0.35;
+        var side2=Math.random()<0.5?-1:1;
+        e.p0={x:side2<0?-30:W+30,y:60};
+        e.p1={x:W/2+side2*40,y:H*0.25};
+        e.p2={x:e.sx,y:e.sy};
+        continue;
+      }
+      var pd=qbez(e.p0,e.p1,e.p2,e.t);
+      e.x=pd.x;e.y=pd.y;
+    }else{
+      e.x=e.sx+Math.sin(t*2+e.sx)*10;
+      e.y=e.sy;
+    }
+    if(inv<=0&&Math.abs(e.x-ship.x)<22&&Math.abs(e.y-ship.y)<22){
+      enemies.splice(i,1);hp--;inv=1.2;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+  }
+  for(i=ebullets.length-1;i>=0;i--){
+    var b=ebullets[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-10||b.x>W+10||b.y>H+10){ebullets.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(b.x-ship.x)<11&&Math.abs(b.y-ship.y)<13){
+      ebullets.splice(i,1);hp--;inv=1.2;boom(ship.x,ship.y,12,"#ff6b6b");
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    for(j=enemies.length-1;j>=0;j--){
+      var e2=enemies[j];
+      if(e2.mode==="enter"&&e2.delay>0)continue;
+      var dx2=bl.x-e2.x,dy2=bl.y-e2.y;
+      if(dx2*dx2+dy2*dy2<324){
+        bullets.splice(bi,1);
+        e2.hp--;
+        if(e2.hp<=0){
+          boom(e2.x,e2.y,12,"#ffd166");
+          score+=20;
+          enemies.splice(j,1);
+        }
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(inv<=0&&hp<=0){gameOver(false);return;}
+  if(!enemies.length){
+    if(wave>=TOTAL){gameOver(true);return;}
+    score+=100;
+    if(hp===waveHp)score+=200;
+    spawnWave();
+  }
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  ctx.strokeStyle="rgba(79,209,197,0.12)";
+  ctx.setLineDash([4,8]);
+  for(i=0;i<enemies.length;i++){
+    var e0=enemies[i];
+    ctx.strokeRect(e0.sx-18,e0.sy-14,36,28);
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle="#4fd1c5";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-2,bullets[i].y-10,4,14);
+  ctx.fillStyle="#ff9f43";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4,0,6.283);ctx.fill();
+  }
+  for(i=0;i<enemies.length;i++){
+    var e=enemies[i];
+    if(e.mode==="enter"&&e.delay>0)continue;
+    ctx.save();ctx.translate(e.x,e.y);
+    ctx.fillStyle=e.mode==="dive"?"#ff4d4d":"#ff6b6b";
+    ctx.beginPath();ctx.moveTo(0,13);ctx.lineTo(-13,-9);ctx.lineTo(0,-3);ctx.lineTo(13,-9);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle="#ffd166";ctx.fillRect(-2,-2,4,4);
+    ctx.restore();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"&&!(inv>0&&Math.floor(inv*12)%2===0)){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle="#4fd1c5";
+    ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(-14,14);ctx.lineTo(0,6);ctx.lineTo(14,14);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  if(banner>0){
+    ctx.globalAlpha=Math.min(1,banner);
+    ctx.fillStyle="#4fd1c5";ctx.font="bold 28px system-ui";ctx.textAlign="center";
+    ctx.fillText("第 "+wave+" 编队入场",W/2,H/2-60);
+    ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  for(var k=0;k<stars.length;k++){
+    var st=stars[k];
+    st.y+=st.v*dt;
+    if(st.y>H){st.y=-2;st.x=Math.random()*W;}
+  }
+  if(state==="play")update(dt);
+  draw();
+  hS.textContent=score;hW.textContent=Math.max(1,wave)+"/"+TOTAL;hH.textContent=hp;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

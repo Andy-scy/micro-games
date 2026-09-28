@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幽影雷达</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8ecf8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;min-height:100vh;padding:14px}
+.wrap{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#63e6be;margin-bottom:6px}
+.tip{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:10px}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:#0a0d1a;border:1px solid #262c48}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.85);display:flex;align-items:center;justify-content:center;text-align:center}
+.overlay.hide{display:none}
+.panel{padding:22px}
+.panel h2{color:#63e6be;font-size:24px;margin-bottom:10px}
+.panel p{font-size:14px;color:#c6cdea;line-height:1.7;margin-bottom:16px}
+button{background:#63e6be;color:#05301f;border:0;border-radius:999px;padding:10px 34px;font-size:16px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.95)}
+.hud{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:#c6cdea}
+.hud b{color:#63e6be;font-size:16px;margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>幽影雷达</h1>
+<p class="tip">←→↑↓/WASD 或按住拖动移动,空格 / 按住屏幕开火。敌机全程隐形:只有雷达扫过时会亮出回波,开火瞬间闪现,被击中后短暂显形。凭回波预判走位,拿到 600 分获胜。</p>
+<div class="stage">
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov" class="overlay"><div class="panel">
+<h2 id="ovT">幽影雷达</h2>
+<p id="ovX">看不清的敌人最危险。盯紧雷达扫出的绿色回波,在它们开火的火光里还击。</p>
+<button id="btn">开启雷达</button>
+</div></div>
+</div>
+<div class="hud"><span>得分<b id="hS">0</b></span><span>回波<b id="hB">0</b></span><span>生命<b id="hH">3</b></span></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovX=document.getElementById("ovX"),btn=document.getElementById("btn");
+var hS=document.getElementById("hS"),hB=document.getElementById("hB"),hH=document.getElementById("hH");
+var GOAL=600;
+var state="ready",score=0,hp=3,inv=0,cool=0,t=0,spawn=1,sa=0,blips=0;
+var cx=W/2,cy=H*0.4;
+var ship={x:W/2,y:H-80};
+var bullets=[],ebullets=[],enemies=[],parts=[],stars=[];
+var keys={},px=0,py=0,pressed=false;
+var i;
+for(i=0;i<90;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.5+0.4,v:Math.random()*20+6});}
+function reset(){
+  score=0;hp=3;inv=0;cool=0;t=0;spawn=0.6;sa=0;blips=0;
+  ship.x=W/2;ship.y=H-80;
+  bullets=[];ebullets=[];enemies=[];parts=[];
+}
+function boom(x,y,n,col){
+  for(var k=0;k<n;k++){
+    var a=Math.random()*6.283,s=Math.random()*140+30;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.4+Math.random()*0.35,col:col});
+  }
+}
+function gameOver(win){
+  state="over";
+  ovT.textContent=win?"幽灵退散":"战机坠毁";
+  ovX.textContent="最终得分:"+score+(win?" · 你在一片漆黑里赢下了猎影之战!":" · 隐形敌机教会你:永远别盯着空处发呆。");
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function start(){reset();state="play";ov.classList.add("hide");}
+function update(dt){
+  t+=dt;inv-=dt;cool-=dt;spawn-=dt;
+  sa+=dt*1.7;
+  if(sa>6.283)sa-=6.283;
+  var sp=280;
+  if(keys.ArrowLeft||keys.a)ship.x-=sp*dt;
+  if(keys.ArrowRight||keys.d)ship.x+=sp*dt;
+  if(keys.ArrowUp||keys.w)ship.y-=sp*dt;
+  if(keys.ArrowDown||keys.s)ship.y+=sp*dt;
+  if(pressed){
+    ship.x+=(px-ship.x)*Math.min(1,dt*10);
+    ship.y+=(py-ship.y)*Math.min(1,dt*10);
+  }
+  ship.x=Math.max(20,Math.min(W-20,ship.x));
+  ship.y=Math.max(H*0.45,Math.min(H-40,ship.y));
+  if((keys[" "]||keys.z||pressed)&&cool<=0){
+    cool=0.18;
+    bullets.push({x:ship.x,y:ship.y-18});
+  }
+  if(spawn<=0){
+    spawn=Math.max(0.75,1.7-score*0.0008);
+    enemies.push({x:40+Math.random()*(W-80),y:-24,vy:55+Math.random()*35,hp:2,ph:Math.random()*6.283,ft:1+Math.random()*1.5,ping:0,flash:0,reveal:0});
+  }
+  var bi,j;
+  for(bi=bullets.length-1;bi>=0;bi--){
+    bullets[bi].y-=540*dt;
+    if(bullets[bi].y<-20)bullets.splice(bi,1);
+  }
+  var pingCount=0;
+  for(i=enemies.length-1;i>=0;i--){
+    var e=enemies[i];
+    e.y+=e.vy*dt;
+    e.x+=Math.sin(t*1.8+e.ph)*50*dt;
+    e.ping-=dt;e.flash-=dt;e.reveal-=dt;
+    if(e.ping>0)pingCount++;
+    var ae=Math.atan2(e.y-cy,e.x-cx);
+    var dae=(ae-sa)%6.283;
+    if(dae<0)dae+=6.283;
+    if(dae<dt*1.7)e.ping=1.4;
+    if(e.y>H+24){enemies.splice(i,1);continue;}
+    e.ft-=dt;
+    if(e.ft<=0){
+      e.ft=1.8+Math.random()*1.4;
+      e.flash=0.28;
+      var dx=ship.x-e.x,dy=ship.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+      ebullets.push({x:e.x,y:e.y+12,vx:dx/d*200,vy:dy/d*200});
+    }
+    if(inv<=0&&Math.abs(e.x-ship.x)<22&&Math.abs(e.y-ship.y)<22){
+      enemies.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,14,"#ff6b6b");
+    }
+  }
+  blips=pingCount;
+  for(i=ebullets.length-1;i>=0;i--){
+    var b=ebullets[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<-10||b.x>W+10||b.y>H+10){ebullets.splice(i,1);continue;}
+    if(inv<=0&&Math.abs(b.x-ship.x)<11&&Math.abs(b.y-ship.y)<13){
+      ebullets.splice(i,1);hp--;inv=1.3;boom(ship.x,ship.y,12,"#ff6b6b");
+    }
+  }
+  for(bi=bullets.length-1;bi>=0;bi--){
+    var bl=bullets[bi];
+    for(j=enemies.length-1;j>=0;j--){
+      var e2=enemies[j];
+      var dx2=bl.x-e2.x,dy2=bl.y-e2.y;
+      if(dx2*dx2+dy2*dy2<441){
+        bullets.splice(bi,1);
+        e2.hp--;
+        e2.reveal=1.4;
+        if(e2.hp<=0){
+          boom(e2.x,e2.y,12,"#ffd166");
+          score+=25;
+          enemies.splice(j,1);
+        }
+        break;
+      }
+    }
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);
+  }
+  if(inv<=0&&hp<=0){gameOver(false);return;}
+  if(score>=GOAL)gameOver(true);
+}
+function draw(){
+  ctx.fillStyle="#0a0d1a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#8fa3d9";
+  for(i=0;i<stars.length;i++){
+    var s=stars[i];
+    ctx.globalAlpha=0.3+s.s*0.3;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  }
+  ctx.globalAlpha=1;
+  for(var k=0;k<6;k++){
+    var sa2=sa-k*0.09;
+    ctx.strokeStyle="rgba(99,230,190,"+(0.4-k*0.06)+")";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(sa2)*700,cy+Math.sin(sa2)*700);
+    ctx.stroke();
+  }
+  for(i=0;i<enemies.length;i++){
+    var e=enemies[i];
+    var alpha=Math.max(0,e.ping*0.7,e.flash*3,e.reveal);
+    if(alpha<=0)continue;
+    ctx.globalAlpha=Math.min(1,alpha);
+    if(e.reveal>0||e.flash>0){
+      ctx.save();ctx.translate(e.x,e.y);
+      ctx.fillStyle=e.reveal>0?"#63e6be":"#ffffff";
+      ctx.beginPath();ctx.moveTo(0,13);ctx.lineTo(-13,-9);ctx.lineTo(0,-3);ctx.lineTo(13,-9);
+      ctx.closePath();ctx.fill();
+      ctx.restore();
+    }else{
+      ctx.fillStyle="#63e6be";
+      ctx.save();ctx.translate(e.x,e.y);ctx.rotate(Math.PI/4);
+      ctx.fillRect(-5,-5,10,10);
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#63e6be";
+  for(i=0;i<bullets.length;i++)ctx.fillRect(bullets[i].x-2,bullets[i].y-10,4,14);
+  ctx.fillStyle="#ff6b6b";
+  for(i=0;i<ebullets.length;i++){
+    ctx.beginPath();ctx.arc(ebullets[i].x,ebullets[i].y,4.5,0,6.283);ctx.fill();
+  }
+  for(i=parts.length-1;i>=0;i--){
+    var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2);
+    ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  }
+  ctx.globalAlpha=1;
+  if(state!=="over"&&!(inv>0&&Math.floor(inv*12)%2===0)){
+    ctx.save();ctx.translate(ship.x,ship.y);
+    ctx.fillStyle="#63e6be";
+    ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(-14,14);ctx.lineTo(0,6);ctx.lineTo(14,14);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  ctx.strokeStyle="rgba(99,230,190,0.25)";
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(cx,cy,30,0,6.283);ctx.stroke();
+  ctx.fillStyle="rgba(99,230,190,0.8)";
+  ctx.beginPath();ctx.arc(cx+Math.cos(sa)*30,cy+Math.sin(sa)*30,3,0,6.283);ctx.fill();
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  for(var k2=0;k2<stars.length;k2++){
+    var st=stars[k2];
+    st.y+=st.v*dt;
+    if(st.y>H){st.y=-2;st.x=Math.random()*W;}
+  }
+  if(state==="play")update(dt);
+  draw();
+  hS.textContent=score;hB.textContent=blips;hH.textContent=hp;
+  requestAnimationFrame(loop);
+}
+function ptr(e){
+  var r=cv.getBoundingClientRect();
+  px=(e.clientX-r.left)*W/r.width;
+  py=(e.clientY-r.top)*H/r.height;
+}
+cv.addEventListener("mousedown",function(e){ptr(e);pressed=true;});
+window.addEventListener("mouseup",function(){pressed=false;});
+cv.addEventListener("mousemove",function(e){if(pressed)ptr(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();ptr(e.touches[0]);pressed=true;},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();ptr(e.touches[0]);},{passive:false});
+window.addEventListener("touchend",function(){pressed=false;});
+window.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key.indexOf("Arrow")===0)e.preventDefault();
+  if(e.key==="a"||e.key==="A")keys.a=true;else keys[e.key]=true;
+  if(e.key==="Enter"&&state!=="play")start();
+});
+window.addEventListener("keyup",function(e){
+  if(e.key==="a"||e.key==="A")keys.a=false;else keys[e.key]=false;
+});
+btn.addEventListener("click",start);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

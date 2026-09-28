@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图形推理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:560px}
+h1{font-size:24px;text-align:center;color:#b07cff;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#b07cff}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#b07cff;border-radius:6px}
+#seq{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.cellbox{width:60px;height:60px;background:#232a48;border-radius:10px;border:2px solid #2c3357;display:flex;align-items:center;justify-content:center;font-size:28px;overflow:hidden}
+.cellbox.qm{color:#ffd166;font-weight:800;font-size:26px}
+.dots{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;align-items:center;max-width:52px}
+.dot{width:10px;height:10px;border-radius:50%;background:#4cc9f0;display:block}
+.sw{width:34px;height:34px;border-radius:8px;display:block}
+.sym{font-size:28px;line-height:1}
+.sbox{background:#b07cff;border-radius:4px;display:block}
+#opts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.optv{background:#232a48;border:2px solid #2c3357;border-radius:10px;min-height:64px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:4px;font-family:inherit;color:#e8eaf6}
+.optv:hover{border-color:#b07cff}
+.optv.ok{border-color:#51d88a;background:#173327}
+.optv.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:10px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#b07cff;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#b07cff;color:#1d0f33;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>图形推理</h1>
+  <p class="tips">观察图形序列的排列规律(旋转 / 数量 / 颜色循环 / 形状循环 / 尺寸递增),从四个候选中点出"?"处的下一个图形。每题 20 秒,共 10 题,3 条命,答对 +120。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/10</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="seq"></div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">图形推理</h2><p id="ovp">· 每题展示一排按规律排列的图形<br>· 找出规律,点选"?"处应有的图形<br>· 题目由程序随机生成,每局都不一样<br>· 涉及旋转、数量递增、颜色循环、<br>　形状循环、尺寸递增五种规律<br>· 每题 20 秒,答对 +120,答错 -1 命</p><button class="btn" id="obtn">开始推理</button></div></div>
+<script>
+'use strict';
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function $(id){return document.getElementById(id)}
+function dotsHtml(c){
+  var s='<div class="dots">';
+  for(var i=0;i<c;i++)s+='<span class="dot"></span>';
+  return s+'</div>';
+}
+function swatch(c){return '<span class="sw" style="background:'+c+'"></span>'}
+function sbox(w){return '<span class="sbox" style="width:'+w+'px;height:'+w+'px"></span>'}
+function mkOpts(ansHtml,disHtmls){
+  var arr=[{h:ansHtml,ok:true}];
+  for(var i=0;i<disHtmls.length;i++)arr.push({h:disHtmls[i],ok:false});
+  shuffle(arr);
+  return arr;
+}
+function genRotate(){
+  var syms=['▲','▶','▼','◀'];
+  var s0=Math.floor(Math.random()*4);
+  var dir=Math.random()<0.5?1:3;
+  var seq=[],i;
+  for(i=0;i<4;i++)seq.push('<span class="sym">'+syms[(s0+dir*i)%4]+'</span>');
+  var ai=(s0+dir*4)%4;
+  var dis=[];
+  for(i=1;i<4;i++)dis.push('<span class="sym">'+syms[(ai+dir*i)%4]+'</span>');
+  return {seq:seq,opts:mkOpts('<span class="sym">'+syms[ai]+'</span>',dis),tip:'规律:图形每次旋转 90°,下一个是 '+syms[ai]};
+}
+function genCount(){
+  var n=1+Math.floor(Math.random()*3);
+  var seq=[],i;
+  for(i=0;i<4;i++)seq.push(dotsHtml(n+i));
+  var ans=n+4;
+  var dis=[dotsHtml(ans+1),dotsHtml(ans+2),dotsHtml(ans+3)];
+  return {seq:seq,opts:mkOpts(dotsHtml(ans),dis),tip:'规律:圆点每次多 1 个,下一个是 '+ans+' 个点'};
+}
+function genColor(){
+  var pal=['#ff5c5c','#ffd166','#4da3ff','#51d88a','#b07cff'];
+  var pi=[0,1,2,3,4];shuffle(pi);
+  var p=Math.random()<0.5?2:3;
+  var cyc=pi.slice(0,p);
+  var seq=[],i;
+  for(i=0;i<5;i++)seq.push(swatch(pal[cyc[i%p]]));
+  var ansC=pal[cyc[5%p]];
+  var others=[];
+  for(i=0;i<pal.length;i++)if(pal[i]!==ansC)others.push(pal[i]);
+  shuffle(others);
+  var dis=[swatch(others[0]),swatch(others[1]),swatch(others[2])];
+  return {seq:seq,opts:mkOpts(swatch(ansC),dis),tip:'规律:颜色按 '+p+' 个一循环,下一个颜色已高亮'};
+}
+function genShape(){
+  var sh=['●','■','▲','◆'];
+  var si=[0,1,2,3];shuffle(si);
+  var cyc=si.slice(0,3);
+  var seq=[],i;
+  for(i=0;i<4;i++)seq.push('<span class="sym">'+sh[cyc[i%3]]+'</span>');
+  var ansS=sh[cyc[4%3]];
+  var others=[];
+  for(i=0;i<sh.length;i++)if(sh[i]!==ansS)others.push(sh[i]);
+  var dis=[];
+  for(i=0;i<3;i++)dis.push('<span class="sym">'+others[i]+'</span>');
+  return {seq:seq,opts:mkOpts('<span class="sym">'+ansS+'</span>',dis),tip:'规律:三种形状依次循环,下一个是 '+ansS};
+}
+function genSize(){
+  var s=10+Math.floor(Math.random()*4)*4;
+  var seq=[],i;
+  for(i=0;i<4;i++)seq.push(sbox(s+4*i));
+  var ans=s+16;
+  var dis=[sbox(ans+6),sbox(ans+12),sbox(ans-2)];
+  return {seq:seq,opts:mkOpts(sbox(ans),dis),tip:'规律:方块每次长大一圈,下一个是 '+ans+'px'};
+}
+var GENS=[genRotate,genCount,genColor,genShape,genSize];
+var N=10,QLEN=20;
+var puzzles=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  var types=[],i;
+  for(i=0;i<N;i++)types.push(GENS[i%GENS.length]);
+  shuffle(types);
+  puzzles=[];
+  for(i=0;i<N;i++)puzzles.push(types[i]());
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var pz=puzzles[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  var seq=$('seq');seq.innerHTML='';
+  for(var i=0;i<pz.seq.length;i++){
+    var d=document.createElement('div');
+    d.className='cellbox';
+    d.innerHTML=pz.seq[i];
+    seq.appendChild(d);
+  }
+  var qm=document.createElement('div');
+  qm.className='cellbox qm';
+  qm.textContent='?';
+  seq.appendChild(qm);
+  var box=$('opts');box.innerHTML='';
+  for(var k=0;k<pz.opts.length;k++){
+    var b=document.createElement('button');
+    b.className='optv';
+    b.innerHTML=pz.opts[k].h;
+    b.dataset.ok=pz.opts[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  var pz=puzzles[idx];
+  locked=true;
+  var btns=$('opts').children,i;
+  if(btn.dataset.ok==='1'){
+    score+=120;btn.classList.add('ok');
+    $('msg').textContent='推理正确!+120';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent='推理失败…'+pz.tip;
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else{idx++;showQ();}
+  },1700);
+}
+function finish(win){
+  playing=false;over=true;
+  $('ovt').textContent=win?'推理全对!火眼金睛':'推理中断…';
+  $('ovp').innerHTML='完成 '+Math.min(idx+1,N)+'/'+N+' 题<br>最终得分 <b>'+score+'</b> 分<br>'+(win?'规律尽在掌握!':'多观察"变化量",再来一局!');
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0){
+      var btns=$('opts').children,i;
+      for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+      locked=true;lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+      $('msg').textContent='超时了!'+puzzles[idx].tip;
+      $('sc').textContent=score;
+      schedule(function(){
+        if(!playing||over)return;
+        if(lives<=0)finish(false);
+        else{idx++;showQ();}
+      },1700);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>招式对决</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;--card:#1b2138;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:780px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:10px;line-height:1.7;}
+#card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+#top{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.side{flex:1;}
+.side span{font-weight:700;font-size:14px;}
+.p1c span{color:var(--p1);}.p2c span{color:var(--p2);text-align:right;display:block;}
+.hpbar{height:16px;background:#0d1122;border-radius:8px;overflow:hidden;margin-top:4px;border:1px solid #2a3354;}
+.hpbar i{display:block;height:100%;background:var(--p1);width:100%;transition:width .25s;}
+.p2c .hpbar i{background:var(--p2);margin-left:auto;}
+#mid{width:150px;text-align:center;}
+#roundT{font-size:13px;color:var(--dim);}
+#tbar{height:8px;background:#0d1122;border-radius:4px;margin:6px 0;overflow:hidden;}
+#tbar i{display:block;height:100%;background:#f6c945;width:100%;}
+#banner{font-size:13px;font-weight:700;min-height:34px;line-height:1.5;}
+#picks{display:flex;align-items:stretch;gap:10px;}
+.panel{flex:1;display:flex;gap:8px;}
+.panel.off button{opacity:.45;}
+button.act{flex:1;background:#10152b;border:2px solid #2a3354;color:var(--txt);border-radius:12px;padding:12px 4px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;}
+button.act small{display:block;font-size:11px;color:var(--dim);font-weight:400;margin-top:4px;}
+button.act:hover{border-color:#4a5a8f;}
+.panel.off button.act:hover{border-color:#2a3354;}
+#vs{align-self:center;font-weight:900;color:#ff5c7a;font-size:20px;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>招式对决</h1>
+<div id="tip">猜拳式攻防:攻击 破 蓄力 · 蓄力 破 格挡 · 格挡 反震 攻击(格挡挡下攻击可反伤1点)· 玩家1:A 攻 / S 防 / D 蓄 · 玩家2:← 攻 / ↓ 防 / → 蓄 · 也可点击按钮出招 · 体力先归零者败</div>
+<div id="card">
+ <div id="top">
+  <div class="side p1c"><span>玩家1 体力 <b id="hp0T">5</b></span><div class="hpbar"><i id="hp0"></i></div></div>
+  <div id="mid"><div id="roundT">第 1 回合</div><div id="tbar"><i id="tfill"></i></div><div id="banner">同时出招,暗中决胜!</div></div>
+  <div class="side p2c"><span><b id="hp1T">5</b> 体力 玩家2</span><div class="hpbar"><i id="hp1"></i></div></div>
+ </div>
+ <div id="picks">
+  <div class="panel" id="pan0">
+   <button class="act" data-p="0" data-a="0">攻击<small>快捷键 A</small></button>
+   <button class="act" data-p="0" data-a="1">格挡<small>快捷键 S</small></button>
+   <button class="act" data-p="0" data-a="2">蓄力<small>快捷键 D</small></button>
+  </div>
+  <div id="vs">VS</div>
+  <div class="panel" id="pan1">
+   <button class="act" data-p="1" data-a="0">攻击<small>快捷键 ←</small></button>
+   <button class="act" data-p="1" data-a="1">格挡<small>快捷键 ↓</small></button>
+   <button class="act" data-p="1" data-a="2">蓄力<small>快捷键 →</small></button>
+  </div>
+ </div>
+</div>
+</div>
+<script>
+"use strict";
+var hpBars=[document.getElementById("hp0"),document.getElementById("hp1")];
+var hpTs=[document.getElementById("hp0T"),document.getElementById("hp1T")];
+var pans=[document.getElementById("pan0"),document.getElementById("pan1")];
+var roundT=document.getElementById("roundT"),tfill=document.getElementById("tfill"),banner=document.getElementById("banner");
+var AN=["攻击","格挡","蓄力"];
+var st;
+function reset(){st={hp:[5,5],pick:[null,null],ph:"pick",t:210,round:1};render();banner.textContent="同时出招,暗中决胜!";}
+function render(){
+ var i;
+ for(i=0;i<2;i++){hpBars[i].style.width=(st.hp[i]/5*100)+"%";hpTs[i].textContent=String(st.hp[i]);}
+ roundT.textContent="第 "+st.round+" 回合";
+}
+function lockUI(off){
+ var i,j,bs;
+ for(i=0;i<2;i++){
+  pans[i].classList.toggle("off",off);
+  bs=pans[i].querySelectorAll("button");
+  for(j=0;j<bs.length;j++)bs[j].disabled=off;
+ }
+}
+function pick(p,a){
+ if(st.ph!=="pick"||st.pick[p]!==null)return;
+ st.pick[p]=a;
+ lockUI(true);
+ banner.textContent=(p===0?"玩家1":"玩家2")+"已出招,等待对手……";
+ if(st.pick[0]!==null&&st.pick[1]!==null)resolve();
+}
+function dmgDealt(me,op){
+ if(me===-1)return 0;
+ if(me===0)return op===1?0:1;
+ if(me===2)return op===0?0:(op===2?1:2);
+ return op===0?1:0;
+}
+function actName(a){return a===-1?"犹豫":AN[a];}
+function resolve(){
+ var a=st.pick[0],b=st.pick[1],d0=dmgDealt(a,b),d1=dmgDealt(b,a);
+ st.hp[1]=Math.max(0,st.hp[1]-d0);
+ st.hp[0]=Math.max(0,st.hp[0]-d1);
+ render();
+ var s="玩家1【"+actName(a)+"】 对 玩家2【"+actName(b)+"】<br>";
+ s+="玩家1 -"+d1+" · 玩家2 -"+d0;
+ if(d0===0&&d1===0)s+=" · 双方无伤";
+ banner.innerHTML=s;
+ st.ph="reveal";st.t=120;
+}
+function nextRound(){
+ if(st.hp[0]<=0||st.hp[1]<=0){
+  st.ph="over";
+  var w=st.hp[0]<=0?(st.hp[1]<=0?"平局":1):0;
+  if(w==="平局")banner.textContent="双方同时倒下,平局!";
+  else banner.textContent=w===0?"玩家2 体力耗尽,玩家1 获胜!":"玩家1 体力耗尽,玩家2 获胜!";
+  var btn=document.createElement("button");
+  btn.className="act";btn.style.cssText="margin:14px auto 0;display:block;padding:10px 40px;border-radius:999px;background:#4fd1c5;color:#06222b;border:none;font-weight:700;cursor:pointer;";
+  btn.textContent="再来一局";
+  btn.addEventListener("click",function(){btn.parentNode.removeChild(btn);reset();});
+  document.getElementById("card").appendChild(btn);
+  return;
+ }
+ st.round++;st.pick=[null,null];st.t=210;st.ph="pick";
+ render();lockUI(false);
+ banner.textContent="同时出招,暗中决胜!";
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.ph==="pick"){
+  st.t-=dt;
+  tfill.style.width=Math.max(0,st.t/210*100)+"%";
+  if(st.t<=0){
+   if(st.pick[0]===null)st.pick[0]=-1;
+   if(st.pick[1]===null)st.pick[1]=-1;
+   banner.textContent="超时!犹豫者要挨打!";
+   resolve();
+  }
+ }else if(st.ph==="reveal"){
+  st.t-=dt;
+  if(st.t<=0)nextRound();
+ }
+ requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright")e.preventDefault();
+ if(e.repeat)return;
+ if(k==="a")pick(0,0);if(k==="s")pick(0,1);if(k==="d")pick(0,2);
+ if(k==="arrowleft")pick(1,0);if(k==="arrowdown")pick(1,1);if(k==="arrowright")pick(1,2);
+});
+var btns=document.querySelectorAll("button.act[data-p]"),bi;
+for(bi=0;bi<btns.length;bi++){
+ (function(b){
+  b.addEventListener("click",function(){pick(parseInt(b.getAttribute("data-p"),10),parseInt(b.getAttribute("data-a"),10));});
+ })(btns[bi]);
+}
+reset();lockUI(false);requestAnimationFrame(loop);
+</script>
+</body>
+</html>

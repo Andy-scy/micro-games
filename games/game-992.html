@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>烟花小铺</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fda4af;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;margin-bottom:8px}
+.ctl button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:12px}
+.ctl button.sel{font-weight:700}
+.ctl button.sel.c0{background:#ff6b6b;border-color:#ff6b6b;color:#450a0a}
+.ctl button.sel.c1{background:#fcd34d;border-color:#fcd34d;color:#451a03}
+.ctl button.sel.c2{background:#6ee7b7;border-color:#6ee7b7;color:#022c22}
+.ctl button.sel.c3{background:#e0e7ff;border-color:#e0e7ff;color:#312e81}
+.ctl .lb{color:#8b90b0;margin-left:4px}
+.ctl button.sel.s0,.ctl button.sel.s1,.ctl button.sel.s2{background:#fda4af;border-color:#fda4af;color:#4c0519;font-weight:700}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fda4af}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#fda4af;color:#4c0519;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>烟花小铺</h1>
+  <p class="hint">选好花色与粒型,点夜空定爆点 · 爆高随点处而定 · 完成三张订单圆满</p>
+  <div class="hud">
+    <span>声誉 <b id="hRep">0</b>/3</span>
+    <span>订单 <b id="hOrder">—</b></span>
+  </div>
+  <div class="ctl" id="chips">
+    <span class="lb">花色</span>
+    <button data-c="0" class="sel c0">玛瑙红</button><button data-c="1" class="c1">鎏金</button><button data-c="2" class="c2">青碧</button><button data-c="3" class="c3">月白</button>
+    <span class="lb">粒型</span>
+    <button data-s="0" class="sel s0">牡丹</button><button data-s="1" class="s1">柳枝</button><button data-s="2" class="s2">环月</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">烟花小铺</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开铺燃花</button>
+      <button id="btnMore" style="display:none">继续燃放</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hRep=$("hRep"),hOrder=$("hOrder");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,TAU=Math.PI*2;
+var CN=["玛瑙红","鎏金","青碧","月白"],CC=["#ff6b6b","#fcd34d","#6ee7b7","#e0e7ff"];
+var SN=["牡丹","柳枝","环月"],BN=["高空","中天","低空"];
+function sr(n){var x=Math.sin(n*57.7+91.3)*3571.3453;return x-Math.floor(x);}
+var bgStars=[];
+for(var i=0;i<50;i++)bgStars.push({x:sr(i*5+1)*W,y:sr(i*5+2)*200,s:0.5+sr(i*5+3)});
+var curC=0,curS=0,order=null,rep=0,state="menu",goalDone=false;
+var rockets=[],parts=[],fx=[],time=0;
+var ac=null;
+function boom(){try{
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+  var o=ac.createOscillator(),g=ac.createGain();
+  o.type="sawtooth";o.frequency.value=65;
+  g.gain.value=0.09;
+  g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.4);
+  o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+0.4);
+}catch(e){}}
+function band(y){return y<105?0:(y<195?1:2);}
+function newOrder(){
+  var c,s,b;
+  do{
+    c=(Math.random()*4)|0;s=(Math.random()*3)|0;b=(Math.random()*3)|0;
+  }while(order&&c===order.c&&s===order.s&&b===order.b);
+  order={c:c,s:s,b:b};
+  hOrder.textContent=CN[c]+" · "+SN[s]+" · "+BN[b];
+}
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function burst(x,y){
+  var col=CC[curC],k,n,arr;
+  boom();
+  if(curS===0){n=46;for(k=0;k<n;k++){var a=k/n*TAU+(Math.random()-0.5)*0.2,sp=70+Math.random()*60;
+    parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,g:70,life:1.1+Math.random()*0.5,max:1.6,col:col,tr:false});}}
+  else if(curS===1){n=30;for(k=0;k<n;k++){var a2=k/n*TAU,sp2=40+Math.random()*35;
+    parts.push({x:x,y:y,vx:Math.cos(a2)*sp2,vy:Math.sin(a2)*sp2-15,g:52,life:2.2+Math.random()*0.6,max:2.8,col:col,tr:true,px:x,py:y});}}
+  else{n=28;for(k=0;k<n;k++){var a3=k/n*TAU;
+    parts.push({x:x,y:y,vx:Math.cos(a3)*115,vy:Math.sin(a3)*115,g:40,life:1.0,max:1.0,col:col,tr:false});}}
+  var m=[];
+  if(curC!==order.c)m.push("花色不符");
+  if(curS!==order.s)m.push("粒型不符");
+  if(band(y)!==order.b)m.push("爆高不符(需"+BN[order.b]+")");
+  if(m.length===0){
+    rep++;hRep.textContent=rep;
+    addFx(x,y-30,"订单完成 · 声誉+1","#6ee7b7");
+    if(rep>=3&&!goalDone){
+      goalDone=true;state="zen";
+      ovT.textContent="小铺圆满";
+      ovD.textContent="三张订单尽数办妥,声誉满座。\n夜空中花开千度,皆是配色得当之功。\n往后自便,随意燃放。";
+      btnMore.style.display="inline-block";
+      ov.classList.remove("hide");
+    }else newOrder();
+  }else{
+    addFx(x,y-30,m.join("、"),"#f87171");
+  }
+}
+function step(dt){
+  var i;
+  for(i=rockets.length-1;i>=0;i--){var rk=rockets[i];
+    rk.y-=270*dt;
+    if(rk.y<=rk.ty){rockets.splice(i,1);burst(rk.x,rk.ty);}}
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];
+    if(p.tr){p.px=p.x;p.py=p.y;}
+    p.vy+=p.g*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
+    p.life-=dt;
+    if(p.life<=0)parts.splice(i,1);}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#0a0d22");g.addColorStop(1,"#141a33");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<bgStars.length;i++){var bs=bgStars[i];
+    ctx.fillStyle="rgba(220,225,255,"+(0.25+0.2*Math.sin(time*2+i)).toFixed(2)+")";
+    ctx.fillRect(bs.x,bs.y,bs.s,bs.s);}
+  ctx.fillStyle="#0e1428";
+  ctx.beginPath();ctx.moveTo(0,H);
+  ctx.quadraticCurveTo(120,H-34,235,H-22);
+  ctx.quadraticCurveTo(340,H-12,470,H-30);
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    var a=Math.max(0,p.life/p.max);
+    if(p.tr){
+      ctx.strokeStyle=p.col;ctx.globalAlpha=a*0.7;ctx.lineWidth=1.6;
+      ctx.beginPath();ctx.moveTo(p.px,p.py);ctx.lineTo(p.x,p.y);ctx.stroke();
+    }else{
+      ctx.fillStyle=p.col;ctx.globalAlpha=a;
+      ctx.beginPath();ctx.arc(p.x,p.y,2.1,0,TAU);ctx.fill();
+    }
+    ctx.globalAlpha=1;}
+  for(i=0;i<rockets.length;i++){var rk=rockets[i];
+    ctx.fillStyle="#fde68a";
+    ctx.beginPath();ctx.arc(rk.x,rk.y,2.4,0,TAU);ctx.fill();
+    ctx.strokeStyle="rgba(253,230,138,.5)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(rk.x,rk.y);ctx.lineTo(rk.x,rk.y+14);ctx.stroke();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var rc=cv.getBoundingClientRect();
+  var x=(e.clientX-rc.left)*W/rc.width,y=(e.clientY-rc.top)*H/rc.height;
+  if(y<30)y=30;
+  rockets.push({x:x,y:H+8,ty:y});
+});
+var cbs=document.querySelectorAll("[data-c]");
+for(i=0;i<cbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    curC=parseInt(b.getAttribute("data-c"),10);
+    for(var k=0;k<cbs.length;k++)cbs[k].className=cbs[k].getAttribute("data-c")===b.getAttribute("data-c")?("sel c"+curC):("c"+cbs[k].getAttribute("data-c"));
+  });
+})(cbs[i]);}
+var sbs=document.querySelectorAll("[data-s]");
+for(i=0;i<sbs.length;i++){(function(b){
+  b.addEventListener("click",function(){
+    curS=parseInt(b.getAttribute("data-s"),10);
+    for(var k=0;k<sbs.length;k++)sbs[k].className=sbs[k].getAttribute("data-s")===b.getAttribute("data-s")?("sel s"+curS):("s"+sbs[k].getAttribute("data-s"));
+  });
+})(sbs[i]);}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="烟花小铺";
+  ovD.textContent="每张订单指明:花色、粒型、爆高(高空/中天/低空)。\n先选好花色与粒型,再点夜空——点击的高度就是爆高。\n三样皆中方算成交,声誉满三即圆满。";
+  btnGo.textContent="开铺燃花";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){newOrder();state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

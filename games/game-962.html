@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拔河键王</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:760px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:8px;line-height:1.7;}
+.cvwrap{position:relative;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+canvas{display:block;width:100%;height:auto;background:#10152b;touch-action:none;}
+#ov{position:absolute;inset:0;background:rgba(10,12,24,.86);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px;}
+#ov.hide{display:none;}
+#ovT{font-size:26px;font-weight:700;}
+#ovS{color:var(--dim);font-size:14px;line-height:1.9;}
+#ovB{background:var(--p1);border:none;color:#06222b;font-size:16px;font-weight:700;padding:10px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>拔河键王</h1>
+<div id="tip">狂按交替键拔绳!玩家1:W 与 S 交替连按 · 玩家2:↑ 与 ↓ 交替连按 · 同一键连按无效 · 绳结拉过己方白线获胜 · 先胜 3 回合者夺冠(触屏:点按己方半屏上下区交替)</div>
+<div class="cvwrap">
+<canvas id="cv" width="720" height="480"></canvas>
+<div id="ov"><div id="ovT">拔河键王</div><div id="ovS">玩家1:W / S 两个键交替狂按<br>玩家2:↑ / ↓ 两个键交替狂按<br>必须交替按键,重复按同一键无效<br>绳结先被拉过白线的一方输掉回合,先胜 3 回合者夺冠</div><button id="ovB">开始拔河</button></div>
+</div>
+</div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovS=document.getElementById("ovS"),ovB=document.getElementById("ovB");
+var keys={},st;
+function reset(){st={ph:"count",cd:90,pos:0,last:[-1,-1],score:[0,0],round:1,msg:"",msgT:0,stamps:[[],[]],flash:[0,0]};}
+function start(){reset();ov.classList.add("hide");}
+function show(t,s){ovT.textContent=t;ovS.innerHTML=s;ovB.textContent="再来一局";ov.classList.remove("hide");}
+function press(i,alt){
+ if(st.ph!=="play")return;
+ if(st.last[i]===alt){st.flash[i]=18;return;}
+ st.last[i]=alt;
+ var now=performance.now(),arr=st.stamps[i];
+ arr.push(now);if(arr.length>24)arr.shift();
+ if(i===0)st.pos-=9;else st.pos+=9;
+ if(Math.abs(st.pos)>=240){
+  var w=st.pos<0?0:1;
+  st.score[w]++;st.ph="rend";st.msgT=110;
+  st.msg=(w===0?"蓝方":"橙方")+"把绳结拉过了白线!";
+ }
+}
+function rate(i){
+ var now=performance.now(),a=st.stamps[i],c=0,j;
+ for(j=0;j<a.length;j++)if(now-a[j]<1000)c++;
+ return c;
+}
+function step(dt){
+ if(st.ph==="count"){st.cd-=dt;if(st.cd<=0)st.ph="play";}
+ else if(st.ph==="play"){st.pos*=Math.pow(0.996,dt);}
+ else if(st.ph==="rend"){
+  st.msgT-=dt;
+  if(st.msgT<=0){
+   if(st.score[0]>=3||st.score[1]>=3){
+    st.ph="over";
+    show(st.score[0]>=3?"蓝方获胜!":"橙方获胜!","最终比分 "+st.score[0]+" : "+st.score[1]);
+   }else{
+    st.round++;st.pos=0;st.last=[-1,-1];st.stamps=[[],[]];st.ph="count";st.cd=90;
+   }
+  }
+ }
+ if(st.flash[0]>0)st.flash[0]-=dt;
+ if(st.flash[1]>0)st.flash[1]-=dt;
+}
+function figure(x,lean,color){
+ ctx.save();ctx.translate(x,232);ctx.rotate(lean);
+ ctx.fillStyle=color;
+ ctx.beginPath();ctx.arc(0,-46,11,0,6.2832);ctx.fill();
+ ctx.fillRect(-9,-34,18,36);
+ ctx.fillRect(-14,2,10,26);ctx.fillRect(4,2,10,26);
+ ctx.restore();
+}
+function draw(){
+ ctx.clearRect(0,0,720,480);
+ var i,kx=360+st.pos;
+ ctx.strokeStyle="rgba(255,255,255,.15)";ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(120,150);ctx.lineTo(120,300);ctx.moveTo(600,150);ctx.lineTo(600,300);ctx.stroke();
+ ctx.strokeStyle="rgba(255,255,255,.35)";
+ ctx.beginPath();ctx.moveTo(60,240);ctx.lineTo(660,240);ctx.stroke();
+ ctx.lineWidth=6;
+ ctx.strokeStyle="#4fd1c5";ctx.beginPath();ctx.moveTo(80,240);ctx.lineTo(kx,240);ctx.stroke();
+ ctx.strokeStyle="#f6ad55";ctx.beginPath();ctx.moveTo(kx,240);ctx.lineTo(640,240);ctx.stroke();
+ ctx.fillStyle="#e9edf8";ctx.beginPath();ctx.arc(kx,240,14,0,6.2832);ctx.fill();
+ ctx.fillStyle="#0f1220";ctx.font="bold 12px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("结",kx,241);
+ for(i=0;i<3;i++){
+  figure(66+i*30,-0.18,"#4fd1c5");
+  figure(654-i*30,0.18,"#f6ad55");
+ }
+ for(i=0;i<2;i++){
+  var r=rate(i);
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";
+  ctx.fillRect(i===0?60:460,392,200,14);
+  ctx.fillStyle="#10152b";ctx.fillRect(i===0?62:462,394,196,10);
+  ctx.fillStyle=i===0?"#4fd1c5":"#f6ad55";
+  ctx.fillRect(i===0?62:658-196*Math.min(1,r/12),394,196*Math.min(1,r/12),10);
+  ctx.fillStyle="#e9edf8";ctx.font="bold 13px system-ui";ctx.textAlign=i===0?"left":"right";
+  ctx.fillText((i===0?"玩家1 ":"玩家2 ")+r+" 次/秒",i===0?60:660,418);
+  if(st.flash[i]>0){ctx.fillStyle="#ff5c7a";ctx.fillText("要交替按键!",i===0?160:560,370);}
+ }
+ ctx.textAlign="center";ctx.fillStyle="#8b93b0";ctx.font="bold 14px system-ui";
+ ctx.fillText("第 "+st.round+" 回合 · 先胜 3 回合",360,16);
+ if(st.ph==="count"){
+  ctx.fillStyle="#e9edf8";ctx.font="bold 56px system-ui";
+  ctx.fillText(String(Math.ceil(st.cd/30)),360,120);
+  ctx.font="bold 16px system-ui";ctx.fillText("准备……",360,190);
+ }
+ if(st.ph==="play"&&st.cd>-28){st.cd-=1;ctx.fillStyle="#f6c945";ctx.font="bold 46px system-ui";ctx.fillText("拉!!",360,120);}
+ if(st.ph==="rend"){ctx.fillStyle="#ff5c7a";ctx.font="bold 30px system-ui";ctx.fillText(st.msg,360,120);}
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(!(st.ph==="over"))step(dt);
+ draw();requestAnimationFrame(loop);
+}
+window.addEventListener("keydown",function(e){
+ var k=e.key.toLowerCase();
+ if(k==="arrowup"||k==="arrowdown"||k==="arrowleft"||k==="arrowright"||k===" ")e.preventDefault();
+ if(e.repeat)return;
+ if(k==="w")press(0,0);
+ if(k==="s")press(0,1);
+ if(k==="arrowup")press(1,0);
+ if(k==="arrowdown")press(1,1);
+});
+window.addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+cv.addEventListener("touchstart",function(e){
+ e.preventDefault();
+ var r=cv.getBoundingClientRect(),i;
+ for(i=0;i<e.changedTouches.length;i++){
+  var t2=e.changedTouches[i];
+  var x=(t2.clientX-r.left)/r.width*720,y=(t2.clientY-r.top)/r.height*480;
+  if(x<360)press(0,y<240?0:1);else press(1,y<240?0:1);
+ }
+},{passive:false});
+ovB.addEventListener("click",function(){start();ovB.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

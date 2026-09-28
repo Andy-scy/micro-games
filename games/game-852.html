@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宴会座位谜题</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:450px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:10px}
+.ptitle{font-size:12px;color:#8f97c0;margin-bottom:8px}
+#seats{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+.seat{flex:1;max-width:72px;height:64px;background:#232946;border:2px solid #3a4470;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.seat:hover{border-color:#4f6ef7}
+.seat .no{font-size:11px;color:#8f97c0}
+.seat .who{font-size:18px;font-weight:800;color:#fbbf24}
+#tray{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.gt{padding:8px 14px;border-radius:9px;border:2px solid #3a4470;background:#2a3157;color:#e8eaf6;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.gt.sel{border-color:#ffd668;background:#4a3f1e}
+#clues{font-size:13px;color:#c6cdf2;line-height:2}
+#clues div.err{color:#ff7b8a}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#fbbf24;margin-top:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>宴会座位谜题</h1>
+<p class="tip">五位宾客梅、兰、竹、菊、松坐一排(左起 1–5 号)。<br>点选宾客再点座位安排入座,让所有线索同时成立。</p>
+<div class="hud"><span id="hQ">第 1/3 题</span><span id="hLife">机会 3</span></div>
+<div class="panel">
+  <div class="ptitle">座位(从左到右)</div>
+  <div id="seats"></div>
+  <div class="ptitle">待入座宾客</div>
+  <div id="tray"></div>
+</div>
+<div class="panel">
+  <div class="ptitle">线索</div>
+  <div id="clues"></div>
+</div>
+<div id="msg"></div>
+<div class="btnrow"><button class="btn pri" id="bOk">确认答案</button><button class="btn" id="bNew">换一题</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const GUESTS=["梅","兰","竹","菊","松"];
+const PERMS=[];
+(function(){
+  const used=[false,false,false,false,false],cur=[];
+  (function bt(){
+    if(cur.length===5){PERMS.push(cur.slice());return;}
+    for(let i=0;i<5;i++){
+      if(used[i])continue;
+      used[i]=true;cur.push(i);bt();cur.pop();used[i]=false;
+    }
+  })();
+})();
+function ri(n){return Math.floor(Math.random()*n);}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function makeClue(perm){
+  const t=ri(6);
+  if(t===0){const s=ri(5),g=perm[s];return {text:GUESTS[g]+"固定坐在第"+(s+1)+"号位",f:p=>p[s]===g};}
+  if(t===1){const i=ri(4),a=perm[i],b=perm[i+1];return {text:GUESTS[a]+"和"+GUESTS[b]+"相邻",f:p=>Math.abs(p.indexOf(a)-p.indexOf(b))===1};}
+  if(t===2){const i=ri(4),j=i+1+ri(4-i),a=perm[i],b=perm[j];return {text:GUESTS[a]+"坐在"+GUESTS[b]+"的左边(不必相邻)",f:p=>p.indexOf(a)<p.indexOf(b)};}
+  if(t===3){const i=ri(4),a=perm[i+1],b=perm[i];return {text:GUESTS[a]+"紧挨在"+GUESTS[b]+"的右边",f:p=>p.indexOf(a)===p.indexOf(b)+1};}
+  if(t===4){const s=1+ri(3),g=perm[s];return {text:GUESTS[g]+"不坐两端",f:p=>p.indexOf(g)>0&&p.indexOf(g)<4};}
+  const i=ri(3),j=i+2,a=perm[i],b=perm[j];
+  return {text:GUESTS[a]+"和"+GUESTS[b]+"中间隔一个座位",f:p=>Math.abs(p.indexOf(a)-p.indexOf(b))===2};
+}
+function countSols(clues){
+  let n=0;
+  for(const p of PERMS){
+    let ok=true;
+    for(const c of clues){if(!c.f(p)){ok=false;break;}}
+    if(ok)n++;
+  }
+  return n;
+}
+function genRound(){
+  for(let t=0;t<300;t++){
+    const perm=shuffle([0,1,2,3,4]);
+    const clues=[],seen=new Set();
+    let guard=0;
+    while(guard++<40){
+      const c=makeClue(perm);
+      if(!c||seen.has(c.text))continue;
+      seen.add(c.text);clues.push(c);
+      if(countSols(clues)===1)break;
+    }
+    if(clues.length&&countSols(clues)===1)return {perm:perm,clues:clues};
+  }
+  const perm=shuffle([0,1,2,3,4]);
+  return {perm:perm,clues:perm.map((g,s)=>({text:GUESTS[g]+"固定坐在第"+(s+1)+"号位",f:p=>p[s]===g}))};
+}
+let rnd=null,arr=[],selG=-1,lvl=0,mistakes=0,over=false,lock=false;
+let clueEls=[];
+const seatsEl=document.getElementById("seats"),trayEl=document.getElementById("tray");
+const seatEls=[];
+for(let s=0;s<5;s++){
+  const d=document.createElement("div");
+  d.className="seat";d.innerHTML='<div class="no">'+(s+1)+'号</div><div class="who"></div>';
+  d.addEventListener("click",()=>seatClick(s));
+  seatsEl.appendChild(d);seatEls.push(d);
+}
+trayEl.addEventListener("click",e=>{
+  const t=e.target;
+  if(!t.dataset||t.dataset.g===undefined||over||lock)return;
+  const g=parseInt(t.dataset.g,10);
+  selG=(selG===g)?-1:g;
+  render();
+});
+function seatClick(s){
+  if(over||lock)return;
+  const msg=document.getElementById("msg");
+  if(selG>=0){arr[s]=selG;selG=-1;msg.textContent="";render();return;}
+  if(arr[s]>=0){arr[s]=-1;msg.textContent="";render();return;}
+  msg.textContent="先在下方点选一位宾客,再点座位";
+}
+function render(){
+  for(let s=0;s<5;s++){
+    seatEls[s].querySelector(".who").textContent=arr[s]>=0?GUESTS[arr[s]]:"空";
+    seatEls[s].style.borderColor=arr[s]>=0?"#56608f":"#3a4470";
+  }
+  trayEl.innerHTML="";
+  for(let g=0;g<5;g++){
+    if(arr.indexOf(g)>=0)continue;
+    const b=document.createElement("button");
+    b.className="gt"+(selG===g?" sel":"");
+    b.dataset.g=String(g);
+    b.textContent=GUESTS[g];
+    trayEl.appendChild(b);
+  }
+}
+function loadRound(){
+  rnd=genRound();
+  arr=[-1,-1,-1,-1,-1];selG=-1;
+  const cl=document.getElementById("clues");
+  cl.innerHTML="";clueEls=[];
+  for(const c of rnd.clues){
+    const d=document.createElement("div");
+    d.textContent="· "+c.text;
+    cl.appendChild(d);clueEls.push(d);
+  }
+  document.getElementById("hQ").textContent="第 "+(lvl+1)+"/3 题";
+  document.getElementById("msg").textContent="";
+  render();
+}
+function ok(){
+  if(over||lock)return;
+  const msg=document.getElementById("msg");
+  if(arr.indexOf(-1)>=0){msg.textContent="还有座位空着";return;}
+  let all=true;
+  for(let i=0;i<rnd.clues.length;i++){
+    const okc=rnd.clues[i].f(arr);
+    clueEls[i].classList.toggle("err",!okc);
+    if(!okc)all=false;
+  }
+  if(all){
+    lock=true;msg.textContent="全部线索成立!";
+    setTimeout(()=>{
+      lock=false;lvl++;
+      if(lvl>=3){
+        over=true;
+        show("座位安排完美!","连续破解 3 道座位谜题");
+      }else loadRound();
+    },800);
+  }else{
+    mistakes++;
+    document.getElementById("hLife").textContent="机会 "+(3-mistakes);
+    msg.textContent="有线索未满足(标红),调整一下";
+    if(mistakes>=3){
+      over=true;
+      show("挑战失败","正确座位:"+rnd.perm.map((g,s)=>((s+1)+"号"+GUESTS[g])).join("、"));
+    }
+  }
+}
+function show(t,p){document.getElementById("ovT").textContent=t;document.getElementById("ovP").textContent=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  over=false;lock=false;lvl=0;mistakes=0;
+  document.getElementById("hLife").textContent="机会 3";
+  document.getElementById("ov").classList.add("hide");
+  loadRound();
+}
+document.getElementById("bOk").addEventListener("click",ok);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+init();
+</script>
+</body>
+</html>

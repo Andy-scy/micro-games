@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单速递</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>订单速递</h1>
+  <p class="tips">顶部订单要什么就接什么!← → 或 A/D 移篮,触屏拖动。接对 -数量 +15,接错 -1 生命;订单限时 18 秒,按时完成 +80,超时也扣命,共 3 条。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">完成订单</div><div class="big" id="oc">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">订单速递</h2><p id="ovp">玩法:照单收货,数量精确。<br>· 顶部显示订单:哪种水果 × 几个<br>· 接对水果:数量-1,+15 分<br>· 接到订单外的水果:-1 生命<br>· 订单 18 秒限时:完成 +80,超时 -1 生命<br>· 每单都是新组合,键盘/触屏移篮皆可</p><button class="btn" id="obtn">开始接单</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var IT=[{n:'苹果',c:'#ff5c5c'},{n:'香蕉',c:'#ffd166'},{n:'葡萄',c:'#b07cff'}];
+var S=null;
+function reset(){S={on:false,score:0,lives:3,cnt:[0,0,0],oT:18,oc:0,st:0.7,t:0,items:[],pops:[],bx:W/2,bw:88,keys:{}}}
+reset();
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function newOrder(){
+  S.cnt=[0,0,0];
+  var a=Math.floor(Math.random()*3);
+  var b=(a+1+Math.floor(Math.random()*2))%3;
+  S.cnt[a]=2+Math.floor(Math.random()*3);
+  S.cnt[b]=2+Math.floor(Math.random()*3);
+  S.oT=18;
+}
+function startGame(){reset();newOrder();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('oc').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function orderDone(){
+  var s=0;
+  for(var i=0;i<3;i++)s+=S.cnt[i];
+  return s===0;
+}
+function update(dt){
+  S.t+=dt;
+  S.oT-=dt;
+  if(S.oT<=0){
+    S.lives--;$('hp').textContent=hearts();
+    pop(W/2,H-150,'订单超时!-1 生命','#ff6b6b');
+    if(S.lives<=0){gameOver();return}
+    newOrder();
+  }
+  var sp=345,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=0.65+Math.random()*0.35;
+    S.items.push({ti:Math.floor(Math.random()*3),x:30+Math.random()*(W-60),y:-18,v:190+Math.random()*60,rot:Math.random()*6});
+  }
+  var by=H-46;
+  for(var i=S.items.length-1;i>=0;i--){
+    var it=S.items[i];
+    it.y+=it.v*dt;it.rot+=dt*2;
+    if(it.y>=by-18&&it.y<=by+10&&Math.abs(it.x-S.bx)<S.bw/2+10){
+      if(S.cnt[it.ti]>0){
+        S.cnt[it.ti]--;S.score+=15;$('sc').textContent=S.score;
+        pop(it.x,by-30,'+15 '+IT[it.ti].n,'#51d88a');
+        if(orderDone()){
+          S.score+=80;S.oc++;$('sc').textContent=S.score;$('oc').textContent=S.oc;
+          pop(W/2,H-150,'订单完成!+80','#ffd166');
+          newOrder();
+        }
+      }else{
+        S.lives--;$('hp').textContent=hearts();
+        pop(it.x,by-30,'订单没要'+IT[it.ti].n+'!-1 生命','#ff6b6b');
+        if(S.lives<=0){S.items.splice(i,1);gameOver();continue}
+      }
+      S.items.splice(i,1);continue;
+    }
+    if(it.y>H+18)S.items.splice(i,1);
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='关店了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>完成订单 <b>'+S.oc+'</b> 单<br>看清订单再伸手,快而不错才是王牌!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function fruitIcon(ti,x,y,s){
+  if(ti===0){
+    ctx.fillStyle='#ff5c5c';ctx.beginPath();ctx.arc(x,y,s,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#51d88a';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(x,y-s);ctx.quadraticCurveTo(x+4,y-s-5,x+8,y-s-3);ctx.stroke();
+  }else if(ti===1){
+    ctx.strokeStyle='#ffd166';ctx.lineWidth=s*0.9;
+    ctx.beginPath();ctx.arc(x-s*0.4,y+s*0.2,s*1.05,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  }else{
+    ctx.fillStyle='#b07cff';
+    ctx.beginPath();ctx.arc(x-s*0.5,y+s*0.4,s*0.55,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+s*0.5,y+s*0.4,s*0.55,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x,y-s*0.25,s*0.55,0,Math.PI*2);ctx.fill();
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  ctx.fillStyle='rgba(255,255,255,.07)';rr(70,10,W-140,58,12);ctx.fill();
+  ctx.font='bold 13px system-ui';ctx.textAlign='center';
+  ctx.fillStyle='#9aa3c0';ctx.fillText('当前订单',W/2,26);
+  var slots=[],n=0;
+  for(var q=0;q<3;q++)if(S.cnt[q]>0)slots.push(q);
+  for(var s2=0;s2<slots.length;s2++){
+    var ti=slots[s2];
+    var fx=W/2+(s2-(slots.length-1)/2)*92;
+    fruitIcon(ti,fx-14,42,9);
+    ctx.fillStyle='#e8eaf6';ctx.font='bold 15px system-ui';ctx.textAlign='left';
+    ctx.fillText('×'+S.cnt[ti],fx-2,47);
+  }
+  ctx.fillStyle='rgba(255,107,107,.9)';rr(90,60,(W-180)*Math.max(0,S.oT/18),5,3);ctx.fill();
+  for(var i=0;i<S.items.length;i++){
+    var it=S.items[i];
+    ctx.save();ctx.translate(it.x,it.y);ctx.rotate(Math.sin(it.rot)*0.3);
+    fruitIcon(it.ti,0,0,12);
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('接单篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

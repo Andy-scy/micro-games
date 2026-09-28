@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>残影序列</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+#status{text-align:center;color:#fbbf24;font-size:15px;font-weight:700;min-height:22px;margin-bottom:8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+#grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:300px;margin:0 auto}
+.cell{aspect-ratio:1;background:#11152a;border:1px solid #232849;border-radius:12px;cursor:pointer;transition:background-color .08s,box-shadow .08s}
+.cell.lit{background:#a78bfa;box-shadow:0 0 18px rgba(167,139,250,.7)}
+.cell.ok{background:#14532d;box-shadow:0 0 14px rgba(74,222,128,.5)}
+.cell.bad{background:#7f1d1d;box-shadow:0 0 14px rgba(239,68,68,.5)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>残影序列</h1>
+  <p class="hint">格子会快速闪现一串位置 · 记住后按同样顺序点出来</p>
+  <div class="hud">
+    <span>轮次 <b id="round">1</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div id="status">准备好了吗?</div>
+  <div class="stage">
+    <div id="grid"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">残影序列</h2>
+      <p id="ovDesc">九宫格会以极快速度依次闪现一串位置残影,全神贯注记住顺序,然后按相同顺序点击复现!序列每轮加长,点错扣一次机会并重放本序列。你能记住多长?</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var grid=$("grid"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elRound=$("round"),elScore=$("score"),elLives=$("lives"),elBest=$("best"),status=$("status");
+var KEY="mg_s232";
+var state="menu",round=1,score=0,lives=3,seq=[],pos=0,cells=[],timers=[],token=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function clearTimers(){var i;for(i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+function later(fn,ms){timers.push(setTimeout(fn,ms));}
+function setStatus(s){status.textContent=s;}
+function updateHud(){
+  elRound.textContent=round;
+  elScore.textContent=score;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function buildGrid(){
+  var i;
+  for(i=0;i<9;i++){
+    (function(idx){
+      var cell=document.createElement("div");
+      cell.className="cell";
+      cell.addEventListener("pointerdown",function(){pick(idx);});
+      grid.appendChild(cell);
+      cells.push(cell);
+    })(i);
+  }
+}
+function makeSeq(){
+  var len=Math.min(9,2+round),i,r;
+  seq=[];
+  for(i=0;i<len;i++){
+    do{r=(Math.random()*9)|0;}while(seq.length&&seq[seq.length-1]===r);
+    seq.push(r);
+  }
+}
+function playSeq(i){
+  var my=token;
+  if(i>=seq.length){
+    later(function(){
+      if(my!==token)return;
+      state="input";
+      setStatus("轮到你!按顺序复现");
+    },260);
+    return;
+  }
+  cells[seq[i]].classList.add("lit");
+  later(function(){
+    if(my!==token)return;
+    cells[seq[i]].classList.remove("lit");
+  },340);
+  later(function(){
+    if(my!==token)return;
+    playSeq(i+1);
+  },540);
+}
+function startRound(){
+  makeSeq();
+  pos=0;
+  state="show";
+  setStatus("观察残影序列…("+seq.length+" 步)");
+  playSeq(0);
+}
+function flashCell(idx,cls){
+  var my=token;
+  cells[idx].classList.add(cls);
+  later(function(){
+    if(my!==token)return;
+    cells[idx].classList.remove(cls);
+  },220);
+}
+function pick(idx){
+  if(state!=="input")return;
+  if(idx===seq[pos]){
+    flashCell(idx,"ok");
+    pos++;
+    if(pos>=seq.length){
+      score+=seq.length*10+round*5;
+      round++;
+      state="gap";
+      setStatus("完成!");
+      updateHud();
+      later(startRound,800);
+    }
+  }else{
+    flashCell(idx,"bad");
+    lives--;
+    state="gap";
+    updateHud();
+    if(lives<=0){
+      endGame();
+    }else{
+      setStatus("点错了!重放本序列");
+      later(function(){
+        pos=0;
+        state="show";
+        playSeq(0);
+      },900);
+    }
+  }
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="记忆中断";
+  ovDesc.textContent="本轮序列长度 "+seq.length+" 步,挑战终止";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  setStatus("游戏结束");
+  updateHud();
+}
+function startGame(){
+  clearTimers();
+  token++;
+  round=1;score=0;lives=3;
+  state="gap";
+  ov.classList.add("hide");
+  updateHud();
+  later(startRound,500);
+}
+buildGrid();
+btnGo.addEventListener("click",startGame);
+updateHud();
+})();
+</script>
+</body>
+</html>

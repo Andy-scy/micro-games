@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>九宫马拉松</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#99f6e4;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#99f6e4;font-size:16px}
+.gbtn{background:#0f3d38;color:#99f6e4;border:1px solid #99f6e4;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#99f6e4;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:320px;margin:0 auto;touch-action:manipulation}
+.pad{aspect-ratio:1/1;border-radius:12px;background:#1b2140;border:2px solid #2a3258;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#5b648c;cursor:pointer;transition:transform .06s,box-shadow .12s,background .12s,color .12s;user-select:none;-webkit-user-select:none}
+.pad:active{transform:scale(.93)}
+.pad.lit{background:#2dd4bf;border-color:#ccfbf1;color:#134e4a;box-shadow:0 0 24px rgba(45,212,191,.85)}
+.goal{text-align:center;font-size:12px;color:#38507a;margin-top:8px;letter-spacing:1px}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#99f6e4;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#99f6e4;color:#0f3d38;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>九宫马拉松</h1>
+  <p class="hint">生命制长跑:一条只增不减的序列,从 1 步一路长到 20 步即为通关!点错扣 1 条命并重播本段,共 3 条命。九宫格对应键盘 1-9,长跑开始。</p>
+  <div class="hud">
+    <span>进度 <b id="lv">0</b>/20</span>
+    <span>生命 <b id="lives">♥♥♥</b></span>
+    <span>通关纪录 <b id="best">未通关</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="grid" id="grid"></div>
+  <div class="goal">目标:完整复述 20 步长序列 · 失误不重来,只扣命</div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">九宫马拉松</h2>
+    <p id="ovDesc">这不是冲刺,是长跑:序列只涨不清零,失误只扣命不扣进度,3 条命撑到 20 步就是冠军。越到后面每一步都千金重。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始长跑</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg356_best",GOAL=20,LIVES0=3,FREQ=[261.63,293.66,329.63,349.23,392,440,493.88,523.25,587.33],GAP=640,FLASH=400;
+var seq=[],pos=0,level=0,lives=LIVES0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var pads=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLives=$("lives"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.26;v=v==null?0.14:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var box=$("grid");for(var i=0;i<9;i++){var d=document.createElement("div");d.className="pad";d.textContent=String(i+1);d.dataset.i=String(i);box.appendChild(d);pads.push(d);}})();
+function flash(i,ms){var el=pads[i];el.classList.add("lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<9;i++)pads[i].classList.remove("lit");}
+function rnd(){var n;do{n=(Math.random()*9)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;
+elLives.textContent=lives>0?"♥♥♥".slice(0,lives*1)+"♡".repeat(3-lives):"♡♡♡";
+elBest.textContent=best>=GOAL?"已通关":"最长 "+best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";setMsg("重播本段("+seq.length+" 步)…");var i=0;(function step(){
+if(i>=seq.length){state="input";pos=0;setMsg("继续跑!从头复述这一段");return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();seq=[];pos=0;level=0;lives=LIVES0;state="wait";setMsg("");updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;
+if(level>=GOAL){state="over";clearTimers();
+if(best<GOAL){best=GOAL;saveNum(KEY,best);}
+tone(523.25,0.5,0.2);tone(659.26,0.5,0.2);
+ovTitle.textContent="马拉松完赛!";
+ovDesc.textContent="20 步长序列一气呵成,3 条命还在,你是记忆赛道上的冠军跑者!";
+ovScore.style.display="block";ovScore.textContent="通关 · 剩余生命 "+lives+" 条";
+btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();return;}
+state="wait";setMsg("补给站 "+level+"/20!序列加长…");updateHud();timers.push(setTimeout(nextRound,800));}
+function fail(){clearTimers();clearLit();lives--;updateHud();
+if(lives<=0){state="over";tone(92,0.55,0.2,"sawtooth");
+if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="体力耗尽";
+ovDesc.textContent="在 "+level+"/20 处弹尽粮绝。长跑要诀:每到一个补给站,就把整段序列默念一遍再出发。";
+ovScore.style.display="block";ovScore.textContent="最远跑到 "+level+" 步";btnGo.textContent="再来一局";
+ov.classList.remove("hide");updateHud();return;}
+tone(110,0.4,0.2,"sawtooth");state="wait";
+setMsg("失误!剩 "+lives+" 条命,重播本段…");
+timers.push(setTimeout(playSeq,900));}
+function press(i){if(state!=="input")return;flash(i,200);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+$("grid").addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+document.addEventListener("keydown",function(e){
+if(state==="menu"||state==="over"){if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}return;}
+var k=e.key;if(k>="1"&&k<="9")press(parseInt(k,10)-1);});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

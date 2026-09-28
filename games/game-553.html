@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三张豹子 攻心牌局</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 16px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:16px;width:100%;max-width:700px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.lab{font-size:13px;color:#bcd0c4}
+.row{display:flex;gap:8px;justify-content:center;min-height:80px}
+.card{width:56px;height:80px;border-radius:9px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.45);user-select:none}
+.card.red{color:#d62839}
+.card .r{font-size:17px;font-weight:800}
+.card .s{font-size:27px;line-height:1.05}
+.card.back{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.back span{visibility:hidden}
+#msg{min-height:40px;font-size:15px;color:#ffd166;text-align:center}
+#btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#pot{font-size:18px;font-weight:800;color:#ffd166}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>三张豹子 · 攻心牌局</h1>
+<p id="how">每局各押 10 底注，看自己的三张牌决定：弃牌认输、跟注 20 或加注 50 逼 AI 表态。牌型：豹子＞顺金＞金花＞顺子＞对子＞单张。筹码冲到 200 或让 AI 破产即胜。</p>
+<div id="bar"><span>你 <b id="pc">100</b></span><span>AI <b id="ac">100</b></span><span>第 <b id="rd">0</b> 局</span></div>
+<div id="table">
+  <div id="pot">底池 0</div>
+  <div class="lab">AI 手牌 <span id="aicat"></span></div>
+  <div class="row" id="arow"></div>
+  <div class="lab">你的手牌 <span id="pcat"></span></div>
+  <div class="row" id="prow"></div>
+  <div id="msg"></div>
+  <div id="btns">
+    <button id="start" class="acc">押 10 开局</button>
+    <button id="fold" disabled>弃牌</button>
+    <button id="call" disabled>跟注 20</button>
+    <button id="raise" disabled>加注 50</button>
+  </div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+var NAMES=['单张','对子','顺子','金花','顺金','豹子'];
+var deck=[],you=[],ai=[],chips=100,aiChips=100,pot=0,round=0,phase='idle',showAi=false,timer=null;
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+2;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+function refill(){deck=[];for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)deck.push({s:SUITS[i],r:RANKS[j]});shuffle(deck);}
+function cardHTML(c){
+  if(!c)return '<div class="card back"><span>·</span></div>';
+  var red=(c.s==='♥'||c.s==='♦')?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function rank3(h){
+  var vs=[vi(h[0].r),vi(h[1].r),vi(h[2].r)].sort(function(a,b){return b-a;});
+  var flush=h[0].s===h[1].s&&h[1].s===h[2].s;
+  var trips=vs[0]===vs[2];
+  var straight=(vs[0]-vs[1]===1&&vs[1]-vs[2]===1)||(vs[0]===14&&vs[1]===3&&vs[2]===2);
+  var hi=(straight&&vs[0]===14)?3:vs[0];
+  var pair=-1,kick=-1;
+  if(!trips){
+    if(vs[0]===vs[1]){pair=vs[0];kick=vs[2];}
+    else if(vs[1]===vs[2]){pair=vs[1];kick=vs[0];}
+  }
+  var cat,s1,s2,s3;
+  if(trips){cat=5;s1=vs[0];s2=0;s3=0;}
+  else if(straight&&flush){cat=4;s1=hi;s2=0;s3=0;}
+  else if(flush){cat=3;s1=vs[0];s2=vs[1];s3=vs[2];}
+  else if(straight){cat=2;s1=hi;s2=0;s3=0;}
+  else if(pair>=0){cat=1;s1=pair;s2=kick;s3=0;}
+  else{cat=0;s1=vs[0];s2=vs[1];s3=vs[2];}
+  return{cat:cat,v:s1*10000+s2*100+s3,name:NAMES[cat]};
+}
+function better(a,b){if(a.cat!==b.cat)return a.cat>b.cat;return a.v>b.v;}
+function render(){
+  $('pc').textContent=chips;$('ac').textContent=aiChips;$('rd').textContent=round;
+  $('pot').textContent='底池 '+pot;
+  var ar='';
+  for(var i=0;i<3;i++)ar+=cardHTML((showAi||phase==='done')?ai[i]:null);
+  $('arow').innerHTML=ar;
+  var pr='';for(var k=0;k<3;k++)pr+=cardHTML(you[k]);
+  $('prow').innerHTML=pr;
+  $('pcat').textContent=(phase==='idle'||you.length<3)?'':('（'+rank3(you).name+'）');
+  $('aicat').textContent=showAi&&ai.length===3?('（'+rank3(ai).name+'）'):'';
+  $('start').disabled=!(phase==='idle'&&chips>=10&&aiChips>=10);
+  var act=(phase==='act');
+  $('fold').disabled=!act;
+  $('call').disabled=!act||chips<20||aiChips<20;
+  $('raise').disabled=!act||chips<50||aiChips<50;
+}
+function msg(s){$('msg').innerHTML=s;}
+function startRound(){
+  if(phase!=='idle'||chips<10||aiChips<10)return;
+  refill();chips-=10;aiChips-=10;pot=20;round++;
+  you=[deck.pop(),deck.pop(),deck.pop()];
+  ai=[deck.pop(),deck.pop(),deck.pop()];
+  showAi=false;phase='act';
+  msg('看牌吧：弃牌认栽，或加码逼 AI 亮牌');render();
+}
+function aiRespond(need){
+  var r=rank3(ai);
+  var strong=r.cat>=2||(r.cat===1&&r.v>=12000)||(r.cat===0&&r.v>=130000);
+  if(aiChips<need)return false;
+  if(strong)return true;
+  return Math.random()<0.22;
+}
+function fold(who){
+  if(who===0){
+    aiChips+=pot;pot=0;
+    msg('你弃牌了，底池归 AI');
+  }else{
+    chips+=pot;pot=0;
+    msg('AI 弃牌了，底池归你！');
+  }
+  endRound();
+}
+function showdown(){
+  showAi=true;phase='show';
+  var a=rank3(you),b=rank3(ai);
+  var line='你 '+a.name+'，AI '+b.name+'。';
+  if(better(a,b)){chips+=pot;line+='你更大，赢下底池 +'+pot+'！';}
+  else if(better(b,a)){aiChips+=pot;line+='AI 更大，底池被拿走';}
+  else{chips+=pot/2;aiChips+=pot/2;line+='完全同级，平分底池';}
+  pot=0;msg(line);endRound();
+}
+function endRound(){
+  render();
+  if(chips>=200){end(true,'筹码达到 '+chips+'，牌桌之王！');return;}
+  if(aiChips<10){end(true,'AI 破产，你赢下整场牌局！');return;}
+  if(chips<10){end(false,'你的筹码不足 10，黯然离场');return;}
+  timer=setTimeout(function(){phase='idle';render();msg('点「押 10 开局」继续');},1400);
+}
+function doCall(){
+  if(phase!=='act')return;
+  chips-=20;pot+=20;
+  msg('你跟注 20…');
+  render();
+  timer=setTimeout(function(){
+    if(aiRespond(20)){aiChips-=20;pot+=20;msg('AI 跟注！亮牌定胜负');showdown();}
+    else{fold(1);}
+  },700);
+}
+function doRaise(){
+  if(phase!=='act')return;
+  chips-=50;pot+=50;
+  msg('你加注 50，施压中…');
+  render();
+  timer=setTimeout(function(){
+    if(aiRespond(50)){aiChips-=50;pot+=50;msg('AI 硬跟到底！亮牌定胜负');showdown();}
+    else{fold(1);}
+  },700);
+}
+function end(win,info){
+  phase='done';if(timer){clearTimeout(timer);timer=null;}
+  render();
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终筹码 你 '+chips+' : AI '+aiChips;
+  $('over').classList.remove('hide');
+}
+function newGame(){
+  if(timer){clearTimeout(timer);timer=null;}
+  refill();you=[];ai=[];chips=100;aiChips=100;pot=0;round=0;phase='idle';showAi=false;
+  $('over').classList.add('hide');msg('点「押 10 开局」开始第一局');render();
+}
+$('start').onclick=startRound;
+$('fold').onclick=function(){if(phase==='act')fold(0);};
+$('call').onclick=doCall;
+$('raise').onclick=doRaise;
+$('again').onclick=newGame;
+newGame();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幻影泡泡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:8px}
+#tbar{height:100%;width:100%;background:#b07cff;border-radius:6px}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>幻影泡泡</h1>
+  <p class="tips">泡泡平时几乎隐形,只在相位周期内短暂显形!记住它们的轨迹,趁其现身或盲猜位置戳破。越隐身时戳中越值钱,点空要扣时间!</p>
+  <div class="card">
+    <div class="bar"><div id="tbar"></div></div>
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">本波进度</div><div class="big" id="wp">0/10</div></div>
+      <div class="stat"><div class="mut">波数</div><div class="big" id="wv">1</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">幻影泡泡</h2><p id="ovp">玩法说明:<br>· 每波 10 颗幻影泡泡缓慢漂移,只在周期内短暂显形<br>· 平时只能看到极淡的轮廓,考验记忆与预判<br>· 点中几乎隐形的泡泡奖励更高(最高 +28)<br>· 点空一次 -2 秒,清空一波 +50 分<br>· 每过一波泡泡更多、闪现更快<br>· 45 秒倒计时归零即结算</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff','#b07cff'];
+var bubbles=[],parts=[],floats=[];
+var score=0,wave=1,wavePop=0,waveNeed=10,timeLeft=45;
+var running=false,lastT=0,gt=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function upd(){
+  $i('sc').textContent=score;
+  $i('wp').textContent=wavePop+'/'+waveNeed;
+  $i('wv').textContent=wave;
+}
+function reset(){
+  score=0;wave=1;wavePop=0;waveNeed=10;timeLeft=45;
+  bubbles=[];parts=[];floats=[];gt=0;
+  newWave();upd();
+  $i('tbar').style.width='100%';
+}
+function newWave(){
+  bubbles=[];
+  var n=Math.min(16,9+wave);
+  waveNeed=n;wavePop=0;
+  var placed=[];
+  for(var i=0;i<n;i++){
+    var x=0,y=0,ok=false,tries=0;
+    while(!ok&&tries<80){
+      x=rnd(44,W-44);y=rnd(50,H-44);ok=true;tries++;
+      for(var j=0;j<placed.length;j++){
+        var dx=x-placed[j][0],dy=y-placed[j][1];
+        if(dx*dx+dy*dy<76*76){ok=false;break;}
+      }
+    }
+    placed.push([x,y]);
+    bubbles.push({x:x,y:y,r:22,
+      vx:rnd(-26,26)*(1+wave*0.08),vy:rnd(-22,22)*(1+wave*0.08),
+      ph:rnd(0,6.28),spd:rnd(0.9,1.3)+wave*0.12,
+      c:COLORS[i%COLORS.length]});
+  }
+  upd();
+}
+function alphaOf(b){
+  var a=(Math.sin(gt*b.spd+b.ph)+1)/2;
+  return a*a*a;
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function update(dt){
+  if(!running)return;
+  gt+=dt;
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;running=false;endGame();return;}
+  $i('tbar').style.width=Math.min(100,timeLeft/45*100)+'%';
+  var i;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<b.r+4){b.x=b.r+4;b.vx=Math.abs(b.vx);}
+    if(b.x>W-b.r-4){b.x=W-b.r-4;b.vx=-Math.abs(b.vx);}
+    if(b.y<b.r+4){b.y=b.r+4;b.vy=Math.abs(b.vy);}
+    if(b.y>H-b.r-4){b.y=H-b.r-4;b.vy=-Math.abs(b.vy);}
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<bubbles.length;i++){
+    var b=bubbles[i],a=alphaOf(b);
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.2832);
+    ctx.globalAlpha=0.06;ctx.strokeStyle='#cdd6f4';ctx.lineWidth=1.5;ctx.stroke();
+    if(a>0.02){
+      ctx.globalAlpha=Math.min(1,a);
+      ctx.fillStyle=b.c;ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.5)';ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  ctx.font='13px system-ui';ctx.fillStyle='#9aa3c0';
+  ctx.fillText('泡泡会周期性显形,注意看淡轮廓',W/2,H-10);
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e),hit=-1,bestD=1e9;
+  for(var i=0;i<bubbles.length;i++){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y,d=dx*dx+dy*dy;
+    if(d<=(b.r+7)*(b.r+7)&&d<bestD){bestD=d;hit=i;}
+  }
+  if(hit<0){
+    timeLeft-=2;
+    addFloat(p.x,p.y,'-2 秒','#ff5c5c');
+    return;
+  }
+  var b=bubbles[hit];
+  bubbles.splice(hit,1);
+  var a=alphaOf(b);
+  var gain=10+Math.round(18*(1-a));
+  score+=gain;wavePop++;
+  addFloat(b.x,b.y,a<0.1?'盲戳!+'+gain:'+'+gain,'#b07cff');
+  for(var k=0;k<8;k++){var ang=rnd(0,6.28),s=rnd(50,150);
+    parts.push({x:b.x,y:b.y,vx:Math.cos(ang)*s,vy:Math.sin(ang)*s,r:rnd(2,4),c:b.c,life:rnd(0.3,0.5)});}
+  if(wavePop>=waveNeed){
+    score+=50;wave++;
+    addFloat(W/2,H/2,'清波!+50','#ffd166');
+    newWave();
+  }
+  upd();
+});
+function endGame(){
+  $i('ovt').textContent='时间到!';
+  $i('ovp').innerHTML='本局得分:<b>'+score+'</b><br>进行到第 '+wave+' 波(已戳 '+wavePop+'/'+waveNeed+')';
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

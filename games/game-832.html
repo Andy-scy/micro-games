@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流沙成画</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative;border-radius:12px;overflow:hidden;border:2px solid #713f12;background:#10141f;line-height:0}
+canvas{width:100%;height:auto;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(14,10,4,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px;line-height:1.7}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#422b05;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>流沙成画</h1>
+  <p class="hint">按住撒沙,沙粒受<b style="color:#fbbf24">重力</b>下落堆积;让沙子填满暗金色轮廓的 <b style="color:#fde047">70%</b> 就成画!<br>沙袋有限,撒到轮廓外就是浪费。</p>
+  <div class="hud"><span>画作 <b id="lv">1/3</b></span><span>覆盖率 <b id="cov">0%</b></span><span>余沙 <b id="sand">0</b></span></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="480"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">流沙成画</h2>
+      <p id="ovP">三幅沙画底稿:五角星、爱心、小房子。按住在轮廓内慢慢撒沙,沙会自然堆积;沙袋用完还没填够 70% 就算失败。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">提起沙袋</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var ov=$("ov"),ovT=$("ovT"),ovP=$("ovP"),ovS=$("ovS"),btnGo=$("btnGo");
+var elLv=$("lv"),elCov=$("cov"),elSand=$("sand");
+function starPts(cx,cy,R,r,n){
+  var pts=[],i;
+  for(i=0;i<n*2;i++){
+    var rad=(i%2===0)?R:r,a=-Math.PI/2+Math.PI*i/n;
+    pts.push([cx+rad*Math.cos(a),cy+rad*Math.sin(a)]);
+  }
+  return pts;
+}
+function heartPoly(cx,cy,s){
+  var pts=[],t;
+  for(t=0;t<Math.PI*2;t+=Math.PI/18){
+    var x=16*Math.pow(Math.sin(t),3);
+    var y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+    pts.push([cx+x*s,cy-y*s]);
+  }
+  return pts;
+}
+var N=96,CELL=5;
+var LV=[
+ {name:"五角星",polys:[starPts(48,52,40,17,5)]},
+ {name:"爱心",polys:[heartPoly(48,52,2.2)]},
+ {name:"小房子",polys:[[[48,12],[16,46],[80,46]],[[22,46],[74,46],[74,88],[22,88]]]}
+];
+var state="menu",lv=0,score=0,grid=null,tmask=null,tcnt=0,fixed=0,budget=0,grains=[],isDown=false,px=0,py=0;
+var tmp=document.createElement("canvas");tmp.width=N;tmp.height=N;
+var tctx=tmp.getContext("2d"),img=tctx.createImageData(N,N);
+function inPoly(x,y,pts){
+  var ins=false,i,j,n=pts.length;
+  for(i=0,j=n-1;i<n;j=i++){
+    if(((pts[i][1]>y)!==(pts[j][1]>y))&&(x<(pts[j][0]-pts[i][0])*(y-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0]))ins=!ins;
+  }
+  return ins;
+}
+function covNow(){return tcnt?fixed/tcnt*100:0;}
+function loadLevel(){
+  tmask=new Uint8Array(N*N);tcnt=0;fixed=0;
+  grid=new Uint8Array(N*N);grains=[];
+  var polys=LV[lv].polys,i,j,k;
+  for(i=0;i<N;i++)for(j=0;j<N;j++){
+    var x=i+0.5,y=j+0.5;
+    for(k=0;k<polys.length;k++){
+      if(inPoly(x,y,polys[k])){tmask[i*N+j]=1;tcnt++;break;}
+    }
+  }
+  budget=Math.round(tcnt*1.35);
+  elLv.textContent=(lv+1)+"/3";hud();render();
+}
+function hud(){
+  elCov.textContent=Math.floor(covNow())+"%";
+  elSand.textContent=budget;
+}
+function pos(e){
+  var r=cv.getBoundingClientRect(),t=e;
+  if(e.touches&&e.touches.length)t=e.touches[0];
+  else if(e.changedTouches&&e.changedTouches.length)t=e.changedTouches[0];
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+function begin(e){if(state!=="playing")return;var p=pos(e);isDown=true;px=p.x;py=p.y;}
+function moveP(e){if(!isDown)return;var p=pos(e);px=p.x;py=p.y;}
+function endP(){isDown=false;}
+cv.addEventListener("mousedown",begin);
+window.addEventListener("mousemove",moveP);
+window.addEventListener("mouseup",endP);
+cv.addEventListener("touchstart",function(e){e.preventDefault();begin(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();moveP(e);},{passive:false});
+cv.addEventListener("touchend",function(e){e.preventDefault();endP();},{passive:false});
+function emit(){
+  if(!isDown||budget<=0)return;
+  var cx=Math.floor(px/CELL),cy=Math.floor(py/CELL),k;
+  for(k=0;k<3;k++){
+    if(budget<=0)break;
+    var gx=Math.max(0,Math.min(N-1,cx+((Math.random()*3)|0)-1));
+    var gy=Math.max(0,Math.min(N-1,cy+((Math.random()*3)|0)-1));
+    if(grid[gx*N+gy]===0){grid[gx*N+gy]=2;grains.push({x:gx,y:gy});budget--;}
+  }
+  hud();
+}
+function step(){
+  var i=0;
+  while(i<grains.length){
+    var g=grains[i],ny=g.y+1,moved=false;
+    if(ny<N&&grid[ny*N+g.x]===0){
+      grid[g.y*N+g.x]=0;g.y=ny;grid[ny*N+g.x]=2;moved=true;
+    }else if(Math.random()<0.4){
+      var dir=Math.random()<0.5?-1:1,nx=g.x+dir;
+      if(nx>=0&&nx<N&&ny<N&&grid[ny*N+nx]===0){
+        grid[g.y*N+g.x]=0;g.x=nx;g.y=ny;grid[ny*N+nx]=2;moved=true;
+      }
+    }
+    if(!moved){
+      grid[g.y*N+g.x]=1;
+      if(tmask[g.y*N+g.x])fixed++;
+      grains.splice(i,1);
+    }else i++;
+  }
+}
+function render(){
+  var d=img.data,i,total=N*N;
+  for(i=0;i<total;i++){
+    var o=i*4;
+    if(grid[i]===1){d[o]=251;d[o+1]=191;d[o+2]=36;d[o+3]=255;}
+    else if(grid[i]===2){d[o]=253;d[o+1]=230;d[o+2]=138;d[o+3]=255;}
+    else if(tmask[i]){d[o]=94;d[o+1]=70;d[o+2]=16;d[o+3]=255;}
+    else{d[o]=16;d[o+1]=20;d[o+2]=31;d[o+3]=255;}
+  }
+  tctx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(tmp,0,0,480,480);
+}
+function finish(win){
+  state="over";
+  var c=Math.floor(covNow());
+  if(win){
+    score+=c;
+    if(lv>=2){
+      ovT.textContent="沙画大师!";
+      ovP.textContent="三幅流沙画全部完成,金黄的沙粒服服帖帖。";
+      ovS.style.display="block";ovS.textContent="总分 "+score;
+      btnGo.textContent="再来一局";
+    }else{
+      lv++;
+      ovT.textContent="成画!覆盖率 "+c+"%";
+      ovP.textContent="沙粒温顺地填满了轮廓,下一幅难度不变、构图更刁钻。";
+      ovS.style.display="block";ovS.textContent="得分 "+c+" · 总分 "+score;
+      btnGo.textContent="下一幅";
+    }
+  }else{
+    ovT.textContent="沙袋见底了";
+    ovP.textContent="覆盖率只有 "+c+"%,还差一点。慢一点撒,贴着轮廓内侧来。";
+    ovS.style.display="block";ovS.textContent="本幅覆盖率 "+c+"%";
+    btnGo.textContent="重撒本幅";
+  }
+  ov.classList.remove("hide");
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state!=="playing")return;
+  emit();
+  step();
+  hud();render();
+  if(covNow()>=70){finish(true);return;}
+  if(budget<=0&&grains.length===0){finish(false);return;}
+}
+btnGo.addEventListener("click",function(){
+  var fresh=state==="menu";
+  state="playing";
+  ovS.style.display="none";ov.classList.add("hide");
+  if(fresh){lv=0;score=0;}
+  loadLevel();
+});
+loadLevel();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

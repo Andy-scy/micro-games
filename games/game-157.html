@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>禅意花园</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0f1220; color: #e8eaf6; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.wrap { width: min(94vw, 470px); padding: 14px 0 30px; text-align: center; }
+h1 { font-size: 24px; color: #7c9cff; letter-spacing: 2px; margin-bottom: 10px; }
+.hud { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px; }
+.box { background: #1b2036; border-radius: 10px; padding: 5px 12px; min-width: 70px; }
+.lb { font-size: 11px; color: #8a93b5; }
+.vl { font-size: 17px; font-weight: 700; color: #ffd76a; }
+.hint { font-size: 12px; color: #8a93b5; line-height: 1.7; margin-bottom: 10px; min-height: 32px; }
+#board { position: relative; margin: 0 auto; background: #1b2036; border-radius: 12px; touch-action: none; -webkit-user-select: none; user-select: none; }
+#cells, #tiles { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.cell { position: absolute; background: #232a45; border-radius: 8px; }
+.cell.dim { background: #141828; }
+.tile { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 800; transition: left .12s ease, top .12s ease; }
+.tile.new { animation: pop .18s ease; }
+@keyframes pop { from { transform: scale(.3); } to { transform: scale(1); } }
+.b1 { background: #45507c; color: #eef1ff; }
+.b2 { background: #4d6ab2; color: #f2f5ff; }
+.b3 { background: #3f9ec9; color: #082633; }
+.b4 { background: #43c2a2; color: #073027; }
+.b5 { background: #e8b64c; color: #332302; }
+.b6 { background: #ef7048; color: #331104; }
+.k-neg { background: #c2566b; color: #fff0f3; }
+.k-ice { background: #9adcf0; color: #0b3542; box-shadow: inset 0 0 0 3px #e2f7ff; }
+.k-bomb { background: #e2632f; color: #fff2e8; animation: boom 1s ease infinite; }
+@keyframes boom { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
+.k-rock { background: #3c4258; color: #9aa3c0; }
+.btn { background: #7c9cff; color: #101426; border: none; border-radius: 10px; padding: 9px 20px; font-size: 14px; font-weight: 700; cursor: pointer; margin: 4px; }
+.btn.gray { background: #2a3152; color: #cdd5f5; }
+.tools { margin-top: 12px; }
+#overlay { position: fixed; left: 0; top: 0; right: 0; bottom: 0; background: rgba(8, 10, 20, .85); display: none; align-items: center; justify-content: center; z-index: 10; }
+#overlay.show { display: flex; }
+.panel { background: #1b2036; border: 1px solid #2c3357; border-radius: 16px; padding: 26px 32px; text-align: center; max-width: 86vw; }
+.panel h2 { font-size: 22px; margin-bottom: 10px; color: #ffd76a; }
+.panel p { color: #aab3d6; font-size: 14px; line-height: 1.8; margin-bottom: 16px; }
+.bar { height: 8px; background: #232a45; border-radius: 4px; overflow: hidden; margin: 0 0 10px; }
+.bar i { display: block; height: 100%; background: #7c9cff; width: 100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>禅意花园</h1>
+<div class="hud">
+<div class="box"><div class="lb">得分</div><div class="vl" id="score">0</div></div>
+<div class="box"><div class="lb">最大块</div><div class="vl" id="maxv">0</div></div>
+<div class="box"><div class="lb">步数</div><div class="vl" id="mvl">0</div></div>
+</div>
+<div class="hint" id="hint"></div>
+<div id="board"><div id="cells"></div><div id="tiles"></div></div>
+<div class="tools"><button class="btn gray" id="btnRestart">重新开始</button><button class="btn gray" id="btnEnd">结束本局</button></div>
+</div>
+<div id="overlay"><div class="panel">
+<h2 id="ovTitle"></h2>
+<p id="ovText"></p>
+<button class="btn" id="ovAgain">再来一局</button>
+<button class="btn gray" id="ovMore" style="display:none">继续挑战</button>
+</div></div>
+<script>
+'use strict';
+var N = 4, TARGET = 1024, ACT = N;
+var GAP = 10, CELL = 70;
+var grid = [], score = 0, moves = 0, maxv = 0;
+var over = true, won = false, tileSeq = 0, NULL_BONUS = 0;
+var mvlEl = $('mvl');
+var els = {};
+var board = document.getElementById('board');
+var cellsBox = document.getElementById('cells');
+var tilesBox = document.getElementById('tiles');
+var scoreEl = document.getElementById('score');
+var maxvEl = document.getElementById('maxv');
+var hintEl = document.getElementById('hint');
+var baseHint = '禅意花园:没有失败!盘面僵满时低阶方块会自动消散(禅之吐纳)。合出 1024 见本心,之后仍可继续。';
+
+function $(id) { return document.getElementById(id); }
+function mkTile(v, kind) { tileSeq += 1; return { id: tileSeq, v: v, kind: kind || 'n' }; }
+function cloneGrid(g) { var o = []; for (var i = 0; i < g.length; i++) o.push(g[i].slice()); return o; }
+function canMerge(a, b) { return a.kind === 'n' && b.kind === 'n' && a.v === b.v; }
+function mergeResult(a, b) { return mkTile(a.v * 2, 'n'); }
+function lineCells(g, dir, i) {
+  var arr = [];
+  for (var j = 0; j < ACT; j++) {
+    var r, c;
+    if (dir === 0) { r = i; c = j; }
+    else if (dir === 2) { r = i; c = ACT - 1 - j; }
+    else if (dir === 1) { r = j; c = i; }
+    else { r = ACT - 1 - j; c = i; }
+    arr.push({ r: r, c: c, t: g[r][c] });
+  }
+  return arr;
+}
+function applyMove(g, dir) {
+  var moved = false, gained = 0, mergeAt = [];
+  for (var i = 0; i < ACT; i++) {
+    var cells = lineCells(g, dir, i);
+    var tiles = [];
+    for (var j = 0; j < cells.length; j++) { if (cells[j].t) tiles.push(cells[j].t); }
+    var out = [], k = 0;
+    while (k < tiles.length) {
+      if (k + 1 < tiles.length && canMerge(tiles[k], tiles[k + 1])) { out.push({ a: tiles[k], b: tiles[k + 1] }); k += 2; }
+      else { out.push({ a: tiles[k], b: null }); k += 1; }
+    }
+    for (var m = 0; m < cells.length; m++) {
+      var p = cells[m];
+      if (m < out.length) {
+        var o = out[m];
+        if (o.b) {
+          var res = mergeResult(o.a, o.b);
+          if (res) { g[p.r][p.c] = res; mergeAt.push(p); gained += res.v; }
+          else { g[p.r][p.c] = null; gained += NULL_BONUS; }
+          moved = true;
+        } else {
+          if (g[p.r][p.c] !== o.a) moved = true;
+          g[p.r][p.c] = o.a;
+        }
+      } else {
+        if (g[p.r][p.c] !== null) moved = true;
+        g[p.r][p.c] = null;
+      }
+    }
+  }
+  return { moved: moved, gained: gained, mergeAt: mergeAt };
+}
+function emptyIn(g) {
+  var list = [];
+  for (var r = 0; r < ACT; r++) {
+    for (var c = 0; c < ACT; c++) { if (!g[r][c]) list.push({ r: r, c: c }); }
+  }
+  return list;
+}
+function anyMoveLeft() {
+  for (var d = 0; d < 4; d++) { if (applyMove(cloneGrid(grid), d).moved) return true; }
+  return false;
+}
+function maxTile() {
+  var m = 0;
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) { var t = grid[r][c]; if (t && t.v > m) m = t.v; }
+  }
+  return m;
+}
+function spawnVal() { return Math.random() < 0.9 ? 2 : 4; }
+function spawnOne() {
+  var l = emptyIn(grid);
+  if (!l.length) return null;
+  var p = l[Math.floor(Math.random() * l.length)];
+  grid[p.r][p.c] = mkTile(spawnVal(), 'n');
+  return p;
+}
+function colorClass(t) {
+  if (t.kind === 'rock') return 'k-rock';
+  if (t.kind === 'bomb') return 'k-bomb';
+  if (t.kind === 'ice') return 'k-ice';
+  if (t.kind === 'g') return 'k-neg';
+  var v = t.v;
+  if (v <= 4) return 'b1';
+  if (v <= 16) return 'b2';
+  if (v <= 64) return 'b3';
+  if (v <= 256) return 'b4';
+  if (v <= 1024) return 'b5';
+  return 'b6';
+}
+function render() {
+  if (grid.length !== N) return;
+  var seen = {};
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      var t = grid[r][c];
+      if (!t) continue;
+      seen[t.id] = true;
+      var el = els[t.id];
+      var isNew = false;
+      if (!el) {
+        el = document.createElement('div');
+        tilesBox.appendChild(el);
+        els[t.id] = el;
+        isNew = true;
+      }
+      var txt;
+      if (t.kind === 'bomb') txt = String(t.timer);
+      else if (t.kind === 'rock') txt = '岩';
+      else txt = String(t.v);
+      el.style.width = CELL + 'px';
+      el.style.height = CELL + 'px';
+      el.style.left = (GAP + c * (CELL + GAP)) + 'px';
+      el.style.top = (GAP + r * (CELL + GAP)) + 'px';
+      var fs = CELL * (txt.length <= 2 ? 0.42 : (txt.length === 3 ? 0.36 : (txt.length === 4 ? 0.3 : 0.24)));
+      el.style.fontSize = fs + 'px';
+      el.textContent = txt;
+      el.className = isNew ? ('tile new ' + colorClass(t)) : ('tile ' + colorClass(t));
+    }
+  }
+  for (var id in els) {
+    if (!seen[id]) { tilesBox.removeChild(els[id]); delete els[id]; }
+  }
+  scoreEl.textContent = String(score);
+  maxvEl.textContent = String(maxv);
+  updateHud();
+}
+function updateHud() { mvlEl.textContent = String(moves); }
+var ovBox = $('overlay');
+var ovTitle = $('ovTitle');
+var ovText = $('ovText');
+var ovMore = $('ovMore');
+function showOverlay(title, text, more) {
+  ovTitle.textContent = title;
+  ovText.textContent = text;
+  ovMore.style.display = more ? 'inline-block' : 'none';
+  ovBox.classList.add('show');
+  over = true;
+}
+function hideOverlay() { ovBox.classList.remove('show'); }
+function flashHint(msg) {
+  hintEl.textContent = msg;
+  window.setTimeout(function() { if (!over) hintEl.textContent = baseHint; }, 1400);
+}
+function onMoved(res) { spawnOne(); }
+function onWin() { showOverlay('胜利!合成了 2048!', '得分 ' + score + ',共 ' + moves + ' 步。可以继续冲击 4096!', true); }
+function onStuck() { showOverlay('无路可走', '最终得分 ' + score + ',最大块 ' + maxv + '。再来一局吧!', false); }
+function afterChecks() {
+  if (over) return;
+  if (!won && maxv >= TARGET) {
+    won = true;
+    showOverlay('心如止水', '合成了 1024,本心自见!得分 ' + score + '。可继续禅修,也可再来一局。', true);
+    return;
+  }
+  if (!anyMoveLeft()) {
+    var tiers = [4, 8, 16, 32, 64, 128, 256];
+    for (var i = 0; i < tiers.length; i++) {
+      if (clearBelow(tiers[i])) break;
+    }
+    if (emptyIn(grid).length === 0) clearAll();
+    spawnOne();
+    spawnOne();
+    flashHint('禅之吐纳:僵局化解,低阶方块化风而散。');
+    render();
+  }
+}
+function clearBelow(cap) {
+  var any = false;
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      var t = grid[r][c];
+      if (t && t.v <= cap) { grid[r][c] = null; any = true; }
+    }
+  }
+  return any;
+}
+function clearAll() {
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) grid[r][c] = null;
+  }
+}
+function tryMove(d) {
+  if (over) return;
+  var res = applyMove(grid, d);
+  if (!res.moved) return;
+  score += res.gained;
+  moves += 1;
+  maxv = maxTile();
+  onMoved(res);
+  render();
+  afterChecks();
+}
+function onDir(d) { tryMove(d); }
+function initSpawn() { spawnOne(); spawnOne(); }
+function onRestart() {}
+function restart() {
+  score = 0; moves = 0; maxv = 0; won = false; over = false; tileSeq = 0;
+  grid = [];
+  for (var r = 0; r < N; r++) {
+    var row = [];
+    for (var c = 0; c < N; c++) row.push(null);
+    grid.push(row);
+  }
+  els = {};
+  tilesBox.innerHTML = '';
+  onRestart();
+  initSpawn();
+  render();
+  hideOverlay();
+}
+function layout() {
+  var bs = Math.min(460, document.documentElement.clientWidth - 24);
+  GAP = N <= 3 ? 10 : (N <= 5 ? 8 : 6);
+  CELL = Math.floor((bs - GAP * (N + 1)) / N);
+  if (CELL < 34) CELL = 34;
+  var real = CELL * N + GAP * (N + 1);
+  board.style.width = real + 'px';
+  board.style.height = real + 'px';
+  cellsBox.innerHTML = '';
+  for (var r = 0; r < N; r++) {
+    for (var c = 0; c < N; c++) {
+      var d = document.createElement('div');
+      d.className = 'cell';
+      d.style.width = CELL + 'px';
+      d.style.height = CELL + 'px';
+      d.style.left = (GAP + c * (CELL + GAP)) + 'px';
+      d.style.top = (GAP + r * (CELL + GAP)) + 'px';
+      cellsBox.appendChild(d);
+    }
+  }
+  render();
+}
+$('btnRestart').addEventListener('click', restart);
+$('ovAgain').addEventListener('click', restart);
+ovMore.addEventListener('click', function() { hideOverlay(); over = false; });
+window.addEventListener('keydown', function(e) {
+  var d = -1;
+  var k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') d = 0;
+  else if (k === 'ArrowUp' || k === 'w' || k === 'W') d = 1;
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') d = 2;
+  else if (k === 'ArrowDown' || k === 's' || k === 'S') d = 3;
+  if (d >= 0) { e.preventDefault(); onDir(d); }
+});
+var tstart = null;
+board.addEventListener('touchstart', function(e) {
+  if (e.touches.length === 1) tstart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  e.preventDefault();
+}, { passive: false });
+board.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  if (!tstart) return;
+  var dx = e.changedTouches[0].clientX - tstart.x;
+  var dy = e.changedTouches[0].clientY - tstart.y;
+  tstart = null;
+  if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
+  var d;
+  if (Math.abs(dx) > Math.abs(dy)) d = (dx > 0 ? 2 : 0); else d = (dy > 0 ? 3 : 1);
+  onDir(d);
+}, { passive: false });
+$('btnEnd').addEventListener('click', function() {
+  if (!over) showOverlay('本局收官', '得分 ' + score + ' · 最大块 ' + maxv + ' · 共 ' + moves + ' 步。禅意常在,欢迎再来一局。', false);
+});
+layout();
+restart();
+</script>
+</body>
+</html>

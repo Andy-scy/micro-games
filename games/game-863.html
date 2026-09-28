@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>潜水龟阵</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>潜水龟阵</h1>
+<p class="tip">河面上的乌龟群会周期性下潜!冒气泡表示即将下潜,完全没入时踩上去会溺水。<br>中间一排石墩可以歇脚。登上对岸进入下一轮,龟群会越游越快。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>渡河 <b id="sC">0</b> 次</span></div>
+<canvas id="cv" width="420" height="480"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,ROWS=12,LOOP=660,OFF=120,CYCLE=6.5;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sC=document.getElementById("sC");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var lanes,frog,score,lives,crossing,mul,deadT,state,gt=0;
+var moving=false,fx0=0,fy0=0,fx1=0,fy1=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function buildLanes(){
+  lanes=[];var r;
+  for(r=1;r<=10;r++){
+    if(r===5)continue;
+    var dir=r%2===0?1:-1;
+    var speed=rnd(26,58)*mul;
+    var x0=rnd(0,LOOP),gps=[],i;
+    for(i=0;i<3;i++)gps.push({x:(x0+i*220+rnd(-15,15)+LOOP)%LOOP,len:(i%2===0?120:80),off:rnd(0,CYCLE)});
+    lanes.push({r:r,dir:dir,speed:speed,gps:gps});
+  }
+}
+function laneByRow(r){var i;for(i=0;i<lanes.length;i++)if(lanes[i].r===r)return lanes[i];return null;}
+function phaseOf(g){return (gt+g.off)%CYCLE;}
+function standable(g){return phaseOf(g)<4.4;}
+function under(g){var p=phaseOf(g);return p>=4.4&&p<6.0;}
+function support(r){
+  var ln=laneByRow(r);
+  if(!ln)return true;
+  var i,g,dx;
+  for(i=0;i<ln.gps.length;i++){
+    g=ln.gps[i];dx=g.x-OFF;
+    if(frog.x>dx+5&&frog.x<dx+g.len-5&&standable(g))return true;
+  }
+  return false;
+}
+function updHud(){sS.textContent=score;sL.textContent=lives;sC.textContent=crossing;}
+function resetFrog(){frog={x:210,y:11*CELL,r:11};moving=false;}
+function reset(){score=0;lives=3;crossing=0;mul=1;deadT=0;buildLanes();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.7;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",msg+" 最终得分 "+score+",共渡河 "+crossing+" 次。");}
+}
+function arrive(){
+  if(frog.r===0){
+    score+=200+crossing*25;crossing++;mul=1+crossing*0.07;
+    buildLanes();resetFrog();updHud();
+    return;
+  }
+  if(frog.r<=10&&frog.r!==5&&!support(frog.r))die("踩空了,落水!");
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var r=frog.r,x=frog.x;
+  if(d==="up")r--;else if(d==="down")r++;else if(d==="left")x-=40;else x+=40;
+  r=Math.max(0,Math.min(11,r));x=Math.max(15,Math.min(405,x));
+  fx0=frog.x;fy0=frog.y;fx1=x;fy1=r*CELL;mt=0;moving=true;frog.r=r;
+}
+function update(dt){
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0)resetFrog();return;}
+  var i,g,ln;
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];
+    for(g=0;g<ln.gps.length;g++)ln.gps[g].x=(ln.gps[g].x+ln.dir*ln.speed*dt+LOOP)%LOOP;
+  }
+  if(moving){
+    mt+=dt/0.13;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=fx0+(fx1-fx0)*mt;frog.y=fy0+(fy1-fy0)*mt;
+    if(!moving)arrive();
+  }else if(frog.r>=1&&frog.r<=10&&frog.r!==5){
+    ln=laneByRow(frog.r);
+    if(!support(frog.r)){die("乌龟下潜,落水了!");return;}
+    frog.x+=ln.dir*ln.speed*dt;
+    if(frog.x<14||frog.x>406){die("被水流冲出了河道!");return;}
+  }
+}
+function drawTurtle(x,y,alpha){
+  ctx.globalAlpha=alpha;
+  ctx.fillStyle="#2f8f5b";
+  ctx.beginPath();ctx.arc(x,y+20,13,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#1f6b40";
+  ctx.beginPath();ctx.arc(x,y+20,7,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#57b57c";
+  ctx.beginPath();ctx.arc(x-4,y+8,4,0,Math.PI*2);ctx.arc(x+4,y+8,4,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=1;
+}
+function draw(){
+  var r,i,g,ln,dx,p;
+  for(r=0;r<ROWS;r++){
+    ctx.fillStyle=(r===0||r===11)?"#1e3b26":(r===5?"#3a4152":"#16305e");
+    ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  for(i=0;i<5;i++){
+    ctx.fillStyle="#4a5266";rr(20+i*84,5*CELL+10,52,22,6);ctx.fill();
+    ctx.fillStyle="#333a4d";rr(28+i*84,5*CELL+15,36,10,4);ctx.fill();
+  }
+  ctx.strokeStyle="rgba(120,170,255,.15)";ctx.lineWidth=2;
+  for(i=0;i<4;i++){
+    var wx=((gt*26+i*120)%460)-20;
+    ctx.beginPath();ctx.arc(wx,3*CELL+10,8,Math.PI,Math.PI*2);ctx.stroke();
+  }
+  for(i=0;i<lanes.length;i++){
+    ln=lanes[i];
+    for(g=0;g<ln.gps.length;g++){
+      var gr=ln.gps[g];dx=gr.x-OFF;
+      if(dx>420||dx+gr.len<0)continue;
+      p=phaseOf(gr);
+      if(p>=4.4){
+        var n=gr.len/40,b2;
+        ctx.fillStyle="rgba(190,220,255,"+(0.25+0.2*Math.sin(gt*8))+")";
+        for(b2=0;b2<n;b2++){
+          ctx.beginPath();ctx.arc(dx+20+b2*40,ln.r*CELL+18,4,0,Math.PI*2);ctx.fill();
+          ctx.beginPath();ctx.arc(dx+30+b2*40,ln.r*CELL+10,3,0,Math.PI*2);ctx.fill();
+        }
+      }else{
+        var a=p<3.6?1:(Math.floor(gt*8)%2===0?1:0.35),t2;
+        for(t2=0;t2<gr.len/40;t2++)drawTurtle(dx+20+t2*40,ln.r*CELL,a);
+      }
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,160,420,110);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,210);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";ctx.fillText("气泡=将下潜 · 没入=危险 · 石墩=安全",210,240);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("潜水龟阵","乌龟群会下潜:冒泡是警告,没入时踩上去必溺水。借着浮出水面的时机跳跃,中途可在一排石墩上休息。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

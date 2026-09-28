@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>摆锤惊魂</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f87171;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f87171;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#3d0a0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>摆锤惊魂</h1>
+  <p class="hint">方向键 / 按住屏幕左右半侧 移动 · 躲开左右横扫的钢铁摆锤,活越久分越高</p>
+  <div class="hud">
+    <span>生存 <b id="time">0.0</b>s</span>
+    <span>摆速 <b id="mul">x1.0</b></span>
+    <span>最佳 <b id="best">0.0</b>s</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">摆锤惊魂</h2>
+      <p id="ovDesc">六只巨大的钢铁摆锤在天顶来回横扫,长短不一、节奏各异。左右移动你脚下的小球,在摆锤的缝隙间穿行求生。每隔一段时间摆速还会提升——被击中即结束!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,GY=470,BR=10,BOB=15;
+function $(id){return document.getElementById(id);}
+var elTime=$("time"),elMul=$("mul"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s390");
+var PENDS=[
+ {x:80,L:340,A:0.6,w:0.0023,ph:0},
+ {x:190,L:470,A:0.42,w:0.0017,ph:2.0},
+ {x:300,L:340,A:0.6,w:0.0025,ph:4.0},
+ {x:410,L:470,A:0.42,w:0.0019,ph:1.0},
+ {x:135,L:440,A:0.38,w:0.0021,ph:3.1},
+ {x:365,L:440,A:0.38,w:0.0027,ph:5.2}
+];
+var state,px,pvx,t,alive,mul,mulT,keyL,keyR,touchDir;
+function reset(){
+  px=W/2;pvx=0;t=0;mul=1;mulT=0;keyL=false;keyR=false;touchDir=0;
+}
+function surviveTime(){return Math.floor(t/100)/10;}
+function finish(){
+  state="over";
+  var sc=surviveTime();
+  if(sc>best){best=sc;saveBest("mg_s390",best);}
+  ovT.textContent="被击中!";
+  ovD.textContent="钢铁摆锤无情地扫中了小球。找准节奏,下一回合活得更久!";
+  ovS.style.display="block";ovS.textContent="生存 "+sc+"s · 最佳 "+best+"s";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){keyL=true;e.preventDefault();}
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){keyR=true;e.preventDefault();}
+  if((e.key===" "||e.key==="Enter")&&state!=="playing"){e.preventDefault();startGame();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+function tDir(e){
+  var r=cv.getBoundingClientRect(),tc=e.touches[0];
+  return((tc.clientX-r.left)*W/r.width)<W/2?-1:1;
+}
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  touchDir=tDir(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing")return;
+  touchDir=tDir(e);e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchDir=0;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+function bobPos(p,tt){
+  var th=p.A*Math.sin(p.w*mul*tt+p.ph);
+  return{x:p.x+p.L*Math.sin(th),y:p.L*Math.cos(th),th:th};
+}
+var lastT=0;
+function loop(ms){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=ms;
+  var dt=Math.min(40,ms-lastT);lastT=ms;
+  if(state==="playing"){
+    t+=dt;mulT+=dt;
+    if(mulT>20000&&mul<1.8){mul=Math.min(1.8,mul*1.12);mulT=0;}
+    var dir=(keyL?-1:0)+(keyR?1:0)+touchDir;
+    pvx+=dir*0.0007*dt;
+    pvx*=1-0.003*dt;
+    if(pvx>0.5)pvx=0.5;if(pvx<-0.5)pvx=-0.5;
+    px+=pvx*dt;
+    if(px<BR+6){px=BR+6;pvx=0;}
+    if(px>W-BR-6){px=W-BR-6;pvx=0;}
+    var i;
+    for(i=0;i<PENDS.length;i++){
+      var b=bobPos(PENDS[i],t);
+      var dx=b.x-px,dy=b.y-(GY-BR);
+      if(dx*dx+dy*dy<(BR+BOB-3)*(BR+BOB-3)){finish();break;}
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1124";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1c2547";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2b3663";ctx.fillRect(0,GY,W,4);
+  ctx.fillStyle="#2c3a5e";ctx.fillRect(0,0,W,12);
+  for(i=0;i<PENDS.length;i++){
+    var p=PENDS[i],b=bobPos(p,t);
+    ctx.strokeStyle="rgba(248,113,113,0.12)";ctx.lineWidth=2;
+    ctx.setLineDash([3,7]);
+    ctx.beginPath();
+    ctx.arc(p.x,0,p.L,Math.PI/2-p.A,Math.PI/2+p.A);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle="#94a3b8";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(p.x,0);ctx.lineTo(b.x,b.y);ctx.stroke();
+    ctx.fillStyle="#64748b";
+    ctx.beginPath();ctx.arc(p.x,4,7,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#cbd5e1";
+    ctx.shadowColor="#f87171";ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(b.x,b.y,BOB,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle="#f87171";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(b.x,b.y,BOB,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.fillStyle="#f87171";
+  ctx.shadowColor="#f87171";ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(px,GY-BR,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#3d0a0a";
+  ctx.beginPath();ctx.arc(px-3,GY-BR-3,3,0,Math.PI*2);ctx.fill();
+  if(state==="playing"){
+    ctx.fillStyle="rgba(139,144,176,0.6)";ctx.font="12px system-ui";ctx.textAlign="center";
+    ctx.fillText("◀ 左右移动 ▶",W/2,GY+30);
+    ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

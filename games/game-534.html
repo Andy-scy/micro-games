@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六合连珠</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#c77dff;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#c77dff;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#c77dff}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#c77dff;color:#2c0a44;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>六合连珠</h1>
+  <p class="hint">点击空六边格放置数字块<br>新块的邻居中有 2 个以上同级块,全体聚合成高一格!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>下一个 <b id="next">·</b></span>
+    <span>最高 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="340" height="330"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">六合连珠</h2>
+      <p id="ovP">六向六合,聚三成变\n一口气合出 128 荣耀大满贯!盘满即败</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var W=340,H=330,S=17,CX=170,CY=165;
+var DIRS=[[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ffd166'];
+var cells=[],cur=1,nxt=1,score=0,best=0,state='ready',flashes=[],crown=false;
+function key(q,r){return q+','+r;}
+function build(){
+  cells=[];
+  var q,r;
+  for(q=-3;q<=3;q++)for(r=-3;r<=3;r++){
+    if(Math.abs(q+r)<=3){
+      cells.push({q:q,r:r,x:CX+S*Math.sqrt(3)*(q+r/2),y:CY+S*1.5*r,e:0});
+    }
+  }
+}
+function find(q,r){
+  var i;
+  for(i=0;i<cells.length;i++)if(cells[i].q===q&&cells[i].r===r)return cells[i];
+  return null;
+}
+function neighbors(c){
+  var out=[],i;
+  for(i=0;i<6;i++){
+    var n=find(c.q+DIRS[i][0],c.r+DIRS[i][1]);
+    if(n)out.push(n);
+  }
+  return out;
+}
+function val(e){return Math.pow(2,e);}
+function randE(){var r=Math.random();return r<0.6?1:(r<0.9?2:3);}
+function addScore(n){score+=n;if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function flash(c,e){flashes.push({c:c,t:0,e:e});}
+function resolve(c){
+  var guard=0,changed=true;
+  while(changed&&guard<30){
+    guard++;changed=false;
+    var e=grid_e(c),nb=neighbors(c),mates=[],i;
+    for(i=0;i<nb.length;i++)if(nb[i].e===e)mates.push(nb[i]);
+    if(mates.length>=2){
+      for(i=0;i<mates.length;i++){mates[i].e=0;flash(mates[i],e);}
+      c.e=e+1;flash(c,e+1);
+      addScore((e+1)*mates.length*10);
+      if(e+1>=7&&!crown){crown=true;addScore(1500);}
+      changed=true;
+    }
+  }
+}
+function grid_e(c){return c.e;}
+function emptyCount(){
+  var n=0,i;
+  for(i=0;i<cells.length;i++)if(cells[i].e===0)n++;
+  return n;
+}
+function place(c){
+  if(state!=='play'||c.e!==0)return;
+  c.e=cur;
+  flash(c,cur);
+  var nb=neighbors(c),k=0,i;
+  for(i=0;i<nb.length;i++)if(nb[i].e===c.e)k++;
+  if(k>=2)resolve(c);
+  cur=nxt;nxt=randE();$('next').textContent=String(val(nxt));
+  if(emptyCount()===0)finish();
+}
+function finish(){
+  state='over';
+  $('ovT').textContent='六边盘满';
+  $('ovP').textContent='无处落子,六合归于一统';
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  build();score=0;crown=false;flashes=[];
+  cur=randE();nxt=randE();
+  $('score').textContent='0';$('next').textContent=String(val(nxt));$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function clickAt(x,y){
+  var bestC=null,bd=1e9,i;
+  for(i=0;i<cells.length;i++){
+    var dx=cells[i].x-x,dy=cells[i].y-y,d=dx*dx+dy*dy;
+    if(d<bd){bd=d;bestC=cells[i];}
+  }
+  if(bestC&&bd<S*S*0.9)place(bestC);
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*W/rc.width,(e.clientY-rc.top)*H/rc.height);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*W/rc.width,(t.clientY-rc.top)*H/rc.height);
+  e.preventDefault();
+},{passive:false});
+function hexPath(x,y,s){
+  var i;
+  ctx.beginPath();
+  for(i=0;i<6;i++){
+    var a=Math.PI/180*(60*i-30);
+    var px=x+s*Math.cos(a),py=y+s*Math.sin(a);
+    if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,W,H);
+  var i,j;
+  for(i=0;i<cells.length;i++){
+    var c=cells[i];
+    hexPath(c.x,c.y,S-1.5);
+    if(c.e>0){
+      ctx.fillStyle=CCOL[Math.min(c.e,7)];ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,.3)';ctx.lineWidth=1.5;ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,.92)';
+      ctx.font='700 '+Math.min(17,10+c.e*1.3)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(val(c.e)),c.x,c.y+1);
+    }else{
+      ctx.strokeStyle='rgba(199,125,255,.18)';ctx.lineWidth=1;ctx.stroke();
+    }
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=2.5;
+    hexPath(f.c.x,f.c.y,S-1+pr*6);ctx.stroke();
+    ctx.restore();
+  }
+  if(state==='play'){
+    ctx.fillStyle='rgba(199,125,255,.75)';
+    ctx.font='12px system-ui';ctx.textAlign='center';
+    ctx.fillText('落子 '+ (37-emptyCount()) +'/37',170,318);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  var i,k=[];
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  if(state==='play'){/* 等待点击 */}
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

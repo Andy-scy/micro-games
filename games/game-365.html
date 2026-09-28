@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>越打越快</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#2b1d04;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>越打越快</h1>
+  <p class="hint">光圈收缩到圆心的一瞬敲击 · 每次命中节拍都会加速 · 空格 / 点击 / 触屏</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">越打越快</h2>
+      <p id="ovDesc">没有音符,只有节拍本身。
+每敲对一次,速度 +2 BPM,从 70 一直飙到 240!
+在 240 BPM 下仍稳如磐石即为大满贯;
+失手 3 次游戏结束。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovScore=$("ovScore"),ovDesc=$("ovDesc"),btnGo=$("btnGo");
+var W=480,H=560,CX=240,CY=280;
+var BPM0=70,BPMAX=240;
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_g365");
+
+var AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(type,f0,f1,dur,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);
+  if(f1>0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+dur);
+}
+function sTick(bpm){tone("square",480+bpm*1.2,0,0.06,0.16);}
+function sPerfect(){tone("triangle",900,1500,0.12,0.22);}
+function sGood(){tone("triangle",640,640,0.08,0.18);}
+function sMiss(){tone("sawtooth",200,90,0.28,0.22);}
+
+var state="menu",bpm,score,combo,life,maxCombo,hits,ticks,nextT,lastT,flashes;
+function reset(){
+  bpm=BPM0;score=0;combo=0;life=3;maxCombo=0;hits=0;
+  ticks=[];
+  lastT=0;
+  nextT=performance.now()+1500;
+  flashes=[];
+  upd();
+}
+function start(){audio();reset();state="play";ov.classList.add("hide");}
+function upd(){
+  elScore.textContent=score;
+  elCombo.textContent=combo;
+  elLife.textContent=life;
+  elBest.textContent=best;
+}
+function addPop(txt,color){flashes.push({txt:txt,color:color,t0:performance.now()});}
+function beatInt(){return 60000/bpm;}
+function win(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g365",best);}
+  upd();
+  ovTitle.textContent="节奏大师!";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="你在 "+BPMAX+" BPM 下依然稳如节拍器,\n共命中 "+hits+" 拍 · 最高连击 "+maxCombo+"!";
+  btnGo.textContent="再战一次";
+  ov.classList.remove("hide");
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_g365",best);}
+  upd();
+  ovTitle.textContent="节拍脱轨";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  ovDesc.textContent="止步于 "+bpm+" BPM · 共命中 "+hits+" 拍\n最高连击 "+maxCombo;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function schedule(now){
+  if(now-nextT>4000)nextT=now+400;
+  while(nextT-now<600){
+    ticks.push({t:nextT,used:false,run:false});
+    nextT+=beatInt();
+  }
+  var i,tk;
+  for(i=ticks.length-1;i>=0;i--){
+    tk=ticks[i];
+    if(!tk.run&&now>=tk.t){tk.run=true;sTick(bpm);}
+    if(tk.run&&!tk.used&&now>tk.t+180){
+      tk.used=true;
+      combo=0;life--;sMiss();
+      addPop("失拍!","#f87171");
+      upd();
+      if(life<=0){gameOver();return;}
+    }
+    if(tk.used&&now>tk.t+400)ticks.splice(i,1);
+  }
+}
+function press(){
+  if(state!=="play")return;
+  var now=performance.now(),i,k,dt,bi=-1,bd=1e9;
+  for(i=0;i<ticks.length;i++){
+    k=ticks[i];if(k.used)continue;
+    dt=now-k.t;
+    if(Math.abs(dt)>170)continue;
+    if(Math.abs(dt)<Math.abs(bd)){bd=dt;bi=i;}
+  }
+  if(bi<0){addPop("乱拍","#8b90b0");combo=0;upd();return;}
+  k=ticks[bi];k.used=true;hits++;
+  if(Math.abs(bd)<=70){
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=200+combo*8;
+    if(bpm<BPMAX)bpm=Math.min(BPMAX,bpm+3);
+    addPop("PERFECT +"+(200+combo*8),"#fbbf24");sPerfect();
+  }else{
+    combo++;if(combo>maxCombo)maxCombo=combo;
+    score+=80+combo*4;
+    if(bpm<BPMAX)bpm=Math.min(BPMAX,bpm+1);
+    addPop("GOOD +"+(80+combo*4),"#fbbf24");sGood();
+  }
+  upd();
+  if(bpm>=BPMAX)win();
+}
+function draw(now){
+  var i;
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,0,W,H);
+  var k=(nextT-now)/beatInt();
+  if(k<0)k=0;if(k>1)k=1;
+  ctx.strokeStyle="rgba(251,191,36,0.18)";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(CX,CY,190,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle="rgba(251,191,36,0.9)";ctx.lineWidth=5;
+  ctx.beginPath();ctx.arc(CX,CY,20+k*170,0,Math.PI*2);ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle="#0f1220";
+  ctx.beginPath();ctx.arc(CX,CY,20,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#fbbf24";
+  ctx.font="bold 44px system-ui";ctx.textAlign="center";
+  ctx.fillText(Math.round(bpm),CX,CY-70);
+  ctx.font="15px system-ui";ctx.fillStyle="#8b90b0";
+  ctx.fillText("BPM",CX,CY-46);
+  ctx.font="bold 20px system-ui";ctx.fillStyle="#e8eaf6";
+  ctx.fillText("连击 "+combo,CX,CY+66);
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=(now-f.t0)/600;
+    if(pr>1)continue;
+    ctx.fillStyle=f.color;ctx.globalAlpha=1-pr;
+    ctx.font="bold 18px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,CX,CY+120-pr*30);
+    ctx.globalAlpha=1;
+  }
+  for(i=flashes.length-1;i>=0;i--){if(now-flashes[i].t0>620)flashes.splice(i,1);}
+}
+function onTap(){press();}
+if(window.PointerEvent){
+  cv.addEventListener("pointerdown",function(e){e.preventDefault();onTap();});
+}else{
+  cv.addEventListener("mousedown",function(e){onTap();});
+  cv.addEventListener("touchstart",function(e){e.preventDefault();onTap();},{passive:false});
+}
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.key===" "){
+    e.preventDefault();
+    if(state!=="play")start();
+    else press();
+  }
+});
+btnGo.addEventListener("click",start);
+
+upd();
+requestAnimationFrame(function loop(){
+  var now=performance.now();
+  if(state==="play")schedule(now);
+  draw(now);
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>轮转三连</title>
+<style>
+:root{--bg:#0f1220;--p1:#4fd1c5;--p2:#f6ad55;--txt:#e9edf8;--dim:#8b93b0;--card:#1b2138;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px;}
+#box{width:100%;max-width:460px;}
+h1{text-align:center;font-size:22px;margin-bottom:6px;}
+#tip{text-align:center;color:var(--dim);font-size:13px;margin-bottom:10px;line-height:1.7;}
+#card{background:var(--card);border-radius:16px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.45);}
+#sc{display:flex;justify-content:space-between;font-weight:700;font-size:14px;margin-bottom:10px;}
+#st{text-align:center;font-size:14px;color:var(--dim);margin-bottom:10px;min-height:20px;}
+#bd{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border:3px solid #2a3354;border-radius:12px;padding:8px;}
+#bd.t1{border-color:var(--p1);}#bd.t2{border-color:var(--p2);}
+.cell{aspect-ratio:1;background:#10152b;border:2px solid #232c4d;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;font-family:inherit;color:transparent;}
+.cell:hover{border-color:#4a5a8f;}
+.cell.d1{color:var(--p1);border-color:rgba(79,209,197,.6);}
+.cell.d2{color:var(--p2);border-color:rgba(246,173,85,.6);}
+.cell.old{opacity:.4;}
+.cell.winl{background:#2a3354;border-color:#f6c945;}
+#banner{text-align:center;font-weight:700;font-size:15px;min-height:22px;margin-top:12px;color:#f6c945;}
+#again{display:none;margin:12px auto 0;background:var(--p1);border:none;color:#06222b;font-size:15px;font-weight:700;padding:9px 34px;border-radius:999px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="box">
+<h1>轮转三连</h1>
+<div id="tip">三连棋新规则:每人最多同时占 3 格,落下第 4 子时自己最早的棋子会消失(半透明提示)· 场上永远不会下满,先连成一线者赢回合 · 先胜 3 回合者夺冠</div>
+<div id="card">
+ <div id="sc"><span id="sc1">玩家1 0 胜</span><span id="rT">第 1 回合</span><span id="sc2">0 胜 玩家2</span></div>
+ <div id="st">轮到 玩家1 落子</div>
+ <div id="bd"></div>
+ <div id="banner">率先连成一线者拿下回合!</div>
+ <button id="again">再来一局</button>
+</div>
+</div>
+<script>
+"use strict";
+var bd=document.getElementById("bd"),stEl=document.getElementById("st"),sc1=document.getElementById("sc1"),sc2=document.getElementById("sc2"),rT=document.getElementById("rT"),banner=document.getElementById("banner"),again=document.getElementById("again");
+var LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+var cellsEls=[];
+(function(){
+ var i;
+ for(i=0;i<9;i++){
+  var b=document.createElement("button");
+  b.className="cell";
+  b.addEventListener("click",onCell(i));
+  bd.appendChild(b);
+  cellsEls.push(b);
+ }
+})();
+function onCell(i){return function(){place(i);};}
+function reset(){
+ st={cells:[null,null,null,null,null,null,null,null,null],his:[[],[]],turn:0,score:[0,0],round:1,lock:false,bannerT:0,over:false};
+ again.style.display="none";
+ renderAll();
+ banner.textContent="率先连成一线者拿下回合!";
+}
+function winLine(p){
+ var k,L;
+ for(k=0;k<LINES.length;k++){
+  L=LINES[k];
+  if(st.cells[L[0]]===p&&st.cells[L[1]]===p&&st.cells[L[2]]===p)return L;
+ }
+ return null;
+}
+function place(i){
+ if(st.lock||st.over||st.cells[i]!==null)return;
+ var p=st.turn;
+ st.cells[i]=p;
+ st.his[p].push(i);
+ if(st.his[p].length>3){
+  var old=st.his[p].shift();
+  st.cells[old]=null;
+ }
+ var wl=winLine(p);
+ if(wl){
+  st.lock=true;st.bannerT=110;
+  st.score[p]++;st.winner=p;st.wl=wl;
+  banner.textContent=(p===0?"玩家1":"玩家2")+"连成一线,拿下本回合!";
+ }else{
+  st.turn=1-p;
+ }
+ renderAll();
+}
+function renderAll(){
+ var i,p;
+ for(i=0;i<9;i++){
+  var el=cellsEls[i],v=st.cells[i];
+  el.className="cell";
+  el.textContent="";
+  if(v!==null){
+   el.classList.add(v===0?"d1":"d2");
+   el.textContent=v===0?"甲":"乙";
+   if(st.his[v][0]===i)el.classList.add("old");
+  }
+ }
+ if(st.wl){
+  for(i=0;i<3;i++)cellsEls[st.wl[i]].classList.add("winl");
+ }
+ bd.classList.toggle("t1",st.turn===0&&!st.lock);
+ bd.classList.toggle("t2",st.turn===1&&!st.lock);
+ sc1.textContent="玩家1 "+st.score[0]+" 胜";
+ sc2.textContent=st.score[1]+" 胜 玩家2";
+ rT.textContent="第 "+st.round+" 回合";
+ if(!st.lock&&!st.over)stEl.textContent="轮到 "+(st.turn===0?"玩家1(甲)":"玩家2(乙)")+" 落子";
+ else stEl.textContent=st.lock?"本回合结束,稍候……":"比赛结束";
+}
+function nextRound(){
+ if(st.score[0]>=3||st.score[1]>=3){
+  st.over=true;
+  var w=st.score[0]>=3?0:1;
+  banner.textContent=(w===0?"玩家1":"玩家2")+" 以 "+st.score[0]+" : "+st.score[1]+" 夺冠!";
+  renderAll();
+  again.style.display="block";
+  return;
+ }
+ var s0=st.score[0],s1=st.score[1],r=st.round+1;
+ st.round=r;
+ st.cells=[null,null,null,null,null,null,null,null,null];
+ st.his=[[],[]];
+ st.turn=(r-1)%2;
+ st.lock=false;st.wl=null;
+ renderAll();
+ banner.textContent="率先连成一线者拿下回合!";
+}
+var last=0;
+function loop(t){
+ var dt=Math.min(2.5,(t-last)/16.67||1);last=t;
+ if(st.lock&&st.bannerT>0){
+  st.bannerT-=dt;
+  if(st.bannerT<=0)nextRound();
+ }
+ requestAnimationFrame(loop);
+}
+again.addEventListener("click",function(){reset();again.blur();});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

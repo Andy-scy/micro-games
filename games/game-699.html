@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹指泡泡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+.bar{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:8px}
+#tbar{height:100%;width:100%;background:#51d88a;border-radius:6px}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>弹指泡泡</h1>
+  <p class="tips">直接点破不算本事!拖住泡泡甩出去,让它高速撞上另一颗泡泡,两颗一起炸裂才得分。90 秒禅意物理场,感受一石二鸟的快乐。</p>
+  <div class="card">
+    <div class="bar"><div id="tbar"></div></div>
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">爆破对数</div><div class="big" id="pr">0</div></div>
+      <div class="stat"><div class="mut">连击</div><div class="big" id="cb">x1</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="520"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">弹指泡泡</h2><p id="ovp">玩法说明:<br>· 按住一颗泡泡拖着走,快速甩出并松手<br>· 泡泡高速撞上别的泡泡(相对速度够快)就双双炸裂<br>· 撞得越狠分越高,2 秒内连续爆破叠连击<br>· 慢慢蹭到的泡泡只会弹开,不扣分白费劲<br>· 炸掉的泡泡 1 秒后会从边缘补充<br>· 90 秒结束结算,冲最高分!</p><button class="btn" id="obtn">开始弹指</button></div></div>
+<script>
+'use strict';
+var W=420,H=520;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLORS=['#ff5c5c','#ffd166','#51d88a','#4da3ff','#b07cff'];
+var bubbles=[],parts=[],floats=[];
+var score=0,pairs=0,combo=0,comboT=0,timeLeft=90;
+var dragIdx=-1,dragVX=0,dragVY=0,lastPX=0,lastPY=0;
+var respawnT=[],running=false,lastT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function makeBubble(x,y){
+  return {x:x,y:y,vx:rnd(-30,30),vy:rnd(-30,30),
+    r:rnd(19,24),c:COLORS[Math.floor(Math.random()*COLORS.length)],ph:rnd(0,6.28)};
+}
+function reset(){
+  bubbles=[];parts=[];floats=[];respawnT=[];
+  score=0;pairs=0;combo=0;comboT=0;timeLeft=90;dragIdx=-1;
+  for(var i=0;i<10;i++)bubbles.push(makeBubble(rnd(60,W-60),rnd(60,H-60)));
+  upd();
+  $i('tbar').style.width='100%';
+}
+function upd(){
+  $i('sc').textContent=score;
+  $i('pr').textContent=pairs;
+  $i('cb').textContent='x'+Math.min(5,1+Math.floor(combo/2));
+}
+function addFloat(x,y,txt,c){floats.push({x:x,y:y,txt:txt,c:c,life:0.9})}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=rnd(0,6.28),s=rnd(60,220);
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:rnd(2,5),c:c,life:rnd(0.35,0.7)});}
+}
+function popPair(b1,b2,sp){
+  var idx1=bubbles.indexOf(b1),idx2=bubbles.indexOf(b2);
+  if(idx1<0||idx2<0)return;
+  if(idx1>idx2){bubbles.splice(idx1,1);bubbles.splice(idx2,1);}
+  else{bubbles.splice(idx2,1);bubbles.splice(idx1,1);}
+  combo++;comboT=2;
+  var mult=Math.min(5,1+Math.floor(combo/2));
+  var gain=Math.round((20+sp/25)*mult);
+  score+=gain;pairs++;
+  addFloat((b1.x+b2.x)/2,(b1.y+b2.y)/2,'+'+gain+(sp>500?' 猛!':''),'#ffd166');
+  burst(b1.x,b1.y,b1.c,8);burst(b2.x,b2.y,b2.c,8);
+  respawnT.push(1);
+  respawnT.push(1);
+  upd();
+}
+function edgeSpawn(){
+  var side=Math.floor(Math.random()*4);
+  var x,y;
+  if(side===0){x=rnd(40,W-40);y=40;}
+  else if(side===1){x=rnd(40,W-40);y=H-40;}
+  else if(side===2){x=40;y=rnd(40,H-40);}
+  else{x=W-40;y=rnd(40,H-40);}
+  bubbles.push(makeBubble(x,y));
+}
+function update(dt){
+  if(!running)return;
+  timeLeft-=dt;
+  if(timeLeft<=0){
+    timeLeft=0;running=false;
+    $i('ovt').textContent='时间到,心平气和~';
+    $i('ovp').innerHTML='本局得分:<b>'+score+'</b><br>爆破对数:'+pairs+' 对<br>下次试试更狠的一甩!';
+    $i('obtn').textContent='再来一局';
+    $i('overlay').classList.remove('hide');
+    return;
+  }
+  $i('tbar').style.width=(timeLeft/90*100)+'%';
+  if(comboT>0){comboT-=dt;if(comboT<=0)combo=0;}
+  var i,j,b;
+  var fr=Math.pow(0.4,dt);
+  for(i=0;i<bubbles.length;i++){
+    b=bubbles[i];
+    if(i===dragIdx)continue;
+    b.vx*=fr;b.vy*=fr;
+    b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx)*0.8;}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx=-Math.abs(b.vx)*0.8;}
+    if(b.y<b.r){b.y=b.r;b.vy=Math.abs(b.vy)*0.8;}
+    if(b.y>H-b.r){b.y=H-b.r;b.vy=-Math.abs(b.vy)*0.8;}
+  }
+  for(i=0;i<bubbles.length;i++){
+    for(j=i+1;j<bubbles.length;j++){
+      var b1=bubbles[i],b2=bubbles[j];
+      var dx=b2.x-b1.x,dy=b2.y-b1.y;
+      var dd=dx*dx+dy*dy;
+      var rr=b1.r+b2.r;
+      if(dd>=rr*rr||dd===0)continue;
+      var d=Math.sqrt(dd);
+      var nx=dx/d,ny=dy/d;
+      var rvx=b1.vx-b2.vx,rvy=b1.vy-b2.vy;
+      var rel=Math.sqrt(rvx*rvx+rvy*rvy);
+      if(rel>240){
+        popPair(b1,b2,rel);
+        i=-1;
+        break;
+      }
+      var ov=rr-d;
+      b1.x-=nx*ov/2;b1.y-=ny*ov/2;
+      b2.x+=nx*ov/2;b2.y+=ny*ov/2;
+      var v1n=b1.vx*nx+b1.vy*ny;
+      var v2n=b2.vx*nx+b2.vy*ny;
+      if(v1n-v2n>0){
+        b1.vx+=(v2n-v1n)*nx;b1.vy+=(v2n-v1n)*ny;
+        b2.vx+=(v1n-v2n)*nx;b2.vy+=(v1n-v2n)*ny;
+      }
+    }
+  }
+  for(i=respawnT.length-1;i>=0;i--){
+    respawnT[i]-=dt;
+    if(respawnT[i]<=0){respawnT.splice(i,1);edgeSpawn();}
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=140*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=40*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i,b;
+  for(i=0;i<bubbles.length;i++){
+    b=bubbles[i];
+    var wob=Math.sin(Date.now()*0.002+b.ph)*2;
+    ctx.beginPath();ctx.arc(b.x+wob*0.3,b.y+wob*0.3,b.r,0,6.2832);
+    ctx.fillStyle=b.c;ctx.fill();
+    ctx.lineWidth=2;
+    ctx.strokeStyle=i===dragIdx?'#fff':'rgba(255,255,255,.35)';
+    ctx.stroke();
+    ctx.beginPath();ctx.arc(b.x-b.r*0.32,b.y-b.r*0.32,b.r*0.26,0,6.2832);
+    ctx.fillStyle='rgba(255,255,255,.5)';ctx.fill();
+    if(i===dragIdx){
+      ctx.font='12px system-ui';ctx.textAlign='center';
+      ctx.fillStyle='#fff';
+      ctx.fillText('甩出去!',b.x,b.y-b.r-10);
+    }
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 16px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(!running)return;
+  var p=pt(e);
+  dragIdx=-1;
+  var bestD=1e9;
+  for(var i=0;i<bubbles.length;i++){
+    var b=bubbles[i],dx=p.x-b.x,dy=p.y-b.y,d=dx*dx+dy*dy;
+    if(d<=(b.r+14)*(b.r+14)&&d<bestD){bestD=d;dragIdx=i;}
+  }
+  if(dragIdx>=0){lastPX=p.x;lastPY=p.y;dragVX=0;dragVY=0;}
+});
+cv.addEventListener('pointermove',function(e){
+  if(!running||dragIdx<0)return;
+  var p=pt(e);
+  var b=bubbles[dragIdx];
+  if(!b)return;
+  b.x=Math.max(b.r,Math.min(W-b.r,p.x));
+  b.y=Math.max(b.r,Math.min(H-b.r,p.y));
+  dragVX=(p.x-lastPX)*60;
+  dragVY=(p.y-lastPY)*60;
+  lastPX=p.x;lastPY=p.y;
+});
+function releaseDrag(){
+  if(dragIdx<0)return;
+  var b=bubbles[dragIdx];
+  if(b){
+    var sp=Math.sqrt(dragVX*dragVX+dragVY*dragVY);
+    if(sp>800){dragVX*=800/sp;dragVY*=800/sp;}
+    b.vx=dragVX;b.vy=dragVY;
+  }
+  dragIdx=-1;
+}
+window.addEventListener('pointerup',releaseDrag);
+cv.addEventListener('pointercancel',releaseDrag);
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

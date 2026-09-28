@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹弓入杯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2604;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹弓入杯</h1>
+  <p class="hint">在弹弓处按住并向后拖拽瞄准,松手弹射 · 球停进木杯即捕获</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>剩余弹数 <b id="shots">0</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹弓入杯</h2>
+      <p id="ovDesc">按住弹弓上的小球向后拖拽,松手把它射出去。球落进木杯停稳即捕获,清空全部木杯进入下一关,弹数用尽则失败!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,GY=478,CW=64,CH=46,BR=8,GRAV=0.0009;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elSh=$("shots"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s381");
+var LEVELS=[
+ {start:{x:70,y:430},shots:4,cups:[{x:350,y:432}],walls:[]},
+ {start:{x:60,y:430},shots:4,cups:[{x:392,y:296}],walls:[{x:225,y:250,w:16,h:228}]},
+ {start:{x:60,y:430},shots:5,cups:[{x:396,y:432},{x:265,y:284}],walls:[{x:230,y:330,w:120,h:12},{x:170,y:150,w:100,h:12}]}
+];
+var state,lvIdx,score,shotsLeft,cups,walls,ball,aiming,aimSX,aimSY,aimX,aimY,shotT,slowT,msg,msgT;
+function reset(){lvIdx=0;score=0;loadLevel();}
+function loadLevel(){
+  var L=LEVELS[lvIdx],i;
+  shotsLeft=L.shots;
+  cups=[];for(i=0;i<L.cups.length;i++)cups.push({x:L.cups[i].x,y:L.cups[i].y,got:false,anim:0});
+  walls=[];for(i=0;i<L.walls.length;i++)walls.push({x:L.walls[i].x,y:L.walls[i].y,w:L.walls[i].w,h:L.walls[i].h});
+  ball={x:L.start.x,y:L.start.y,vx:0,vy:0,r:BR,live:false};
+  aiming=false;shotT=0;slowT=0;
+  elLv.textContent=lvIdx+1;updateHud();
+}
+function updateHud(){elSh.textContent=shotsLeft;elSc.textContent=score;elBest.textContent=best;}
+function collideRect(b,rc,rest){
+  var l=rc.x-b.r,rt=rc.x+rc.w+b.r,t=rc.y-b.r,bt=rc.y+rc.h+b.r;
+  if(b.x>l&&b.x<rt&&b.y>t&&b.y<bt){
+    var pl=b.x-l,pr=rt-b.x,pt=b.y-t,pb=bt-b.y,m=Math.min(pl,pr,pt,pb);
+    if(m===pt){b.y=t;if(b.vy>0)b.vy=-b.vy*rest;}
+    else if(m===pb){b.y=bt;if(b.vy<0)b.vy=-b.vy*rest;}
+    else if(m===pl){b.x=l;if(b.vx>0)b.vx=-b.vx*rest;}
+    else{b.x=rt;if(b.vx<0)b.vx=-b.vx*rest;}
+  }
+}
+function stepShot(dt){
+  var sub=3,i,j,c;
+  for(i=0;i<sub;i++){
+    ball.vy+=GRAV*dt/sub;
+    ball.x+=ball.vx*dt/sub;ball.y+=ball.vy*dt/sub;
+    if(ball.x<ball.r){ball.x=ball.r;ball.vx=Math.abs(ball.vx)*0.45;}
+    if(ball.x>W-ball.r){ball.x=W-ball.r;ball.vx=-Math.abs(ball.vx)*0.45;}
+    collideRect(ball,{x:-20,y:GY,w:W+40,h:80},0.35);
+    for(j=0;j<walls.length;j++)collideRect(ball,walls[j],0.5);
+    for(j=0;j<cups.length;j++){
+      c=cups[j];
+      collideRect(ball,{x:c.x+3,y:c.y,w:5,h:CH},0.3);
+      collideRect(ball,{x:c.x+CW-8,y:c.y,w:5,h:CH},0.3);
+      collideRect(ball,{x:c.x+3,y:c.y+CH-7,w:CW-6,h:7},0.25);
+      if(!c.got&&ball.x>c.x+12&&ball.x<c.x+CW-12&&ball.y>c.y+14&&ball.vy>0){capture(c);return;}
+    }
+  }
+}
+function capture(c){
+  c.got=true;c.anim=1;
+  ball.live=false;score+=100;msg="进杯! +100";msgT=1200;
+  var left=0,i;for(i=0;i<cups.length;i++)if(!cups[i].got)left++;
+  if(left>0){ball.x=LEVELS[lvIdx].start.x;ball.y=LEVELS[lvIdx].start.y;ball.vx=0;ball.vy=0;}
+  else{
+    score+=50;msg="过关! +50";
+    if(lvIdx<LEVELS.length-1){lvIdx++;window.setTimeout(function(){if(state==="playing")loadLevel();},900);}
+    else finish(true,"全部关卡通关,弹弓大师!");
+  }
+  updateHud();
+}
+function endShot(){
+  var left=0,i;for(i=0;i<cups.length;i++)if(!cups[i].got)left++;
+  if(left>0&&shotsLeft<=0){finish(false,"弹数用尽,仍有 "+left+" 只杯子未捕获!");return;}
+  ball.x=LEVELS[lvIdx].start.x;ball.y=LEVELS[lvIdx].start.y;ball.vx=0;ball.vy=0;shotT=0;slowT=0;
+}
+function launch(v){
+  ball.vx=v.vx;ball.vy=v.vy;ball.live=true;shotT=0;slowT=0;
+  shotsLeft--;updateHud();
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s381",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+function pullVec(){
+  var dx=aimX-aimSX,dy=aimY-aimSY,d=Math.sqrt(dx*dx+dy*dy);
+  if(d>70){dx=dx/d*70;dy=dy/d*70;}
+  return{x:dx,y:dy};
+}
+function launchVec(p){
+  var d=Math.sqrt(p.x*p.x+p.y*p.y);
+  if(d<12)return null;
+  var k=d/70*0.62;
+  return{vx:-p.x/d*k,vy:-p.y/d*k};
+}
+function ptOf(e){
+  var r=cv.getBoundingClientRect(),p=e.touches?(e.touches[0]||e.changedTouches[0]):e;
+  return{x:(p.clientX-r.left)*W/r.width,y:(p.clientY-r.top)*H/r.height};
+}
+function down(e){
+  if(state!=="playing")return;
+  var p=ptOf(e);aiming=true;aimSX=p.x;aimSY=p.y;aimX=p.x;aimY=p.y;e.preventDefault();
+}
+function move(e){if(!aiming)return;var p=ptOf(e);aimX=p.x;aimY=p.y;e.preventDefault();}
+function up(e){
+  if(!aiming)return;aiming=false;
+  if(ball.live)return;
+  var v=launchVec(pullVec());
+  if(v)launch(v);
+  e.preventDefault();
+}
+cv.addEventListener("mousedown",down);
+window.addEventListener("mousemove",move);
+window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});
+cv.addEventListener("touchmove",move,{passive:false});
+cv.addEventListener("touchend",up,{passive:false});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"&&(e.key===" "||e.key==="Enter")){e.preventDefault();startGame();}
+});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCup(c){
+  ctx.fillStyle="#a06a35";
+  rr(c.x,c.y,CW,CH,4);ctx.fill();
+  ctx.fillStyle="#7c4f22";
+  ctx.fillRect(c.x+4,c.y+4,CW-8,6);
+  ctx.strokeStyle="#5d3a17";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(c.x+8,c.y);ctx.lineTo(c.x+8,c.y+CH);ctx.moveTo(c.x+CW-8,c.y);ctx.lineTo(c.x+CW-8,c.y+CH);ctx.stroke();
+  if(c.y+CH<GY-2){
+    ctx.strokeStyle="rgba(200,200,220,0.35)";ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(c.x+10,c.y);ctx.lineTo(c.x+10,c.y-120);ctx.moveTo(c.x+CW-10,c.y);ctx.lineTo(c.x+CW-10,c.y-120);ctx.stroke();
+  }
+  if(c.got){
+    ctx.fillStyle="#fde047";
+    ctx.beginPath();ctx.arc(c.x+CW/2,c.y+CH-11,BR,0,Math.PI*2);ctx.fill();
+  }
+}
+function draw(){
+  var i,c;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#141a2e";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#1d2742";ctx.fillRect(0,GY,W,4);
+  for(i=0;i<walls.length;i++){
+    ctx.fillStyle="#3b4a77";rr(walls[i].x,walls[i].y,walls[i].w,walls[i].h,4);ctx.fill();
+    ctx.fillStyle="#55679c";ctx.fillRect(walls[i].x+2,walls[i].y+2,walls[i].w-4,3);
+  }
+  for(i=0;i<cups.length;i++)drawCup(cups[i]);
+  var sx=LEVELS[lvIdx].start.x,sy=LEVELS[lvIdx].start.y;
+  ctx.strokeStyle="#7c6242";ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(sx-14,sy-30);ctx.lineTo(sx-6,sy-4);ctx.moveTo(sx+14,sy-30);ctx.lineTo(sx+6,sy-4);ctx.stroke();
+  var bx=ball.x,by=ball.y;
+  if(aiming&&!ball.live){
+    var p=pullVec();
+    bx=sx+p.x;by=sy+p.y;
+    ctx.strokeStyle="#e879a9";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(sx-8,sy-6);ctx.lineTo(bx,by);ctx.lineTo(sx+8,sy-6);ctx.stroke();
+    var v=launchVec(p);
+    if(v){
+      var px=bx,py=by,vx=v.vx,vy=v.vy,k;
+      ctx.fillStyle="rgba(251,191,36,0.6)";
+      for(k=0;k<26;k++){
+        vy+=GRAV*22;px+=vx*22;py+=vy*22;
+        if(k%3===0){ctx.beginPath();ctx.arc(px,py,2.4,0,Math.PI*2);ctx.fill();}
+        if(py>H)break;
+      }
+    }
+  }else if(aiming){aiming=false;}
+  if(!ball.live){bx=sx;by=sy;}
+  ctx.fillStyle="#fde047";
+  ctx.shadowColor="#fde047";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(bx,by,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#4ade80";ctx.font="bold 22px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,120);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(state==="playing"){
+    var i;
+    for(i=0;i<cups.length;i++)if(cups[i].anim>0)cups[i].anim=Math.max(0,cups[i].anim-dt*0.002);
+    if(msgT>0)msgT-=dt;
+    if(ball.live){
+      stepShot(dt);
+      shotT+=dt;
+      var sp=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy);
+      if(sp<0.035)slowT+=dt;else slowT=0;
+      if(shotT>7000||slowT>700||ball.y>H+60)endShot();
+    }
+  }
+  draw();
+}
+state="menu";
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

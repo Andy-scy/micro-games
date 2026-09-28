@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>补色罗盘</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:420px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+canvas{display:block;margin:0 auto;width:100%;max-width:300px;touch-action:none;cursor:grab}
+.sws{display:flex;gap:16px;justify-content:center;margin-top:8px}
+.swbox{text-align:center}
+.sw{width:52px;height:36px;border-radius:9px;border:2px solid rgba(255,255,255,.2)}
+.swlab{font-size:12px;color:#9aa3c0;margin-top:4px}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.4;cursor:default}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:22px;margin-top:8px;line-height:1.6}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>补色罗盘</h1>
+  <p class="tips">中心圆盘显示目标色,请旋转外圈色环,让顶部白针指向它的「补色」(色相相差 180°)。拖动色环或用微调按钮。8 轮容差逐轮收紧(±26° 到 ±12°),偏出容差 -1 生命(共 3 条)。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">轮次</div><div class="big" id="rd">1/8</div></div>
+      <div class="stat"><div class="mut">容差</div><div class="big" id="tol">±26°</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <canvas id="cv" width="300" height="300"></canvas>
+    <div class="sws">
+      <div class="swbox"><div class="sw" id="swT"></div><div class="swlab">目标色</div></div>
+      <div class="swbox"><div class="sw" id="swN"></div><div class="swlab">针尖所指</div></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn sec" id="lm">逆旋 5°</button>
+      <button class="btn" id="ok">确认指向</button>
+      <button class="btn sec" id="rp">顺旋 5°</button>
+    </div>
+    <div id="msg">也可以直接在色环上拖动旋转</div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">补色罗盘</h2><p id="ovp">玩法:色彩理论实战。<br>· 中心圆盘是目标色,外圈是可旋转的色相环<br>· 旋转色环,让顶部白针指向目标色的补色(红↔青、黄↔蓝等,色相相差 180°)<br>· 确认后按角度误差计分,误差在容差内判过<br>· 共 8 轮,容差逐轮收紧;偏出容差 -1 生命<br>· 支持直接拖动色环</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var offset=0,targetHue=0,round=1,lives=3,score=0,busy=false;
+var playing=false,over=false,dragging=false,lastAng=0;
+function $(id){return document.getElementById(id)}
+function circDiff(x,y){return Math.abs(((x-y)%360+540)%360-180)}
+function tol(){return Math.max(12,26-(round-1)*2)}
+function draw(){
+  var c=$('cv').getContext('2d');
+  c.clearRect(0,0,300,300);
+  c.save();c.translate(150,150);
+  for(var i=0;i<72;i++){
+    var a0=(i*5+offset-92.5)*Math.PI/180;
+    c.beginPath();c.moveTo(0,0);
+    c.arc(0,0,134,a0,a0+5*Math.PI/180);
+    c.closePath();
+    c.fillStyle='hsl('+((i*5+offset+2.5)%360)+',74%,55%)';
+    c.fill();
+  }
+  c.beginPath();c.arc(0,0,98,0,Math.PI*2);
+  c.fillStyle='#141933';c.fill();
+  c.beginPath();c.arc(0,0,46,0,Math.PI*2);
+  c.fillStyle='hsl('+targetHue+',70%,55%)';
+  c.fill();
+  c.strokeStyle='#fff';c.lineWidth=2;c.stroke();
+  c.restore();
+  c.fillStyle='#ffffff';
+  c.beginPath();c.moveTo(140,8);c.lineTo(160,8);c.lineTo(150,62);c.closePath();c.fill();
+  $('swT').style.background='hsl('+Math.round(targetHue)+',70%,55%)';
+  $('swN').style.background='hsl('+Math.round(offset%360)+',74%,55%)';
+}
+function drawTop(){
+  $('rd').textContent=round+'/8';
+  $('tol').textContent='±'+tol()+'°';
+  $('sc').textContent=score;
+  $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+}
+function confirmAim(){
+  if(!playing||over||busy)return;
+  busy=true;
+  var err=circDiff(offset,targetHue+180);
+  var t=tol();
+  var pts=Math.max(0,Math.round(100-err*3));
+  score+=pts;
+  var good=err<=t;
+  if(!good)lives--;
+  $('msg').textContent=(good?'命中!':'偏了……')+'角度误差 '+Math.round(err)+'°(容差 ±'+t+'°),+'+pts+' 分';
+  drawTop();
+  setTimeout(next,1300);
+}
+function next(){
+  if(lives<=0){finish(false);return;}
+  round++;
+  if(round>8){finish(true);return;}
+  targetHue=Math.floor(Math.random()*360);
+  offset=Math.floor(Math.random()*360);
+  busy=false;
+  drawTop();draw();
+  $('msg').textContent='让白针指向目标色的补色!';
+}
+function finish(win){
+  playing=false;over=true;
+  drawTop();
+  $('ovt').textContent=win?'补色调和大师!':'罗盘失控…';
+  $('ovp').innerHTML=(win?'8 轮补色全部在容差内!':'生命耗尽,止步第 '+round+' 轮。')+'<br>累计得分 <b>'+score+'</b><br>记住红配青、蓝配橙、黄配紫,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rotate(d){
+  if(busy||!playing||over)return;
+  offset=((offset+d)%360+360)%360;
+  draw();
+}
+$('ok').addEventListener('click',confirmAim);
+$('lm').addEventListener('click',function(){rotate(-5)});
+$('rp').addEventListener('click',function(){rotate(5)});
+function posOf(e){
+  var r=$('cv').getBoundingClientRect();
+  var t=e.touches?e.touches[0]:e;
+  return {x:(t.clientX-r.left)*300/r.width,y:(t.clientY-r.top)*300/r.height};
+}
+function down(e){
+  if(busy||!playing||over)return;
+  var p=posOf(e);
+  dragging=true;
+  lastAng=Math.atan2(p.y-150,p.x-150);
+}
+function move(e){
+  if(!dragging)return;
+  if(e.touches)e.preventDefault();
+  var p=posOf(e);
+  var ang=Math.atan2(p.y-150,p.x-150);
+  var d=ang-lastAng;
+  if(d>Math.PI)d-=Math.PI*2;
+  if(d<-Math.PI)d+=Math.PI*2;
+  offset=((offset+d*180/Math.PI)%360+360)%360;
+  lastAng=ang;
+  draw();
+}
+function up(){dragging=false}
+$('cv').addEventListener('mousedown',down);
+window.addEventListener('mousemove',move);
+window.addEventListener('mouseup',up);
+$('cv').addEventListener('touchstart',function(e){down(e)},{passive:true});
+$('cv').addEventListener('touchmove',move,{passive:false});
+$('cv').addEventListener('touchend',up);
+function startGame(){
+  round=1;lives=3;score=0;busy=false;dragging=false;
+  playing=true;over=false;
+  targetHue=Math.floor(Math.random()*360);
+  offset=Math.floor(Math.random()*360);
+  drawTop();draw();
+  $('msg').textContent='让白针指向目标色的补色!';
+  $('overlay').classList.add('hide');
+}
+$('obtn').addEventListener('click',startGame);
+targetHue=200;offset=30;
+drawTop();draw();
+</script>
+</body>
+</html>

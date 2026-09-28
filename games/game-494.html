@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黄金靶区</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#ffe082;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#ffe082;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#ffe082}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#ffe082;color:#3d3200;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>黄金靶区</h1>
+  <p class="hint">外圈是罚区会倒扣分 · 靶心 25 分 · 绕行金星 +30 · 75 秒冲 300 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">75</b>秒</span>
+    <span>目标 <b>300</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">黄金靶区</h2>
+      <p id="ovD">这只靶的分区很讲究:最外一圈是黑色罚区,中箭倒扣 10 分;往里依次是 5 分、10 分,靶心金核 25 分。一颗金星绕着靶子飞行,射中再得 30 分。靶子还在缓缓漂移。想清楚每一箭打哪里——75 秒冲 300 分,贪心和胆小都会输。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">进靶场</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elMsg=$("msg");
+const GOAL=300,DUR=75;
+let state="menu",score=0,timeLeft=DUR,tp=0,dAng=0,tAng=0,shakeT=0;
+let mouse={x:240,y:280},pops=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function targetPos(){return{x:240+Math.cos(dAng)*28,y:265+Math.sin(dAng*0.7)*20};}
+function starPos(t){
+  return{x:t.x+Math.cos(tAng)*150,y:t.y+Math.sin(tAng)*93};
+}
+function pop(x,y,txt,c){
+  pops.push({x:x,y:y,txt:txt,c:c,t:1});
+}
+function shoot(){
+  if(state!=="play")return;
+  const t=targetPos(),s=starPos(t);
+  if(Math.hypot(mouse.x-s.x,mouse.y-s.y)<20){
+    score+=30;
+    pop(s.x,s.y,"+30","#ffe082");
+    elMsg.textContent="射中金星!+30";
+  }else{
+    const d=Math.hypot(mouse.x-t.x,mouse.y-t.y);
+    if(d<18){score+=25;pop(t.x,t.y-14,"+25","#ffd740");elMsg.textContent="正中金核!+25";}
+    else if(d<45){score+=10;pop(mouse.x,mouse.y,"+10","#ef9a9a");elMsg.textContent="+10";}
+    else if(d<80){score+=5;pop(mouse.x,mouse.y,"+5","#eceff1");elMsg.textContent="+5";}
+    else if(d<120){
+      score=Math.max(0,score-10);shakeT=0.3;
+      pop(mouse.x,mouse.y,"-10","#ef5350");
+      elMsg.textContent="罚区!倒扣 10 分";
+    }else{
+      score=Math.max(0,score-4);
+      pop(mouse.x,mouse.y,"-4","#90a4ae");
+      elMsg.textContent="完全脱靶 -4";
+    }
+  }
+  elSc.textContent=score;
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;dAng=Math.random()*6.28;tAng=Math.random()*6.28;shakeT=0;
+  pops=[];
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"黄金猎手!":"分毫未竞";
+  ovT.style.color=win?"#ffe082":"#ef9a9a";
+  ovD.textContent=win?"你在罚区边缘跳舞,却一支箭都没踩错地方。":"这局是算术题:金核 25 分、金星 30 分,罚区 -10。会算的人先赢一半。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    dAng+=0.5*dt;tAng+=1.25*dt;
+    if(shakeT>0)shakeT-=dt;
+    for(let i=pops.length-1;i>=0;i--){
+      const p=pops[i];p.t-=dt;
+      if(p.t<=0){pops.splice(i,1);continue;}
+      p.y-=34*dt;
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(shakeT>0)ctx.translate((Math.random()-0.5)*8,(Math.random()-0.5)*8);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2d2713");g.addColorStop(1,"#171408");
+  ctx.fillStyle=g;ctx.fillRect(-10,-10,W+20,H+20);
+  const t=targetPos(),s=starPos(t);
+  const pulse=1+Math.sin(tp*5)*0.08;
+  ctx.strokeStyle="rgba(0,0,0,0.4)";ctx.lineWidth=1;
+  ctx.fillStyle="#4e2727";
+  ctx.beginPath();ctx.arc(t.x,t.y,120,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#eceff1";
+  ctx.beginPath();ctx.arc(t.x,t.y,80,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#e53935";
+  ctx.beginPath();ctx.arc(t.x,t.y,45,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#ffd740";
+  ctx.beginPath();ctx.arc(t.x,t.y,18*pulse,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#3d3200";ctx.font="bold 13px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText("25",t.x,t.y+1);
+  ctx.fillStyle="rgba(0,0,0,0.55)";ctx.font="bold 11px system-ui";
+  ctx.fillText("罚 -10",t.x,t.y+92);
+  ctx.fillStyle="#5d4a10";ctx.fillText("+10",t.x,t.y+30);
+  ctx.fillStyle="#90a4ae";ctx.fillText("+5",t.x,t.y+64);
+  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(tp*2);
+  ctx.fillStyle="#ffe082";
+  ctx.beginPath();
+  for(let i=0;i<10;i++){
+    const rr=i%2===0?16:7;
+    const a=i/10*Math.PI*2-Math.PI/2;
+    ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);
+  }
+  ctx.closePath();ctx.fill();
+  ctx.restore();
+  for(let i=0;i<pops.length;i++){
+    const p=pops[i];
+    ctx.globalAlpha=Math.min(1,p.t*2);
+    ctx.fillStyle=p.c;
+    ctx.font="bold 17px system-ui";ctx.textAlign="center";
+    ctx.fillText(p.txt,p.x,p.y);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="#6d4c41";
+  ctx.beginPath();ctx.arc(240,545,14,0,Math.PI*2);ctx.fill();
+  if(state==="play"){
+    ctx.strokeStyle="#ffe082";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(mouse.x,mouse.y,12,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(mouse.x-17,mouse.y);ctx.lineTo(mouse.x-6,mouse.y);
+    ctx.moveTo(mouse.x+6,mouse.y);ctx.lineTo(mouse.x+17,mouse.y);
+    ctx.moveTo(mouse.x,mouse.y-17);ctx.lineTo(mouse.x,mouse.y-6);
+    ctx.moveTo(mouse.x,mouse.y+6);ctx.lineTo(mouse.x,mouse.y+17);ctx.stroke();
+  }
+  ctx.restore();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>吊臂摆渡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2604;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>吊臂摆渡</h1>
+  <p class="hint">第一次点击放下吊链,吊球随吊臂摆动 · 再按一次松手抛球入货箱 · 留意风向!</p>
+  <div class="hud">
+    <span>球数 <b id="bn">1/10</b></span>
+    <span>总分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">吊臂摆渡</h2>
+      <p id="ovDesc">吊臂在横梁上来回移动:按一下空格/屏幕放下吊链,钢球挂上链条随吊臂拖拽而摆动;再按一下松脱吊钩,把球抛向下面的货箱。落点越接近箱心得分越高,正中还有大额奖励。风会吹偏你的球——十球定胜负!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,RAIL=36,CHAIN=170,GY=460,GRAV=0.0011,BR=9;
+function $(id){return document.getElementById(id);}
+var elBn=$("bn"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s397");
+var state,phase,hx,hdir,hvx,prevHvx,chainLen,theta,omega,t,bn,score,fx,fy,fvx,fvy,flying,tx,marks,msg,msgT,wind;
+function reset(){
+  hx=90;hdir=1;hvx=0.12;prevHvx=0.12;chainLen=0;
+  theta=0;omega=0;t=0;bn=1;score=0;flying=false;
+  marks=[];msg="";msgT=0;
+  newTarget();
+  updateHud();
+}
+function newTarget(){tx=90+Math.random()*300;}
+function updateHud(){
+  elBn.textContent=bn+"/10";elSc.textContent=score;elBest.textContent=best;
+}
+function act(){
+  if(state!=="playing")return;
+  if(phase==="up"){phase="dropping";}
+  else if(phase==="down"&&chainLen>=CHAIN-2){
+    var bx=hx+chainLen*Math.sin(theta),by=RAIL+chainLen*Math.cos(theta);
+    fx=bx;fy=by;
+    fvx=hvx+chainLen*Math.cos(theta)*omega;
+    fvy=-chainLen*Math.sin(theta)*omega;
+    flying=true;
+    phase="raising";
+  }
+}
+cv.addEventListener("mousedown",function(e){act();e.preventDefault();});
+cv.addEventListener("touchstart",function(e){act();e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){
+    e.preventDefault();
+    if(state!=="playing")startGame();else act();
+  }
+});
+function startGame(){reset();state="playing";phase="up";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+function landed(){
+  var d=Math.abs(fx-tx);
+  var pts;
+  if(d<=14){pts=150;msg="正中货箱! +150";}
+  else if(fx<-10||fx>W+10){pts=0;msg="飞出场外! +0";}
+  else{pts=Math.max(10,Math.round(120-d*0.8));msg="落点 +"+pts;}
+  score+=pts;msgT=1300;
+  marks.push({x:Math.max(4,Math.min(W-4,fx))});
+  updateHud();
+  if(bn>=10){
+    window.setTimeout(function(){
+      state="over";
+      if(score>best){best=score;saveBest("mg_s397",best);}
+      ovT.textContent="十球结束!";
+      ovD.textContent="吊臂收工,货箱满载而归。下次借更大的摆幅飞得更远!";
+      ovS.style.display="block";ovS.textContent="总分 "+score+" · 最佳 "+best;
+      btn.textContent="再来一局";updateHud();
+      ov.classList.remove("hide");
+    },1000);
+    state="ending";
+  }else{
+    window.setTimeout(function(){
+      if(state!=="between")return;
+      bn++;updateHud();
+      newTarget();theta=0;omega=0;chainLen=0;flying=false;phase="up";
+      state="playing";
+    },900);
+    state="between";
+  }
+}
+var lastT=0;
+function loop(ms){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=ms;
+  var dt=Math.min(40,ms-lastT);lastT=ms;
+  t+=dt;
+  wind=0.00009*Math.sin(t*0.0011);
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    var targetLen=phase==="dropping"?CHAIN:(phase==="raising"?0:chainLen);
+    var spd=0.35;
+    if(chainLen<targetLen)chainLen=Math.min(targetLen,chainLen+spd*dt);
+    else if(chainLen>targetLen)chainLen=Math.max(targetLen,chainLen-spd*dt);
+    if(phase==="dropping"&&chainLen>=CHAIN)phase="down";
+    if(phase==="raising"&&chainLen<=0)phase="up";
+    var moveSpd=chainLen>0?0.085:0.12;
+    hvx=moveSpd*hdir;
+    hx+=hvx*dt;
+    if(hx<70){hx=70;hdir=1;}
+    if(hx>410){hx=410;hdir=-1;}
+    if(chainLen>0){
+      var ax=(hvx-prevHvx)/dt;
+      omega+=(-(GRAV/chainLen)*Math.sin(theta)-(ax/chainLen)*Math.cos(theta))*dt;
+      omega+=wind*2.2*dt;
+      omega*=1-0.0004*dt;
+      theta+=omega*dt;
+    }
+    prevHvx=hvx;
+    if(flying){
+      fvy+=GRAV*dt;
+      fvx+=wind*dt;
+      fx+=fvx*dt;fy+=fvy*dt;
+      if(fy+BR>=GY)landed();
+    }
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#1c2547";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#2b3663";ctx.fillRect(0,GY,W,4);
+  ctx.fillStyle="#2c3a5e";ctx.fillRect(50,RAIL-8,380,10);
+  ctx.fillStyle="#3b4a77";
+  for(i=0;i<10;i++)ctx.fillRect(58+i*38,RAIL-5,20,4);
+  if(state!=="over"&&state!=="ending"){
+    ctx.fillStyle="rgba(74,222,128,0.15)";
+    ctx.fillRect(tx-23,GY-6,46,6);
+    ctx.fillStyle="#a06a35";
+    ctx.fillRect(tx-23,GY-34,46,30);
+    ctx.fillStyle="#7c4f22";
+    ctx.fillRect(tx-23,GY-34,46,6);
+    ctx.strokeStyle="#5d3a17";ctx.lineWidth=2;
+    ctx.strokeRect(tx-23,GY-34,46,30);
+    ctx.fillStyle="#fde047";ctx.font="bold 11px system-ui";ctx.textAlign="center";
+    ctx.fillText("货箱",tx,GY-42);
+    ctx.textAlign="left";
+  }
+  for(i=0;i<marks.length;i++){
+    ctx.fillStyle="rgba(248,113,113,0.6)";
+    ctx.beginPath();ctx.arc(marks[i].x,GY+14,3,0,Math.PI*2);ctx.fill();
+  }
+  var bx2=hx,by2=RAIL;
+  if(chainLen>0){
+    bx2=hx+chainLen*Math.sin(theta);
+    by2=RAIL+chainLen*Math.cos(theta);
+    ctx.strokeStyle="#9aa4c0";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(hx,RAIL);
+    var seg;
+    for(seg=1;seg<=4;seg++){
+      var cl=chainLen*seg/4;
+      ctx.lineTo(hx+cl*Math.sin(theta),RAIL+cl*Math.cos(theta));
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle="#818cf8";
+  ctx.fillRect(hx-16,RAIL-6,32,10);
+  ctx.beginPath();ctx.arc(hx-10,RAIL+6,4,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(hx+10,RAIL+6,4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#fde047";
+  ctx.shadowColor="#fde047";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(bx2,by2+8,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(flying){
+    ctx.fillStyle="#f97316";
+    ctx.shadowColor="#f97316";ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(fx,fy,BR,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  if(wind>0.00003){
+    ctx.fillStyle="rgba(125,211,252,0.8)";ctx.font="12px system-ui";
+    ctx.fillText("风 →",20,70);
+  }else if(wind<-0.00003){
+    ctx.fillStyle="rgba(125,211,252,0.8)";ctx.font="12px system-ui";
+    ctx.fillText("← 风",W-52,70);
+  }
+  if(phase==="up"&&state==="playing"){
+    ctx.fillStyle="rgba(139,144,176,0.8)";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("空格 / 点击 放下吊链",W/2,120);
+    ctx.textAlign="left";
+  }else if(phase==="down"&&state==="playing"){
+    ctx.fillStyle="rgba(251,191,36,0.9)";ctx.font="13px system-ui";ctx.textAlign="center";
+    ctx.fillText("看准摆势!空格 / 点击 松手",W/2,120);
+    ctx.textAlign="left";
+  }
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#4ade80";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,160);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

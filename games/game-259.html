@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>贪婪连击</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#151a30;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#ffd76a}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>贪婪连击</h1>
+<div id="tip">连击越高倍率越高、单词坠得越快——贪婪有代价，90 秒冲击极限分数</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var WORDS=["coin","gain","risk","gold","luck","greed","bonus","prize","combo","fever","boost","surge","storm","blaze","flash","crown","royal","epic","mega","ultra","prime","max","wild","spin","jackpot","fortune","treasure","wealth","rich","brave","dare","rush","dash","hype","peak","vigor","zenith","apex","crest","summit"];
+var ROUND=90;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var words,buffer,target,score,combo,bestCombo,kills,misses,timeLeft,elapsed,shake,running,raf,tPrev,parts;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function mult(){return Math.min(5,1+Math.floor(combo/10));}
+function hudUpd(){
+  hud.textContent='得分 '+score+'　连击 '+combo+'　倍率 x'+mult()+'　击杀 '+kills+'　剩余 '+Math.ceil(timeLeft)+'s';
+}
+function reset(){
+  words=[];buffer='';target=-1;score=0;combo=0;bestCombo=0;kills=0;misses=0;timeLeft=ROUND;elapsed=0;shake=0;parts=[];
+  hudUpd();
+}
+function spawn(){
+  var t=pick(WORDS);
+  for(var k=0;k<words.length;k++){if(words[k].text===t)return;}
+  var xx=rnd(40,Math.max(60,cv.width-110));
+  words.push({text:t,x:xx,y:-24,vy0:26+rnd(0,14)});
+}
+function boom(x,y,col){for(var i=0;i<12;i++)parts.push({x:x,y:y,vx:rnd(-90,90),vy:rnd(-140,30),life:rnd(.3,.7),c:col});}
+function killWord(i){
+  var w=words[i];
+  combo++;
+  bestCombo=Math.max(bestCombo,combo);
+  score+=w.text.length*10*mult();
+  kills++;
+  boom(w.x+40,w.y+14,'#ffd76a');
+  words.splice(i,1);
+  if(target===i){target=-1;buffer='';}else if(target>i)target--;
+  hudUpd();
+}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var cand=-1;
+  if(target>=0&&words[target]&&words[target].text.charAt(buffer.length)===ch)cand=target;
+  if(cand<0){
+    for(var i=0;i<words.length;i++){
+      if(i!==target&&words[i].text.charAt(0)===ch){cand=i;break;}
+    }
+    if(cand>=0)buffer='';
+  }
+  if(cand<0){
+    buffer='';target=-1;
+    if(combo>0){combo=0;shake=4;misses++;hudUpd();}
+    return;
+  }
+  target=cand;buffer+=ch;
+  if(buffer===words[target].text)killWord(target);
+}
+function update(dt){
+  elapsed+=dt;timeLeft-=dt;shake=Math.max(0,shake-dt*12);
+  if(timeLeft<=0){timeLeft=0;end(true);return;}
+  spawnT=(spawnT===undefined?0.4:spawnT)-dt;
+  if(spawnT<=0&&words.length<7){
+    spawn();
+    spawnT=Math.max(0.7,1.9-elapsed*0.012);
+  }
+  var m=mult();
+  for(var i=words.length-1;i>=0;i--){
+    var w=words[i];
+    w.y+=w.vy0*(0.55+0.3*m)*dt;
+    if(w.y>cv.height-36){
+      boom(w.x+40,cv.height-32,'#5a6284',6);
+      words.splice(i,1);
+      if(target===i){target=-1;buffer='';}else if(target>i)target--;
+      if(combo>0){combo=0;shake=4;misses++;hudUpd();}
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=320*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  var m=mult();
+  ctx.fillStyle='rgba(255,215,106,.08)';
+  ctx.fillRect(0,0,cv.width,cv.height*(m/5)*0.3);
+  ctx.font='bold 20px ui-monospace, Consolas, monospace';
+  for(var i=0;i<words.length;i++){
+    var w=words[i];
+    var tw=ctx.measureText(w.text).width;
+    ctx.fillStyle='rgba(255,215,106,.1)';rr(w.x,w.y,tw+22,30,8);ctx.fill();
+    if(i===target){ctx.strokeStyle='#ffd76a';ctx.lineWidth=2;rr(w.x,w.y,tw+22,30,8);ctx.stroke();}
+    var done=(i===target)?buffer:'';
+    var pre=w.text.slice(0,done.length);
+    ctx.fillStyle='#ffd76a';ctx.fillText(pre,w.x+11,w.y+21);
+    ctx.fillStyle='#e8eaf6';ctx.fillText(w.text.slice(done.length),w.x+11+ctx.measureText(pre).width,w.y+21);
+  }
+  if(m>1){
+    ctx.textAlign='center';
+    ctx.font='bold '+(30+m*8)+'px system-ui, sans-serif';
+    ctx.fillStyle='rgba(255,215,106,'+(0.25+m*0.12)+')';
+    ctx.fillText('x'+m,cv.width/2,cv.height-24);
+    ctx.textAlign='left';
+  }
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);
+  if(!running)return;
+  draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'时间到':'挑战结束';
+  ovX.textContent='得分 '+score+'\n最高连击 '+bestCombo+'　击杀 '+kills+'\n失误 '+misses+' 次　用时 '+ROUND+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();spawnT=0.4;ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='贪婪连击';
+ovX.textContent='连续打对字母积累连击：每 10 连击倍率 +1（最高 x5），得分随之暴涨。\n贪婪的代价：倍率越高，单词坠落越快！\n打错或漏掉单词会清空连击。90 秒内冲击最高分。';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

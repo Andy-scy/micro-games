@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>色块猎人</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:480px}
+h1{font-size:25px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:20px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-top:6px}
+#tbar{height:100%;width:100%;background:#4cc9f0;border-radius:6px}
+#grid{display:grid;gap:8px}
+.tile{aspect-ratio:1/1;border:0;border-radius:10px;cursor:pointer;transition:transform .08s}
+.tile:active{transform:scale(.93)}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.shake{animation:shake .25s}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 22px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>色块猎人</h1>
+  <p class="tips">色块群里藏着一只「异类」——颜色略有不同的那一个,点它!每关色差更小、格子更多。答对 +1.5 秒并进入下一关,点错 -3 秒,时间耗尽游戏结束。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1</div></div>
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat" style="flex:2"><div class="mut">剩余时间 <span id="tleft">20.0s</span></div><div class="tbarWrap"><div id="tbar"></div></div></div>
+    </div>
+  </div>
+  <div class="card"><div id="grid"></div></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">色块猎人</h2><p id="ovp">玩法:网格中所有色块颜色几乎相同,只有一个明暗或色相略有偏差。用眼力找出它并点击。<br>· 答对:得分 +关卡数,时间 +1.5 秒,进入下一关<br>· 答错:时间 -3 秒<br>· 格子会越来越多、色差越来越小,时间耗尽即结束</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var level=1,score=0,timeLeft=20,maxTime=30,playing=false,over=false;
+function $(id){return document.getElementById(id)}
+function hsl(h,s,l){return 'hsl('+Math.round(h)+','+Math.round(s)+'%,'+Math.round(l)+'%)'}
+function buildRound(){
+  var gridN=Math.min(2+Math.floor((level-1)/2),7);
+  var g=$('grid');g.innerHTML='';
+  g.style.gridTemplateColumns='repeat('+gridN+',1fr)';
+  var hue=Math.floor(Math.random()*360),sat=55+Math.random()*25,lig=42+Math.random()*16;
+  var mode=Math.random()<0.5;
+  var delta=Math.max(2.2,13-level*0.9);
+  var oddIdx=Math.floor(Math.random()*gridN*gridN);
+  var oddCol=mode?hsl(hue,sat,Math.min(93,lig+delta)):hsl((hue+delta*2.5+8)%360,sat,lig);
+  for(var i=0;i<gridN*gridN;i++){
+    var b=document.createElement('button');
+    b.className='tile';
+    b.style.background=(i===oddIdx)?oddCol:hsl(hue,sat,lig);
+    b.dataset.odd=(i===oddIdx)?'1':'0';
+    g.appendChild(b);
+  }
+  $('lv').textContent=level;
+  $('sc').textContent=score;
+}
+$('grid').addEventListener('click',function(e){
+  if(!playing||over)return;
+  var t=e.target;
+  if(!t.classList||!t.classList.contains('tile'))return;
+  if(t.dataset.odd==='1'){
+    score+=level;
+    timeLeft=Math.min(maxTime,timeLeft+1.5);
+    level++;buildRound();
+  }else{
+    timeLeft=Math.max(0,timeLeft-3);
+    var c=$('grid');
+    c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');
+    if(timeLeft<=0)finish();
+  }
+});
+function startGame(){
+  level=1;score=0;timeLeft=20;playing=true;over=false;
+  $('overlay').classList.add('hide');
+  buildRound();
+}
+function finish(){
+  playing=false;over=true;
+  $('ovt').textContent='时间耗尽!';
+  $('ovp').innerHTML='最终得分 <b>'+score+'</b>,止步第 <b>'+level+'</b> 关。<br>答对越多,色差越小——练出火眼金睛再来一局吧!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=0;finish();}
+    $('tbar').style.width=(timeLeft/maxTime*100)+'%';
+    $('tleft').textContent=timeLeft.toFixed(1)+'s';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钉刺关卡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px;align-items:center}
+.hud b{color:#22d3ee;font-size:16px}
+.gbtn{background:#123a47;color:#67e8f9;border:1px solid #22d3ee;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit;user-select:none}
+.gbtn:active{background:#22d3ee;color:#052830}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#052830;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>钉刺关卡</h1>
+  <p class="hint">← → 变道 · ↑↓ 控制车速 · 触屏点左右半屏变道 · 空格开始</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>距离 <b id="dist">0 m</b></span>
+    <span>轮胎 <b id="tire">▲▲▲</b></span>
+    <span>最佳 <b id="best">0</b></span>
+    <button class="gbtn" id="btnUp">油门(按住)</button>
+    <button class="gbtn" id="btnDown">刹车(按住)</button>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="440" height="600"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">钉刺关卡</h2>
+      <p id="ovDesc">前方布满升降式钉刺带:尖刺按各自的节奏弹出收回,黄色闪烁即将弹出!控制车速掐准时机通过,压中尖刺会爆胎减速,三次爆胎出局。冲到 1000 米终点!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始闯关</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elDist=$("dist"),elTire=$("tire"),elBest=$("best");
+var btnUp=$("btnUp"),btnDown=$("btnDown");
+var LANES=[88,220,352],CARY=H-130;
+var COLORS=["#e05252","#5297e0","#7ed957","#c07ee0","#e0a052"];
+var state="menu",best=0;
+try{best=parseInt(localStorage.getItem("mg_736")||"0",10)||0;}catch(e){best=0;}
+function saveBest(){try{localStorage.setItem("mg_736",String(best));}catch(e){}}
+var lane,px,cars,rows,dist,v,T,score,hits,slowT,flashRed,nextRowW,spawnT,keys,touchBtn;
+function reset(){
+  lane=1;px=LANES[1];cars=[];rows=[];dist=0;v=360;T=0;score=0;hits=0;slowT=0;flashRed=0;
+  nextRowW=480;spawnT=1.6;keys={};touchBtn=0;
+  elScore.textContent="0";elDist.textContent="0 m";elTire.textContent="▲▲▲";elBest.textContent=best;
+}
+function rowState(r){
+  var u=((T/r.period)+r.phase)%1;
+  if(u<0.44)return 2;
+  if(u>0.78)return 1;
+  return 0;
+}
+function endGame(title,win){
+  state="over";
+  if(score>best){best=score;saveBest();elBest.textContent=best;}
+  ovTitle.textContent=title;
+  ovTitle.style.color=win?"#4ade80":"#f87171";
+  ovDesc.textContent=win?"钉刺带再也拦不住你了。":"黄色闪烁预警=尖刺即将弹出,收油等待再通过。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 距离 "+Math.floor(dist/30)+" m · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");ovTitle.style.color="#22d3ee";}
+function update(dt){
+  var i,st,tv;
+  T+=dt;
+  tv=360;
+  if(keys.up||touchBtn===1)tv=520;
+  else if(keys.down||touchBtn===-1)tv=190;
+  if(slowT>0){slowT-=dt;tv*=0.45;}
+  v+=(tv-v)*Math.min(1,dt*2);
+  px+=(LANES[lane]-px)*Math.min(1,dt*10);
+  dist+=v*dt;
+  score=Math.floor(dist/30);
+  elScore.textContent=score;
+  elDist.textContent=Math.floor(dist/30)+" m";
+  while(nextRowW<dist+900){
+    rows.push({w:nextRowW,period:2.5+Math.random()*0.8,phase:Math.random(),prev:nextRowW-dist});
+    nextRowW+=330+Math.random()*140;
+  }
+  for(i=rows.length-1;i>=0;i--){
+    var r=rows[i];
+    var rel=r.w-dist;
+    if(rel<-80){rows.splice(i,1);continue;}
+    if(r.prev>0&&rel<=0&&rowState(r)===2){
+      hits++;slowT=1.2;flashRed=0.7;
+      elTire.textContent=hits===1?"▲▲✗":(hits===2?"▲✗✗":"✗✗✗");
+      if(hits>=3){endGame("轮胎全爆了!",false);return;}
+    }
+    r.prev=rel;
+  }
+  spawnT-=dt;
+  if(spawnT<=0){
+    spawnT=1.4+Math.random()*0.7;
+    var ln=(Math.random()*3)|0;
+    cars.push({lane:ln,x:LANES[ln],y:-90,color:COLORS[(Math.random()*COLORS.length)|0]});
+  }
+  for(i=cars.length-1;i>=0;i--){
+    var c=cars[i];
+    c.x=LANES[c.lane];
+    c.y+=v*0.58*dt;
+    if(c.y>H+140){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<38&&Math.abs(c.y-CARY)<66){endGame("撞上了前车!",false);return;}
+  }
+  flashRed=Math.max(0,flashRed-dt);
+  if(dist>=30000){endGame("冲过终点!",true);return;}
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function drawCar(x,y,body){
+  rr(x-21,y-35,42,70,8);ctx.fillStyle=body;ctx.fill();
+  rr(x-13,y-24,26,22,4);ctx.fillStyle="#141826";ctx.fill();
+  ctx.fillStyle="rgba(10,12,22,0.9)";
+  ctx.fillRect(x-25,y-28,5,14);ctx.fillRect(x+20,y-28,5,14);
+  ctx.fillRect(x-25,y+14,5,14);ctx.fillRect(x+20,y+14,5,14);
+}
+function draw(){
+  var i,y,sx,st;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#12182a";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#232742";ctx.fillRect(20,0,400,H);
+  ctx.fillStyle="#f6d35c";
+  var dash=(dist*1.4)%64;
+  for(i=-1;i<H/64+2;i++){ctx.fillRect(151,i*64+dash-64,5,34);ctx.fillRect(284,i*64+dash-64,5,34);}
+  for(i=0;i<rows.length;i++){
+    var r=rows[i],sy=CARY-(r.w-dist);
+    if(sy<-40||sy>H+40)continue;
+    st=rowState(r);
+    ctx.fillStyle="#3a3f5c";ctx.fillRect(24,sy-6,392,12);
+    if(st===2){
+      ctx.fillStyle="#f87171";
+      for(sx=36;sx<408;sx+=26){
+        ctx.beginPath();ctx.moveTo(sx-9,sy-4);ctx.lineTo(sx,sy-20);ctx.lineTo(sx+9,sy-4);ctx.closePath();ctx.fill();
+      }
+    }else{
+      ctx.fillStyle="#20243e";
+      for(sx=36;sx<408;sx+=26)ctx.fillRect(sx-4,sy-9,8,5);
+      if(st===1&&Math.floor(T*6)%2===0){
+        ctx.strokeStyle="#fbbf24";ctx.lineWidth=2;
+        ctx.strokeRect(24,sy-24,392,30);ctx.lineWidth=1;
+      }
+    }
+  }
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].color);
+  drawCar(px,CARY,slowT>0?"#f8b4b4":"#22d3ee");
+  if(flashRed>0){
+    ctx.strokeStyle="rgba(248,113,113,"+flashRed+")";ctx.lineWidth=6;
+    ctx.strokeRect(3,3,W-6,H-6);ctx.lineWidth=1;
+  }
+  if(Math.floor(dist/30)>=940){
+    var fy=CARY-(30000-dist);
+    if(fy>-40&&fy<H+40){
+      ctx.fillStyle="#4ade80";ctx.fillRect(24,fy-8,392,8);
+      ctx.fillStyle="#4ade80";ctx.font="bold 12px system-ui";ctx.textAlign="center";
+      ctx.fillText("终点 1000m",220,fy-14);
+    }
+  }
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A"){e.preventDefault();if(lane>0)lane--;}
+  else if(e.key==="ArrowRight"||e.key==="d"||e.key==="D"){e.preventDefault();if(lane<2)lane++;}
+  else if(e.key==="ArrowUp"||e.key==="w"||e.key==="W"){e.preventDefault();keys.up=true;}
+  else if(e.key==="ArrowDown"||e.key==="s"||e.key==="S"){e.preventDefault();keys.down=true;}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowUp"||e.key==="w"||e.key==="W")keys.up=false;
+  if(e.key==="ArrowDown"||e.key==="s"||e.key==="S")keys.down=false;
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var t=e.changedTouches[0],rc=cv.getBoundingClientRect();
+  if(t.clientX-rc.left<rc.width/2){if(lane>0)lane--;}else{if(lane<2)lane++;}
+  e.preventDefault();
+},{passive:false});
+function holdUp(ev){touchBtn=1;if(ev)ev.preventDefault();}
+function holdDown(ev){touchBtn=-1;if(ev)ev.preventDefault();}
+function holdOff(ev){touchBtn=0;if(ev)ev.preventDefault();}
+btnUp.addEventListener("touchstart",holdUp,{passive:false});
+btnUp.addEventListener("touchend",holdOff,{passive:false});
+btnUp.addEventListener("mousedown",holdUp);
+btnUp.addEventListener("mouseup",holdOff);
+btnUp.addEventListener("mouseleave",holdOff);
+btnDown.addEventListener("touchstart",holdDown,{passive:false});
+btnDown.addEventListener("touchend",holdOff,{passive:false});
+btnDown.addEventListener("mousedown",holdDown);
+btnDown.addEventListener("mouseup",holdOff);
+btnDown.addEventListener("mouseleave",holdOff);
+btnGo.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>百鱼图鉴</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>百鱼图鉴</h1>
+<p class="tip">浅水洼与深水潭各有不同鱼种,点击水域下竿自动起鱼。25 次机会内集齐 8 种鱼,点亮整本图鉴!</p>
+<div id="hud"><span>图鉴 <b id="s1">0/8</b></span><span>机会 <b id="s2">25</b></span><span>得分 <b id="s3">0</b></span></div>
+<canvas id="cv" width="480" height="640"></canvas>
+<div id="ov"><h2 id="ot">百鱼图鉴</h2><p id="op">浅水洼:白条、鲫鱼、草鱼、锦鲤<br>深水潭:泥鳅、鲶鱼、鳜鱼、河豚<br>集齐 8 种鱼点亮图鉴即胜利,锦鲤两处都可能出现!</p><button id="ob">开始收集</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eD=document.getElementById('s1'),eC=document.getElementById('s2'),eS=document.getElementById('s3');
+var W=cv.width,H=cv.height;
+var dex=[['白条',20,'#b8c9d9'],['鲫鱼',30,'#9fd4b8'],['草鱼',60,'#7fa66a'],['锦鲤',150,'#ff8f5f'],['泥鳅',20,'#a08a6a'],['鲶鱼',40,'#6f7f95'],['鳜鱼',70,'#c9a24f'],['河豚',80,'#e8b7c9']];
+var pools=[
+ [['白条',20,0.40],['鲫鱼',30,0.30],['草鱼',60,0.22],['锦鲤',150,0.08]],
+ [['泥鳅',20,0.30],['鲶鱼',40,0.28],['鳜鱼',70,0.22],['河豚',80,0.12],['锦鲤',150,0.08]]];
+var found={},score=0,casts=25,msg='',newFlag=false;
+var zone=0,phase='idle',pt=0,tWait=0,card=null,fCnt=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function rollSpecies(z){
+  var r=Math.random(),c=0,i;
+  for(i=0;i<pools[z].length;i++){c+=pools[z][i][2];if(r<=c)return pools[z][i]}
+  return pools[z][pools[z].length-1];
+}
+function cast(z){
+  if(state!=='play')return;
+  if(phase!=='idle'||casts<=0)return;
+  zone=z;casts--;phase='cast';pt=0;msg='';
+}
+function finish(win){
+  state='over';ob.textContent='再来一局';
+  ot.textContent=win?'图鉴集齐!':'机会用完了…';
+  op.innerHTML='已收录 <b style="color:#ffd75e">'+fCnt+' / 8</b> 种 · 得分 '+score+'<br>'+(win?'整本图鉴金光闪闪,你是百鱼先生!':'还差几种鱼,换片水域再试试运气。');
+  ov.classList.remove('hide');
+}
+function start(){
+  found={};score=0;casts=25;msg='';zone=0;phase='idle';pt=0;card=null;fCnt=0;newFlag=false;
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  pt+=dt;
+  if(phase==='cast'){
+    if(pt>=0.4){phase='wait';pt=0;tWait=rnd(0.8,1.5)}
+  }else if(phase==='wait'){
+    if(pt>=tWait){
+      var sp=rollSpecies(zone);
+      newFlag=!found[sp[0]];
+      if(newFlag){found[sp[0]]=true;fCnt++}
+      score+=sp[1];
+      card={name:sp[0],v:sp[1]};
+      msg=newFlag?'新收录!'+sp[0]+' +'+sp[1]+' 分':'又钓到'+sp[0]+' +'+sp[1]+' 分';
+      phase='show';pt=0;
+    }
+  }else if(phase==='show'){
+    if(pt>=1.3){
+      card=null;phase='idle';
+      if(fCnt>=8){finish(true);return}
+      if(casts<=0){finish(false);return}
+    }
+  }
+}
+function drawFish(x,y,c,s){
+  X.fillStyle=c;
+  X.beginPath();X.ellipse(x,y,14*s,6*s,0,0,7);X.fill();
+  X.beginPath();X.moveTo(x+12*s,y);X.lineTo(x+22*s,y-6*s);X.lineTo(x+22*s,y+6*s);X.closePath();X.fill();
+  X.fillStyle='#0f1220';X.beginPath();X.arc(x-7*s,y-2*s,1.6*s,0,7);X.fill();
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,70);g.addColorStop(0,'#151c36');g.addColorStop(1,'#232a4d');
+  X.fillStyle=g;X.fillRect(0,0,W,70);
+  X.fillStyle='#9aa3b5';X.font='13px system-ui';X.textAlign='left';
+  X.fillText('点左片浅水洼或右片深水潭下竿,或按 1 / 2 键',12,44);
+  var zs=[['浅水洼','#1c4a58','#123542'],['深水潭','#12365e','#0a2038']];
+  var i,t=Date.now()*0.001;
+  for(i=0;i<2;i++){
+    var x0=i===0?14:248;
+    var g2=X.createLinearGradient(0,80,0,350);g2.addColorStop(0,zs[i][1]);g2.addColorStop(1,zs[i][2]);
+    X.fillStyle=g2;X.fillRect(x0,80,218,270);
+    X.strokeStyle=i===zone&&phase==='idle'?'rgba(255,215,94,.8)':'rgba(127,212,255,.25)';
+    X.lineWidth=i===zone&&phase==='idle'?2.5:1.5;
+    X.strokeRect(x0,80,218,270);
+    X.fillStyle='rgba(220,232,245,.85)';X.font='bold 14px system-ui';X.fillText(zs[i][0],x0+12,104);
+    var k;
+    for(k=0;k<3;k++){
+      var fx=x0+30+((k*67+i*40)%160)+Math.sin(t*(0.8+k*0.2)+k*2)*14;
+      var fy=150+k*60+Math.cos(t+k)*6;
+      X.fillStyle='rgba(10,26,44,.55)';
+      X.beginPath();X.ellipse(fx,fy,16,7,0,0,7);X.fill();
+    }
+  }
+  if(phase==='cast'||phase==='wait'){
+    var cx=zone===0?123:357;
+    X.strokeStyle='rgba(230,238,246,.7)';X.lineWidth=1.5;
+    X.beginPath();X.moveTo(cx,80);X.lineTo(cx,phase==='cast'?150:210);X.stroke();
+    X.fillStyle='#ff5f5f';X.beginPath();X.arc(cx,phase==='cast'?152:212,5,0,7);X.fill();
+    if(phase==='wait'){X.fillStyle='#ffe9a3';X.font='12px system-ui';X.textAlign='center';X.fillText('…',cx,236)}
+  }
+  if(card){
+    var px=zone===0?123:357,py=230;
+    X.fillStyle='rgba(8,12,24,.88)';X.strokeStyle='#ffd75e';X.lineWidth=2;
+    X.fillRect(px-90,py-52,180,104);X.strokeRect(px-90,py-52,180,104);
+    var col='#9fb4c9',di;
+    for(di=0;di<dex.length;di++){if(dex[di][0]===card.name)col=dex[di][2]}
+    drawFish(px,py-14,col,1.6);
+    X.fillStyle='#ffffff';X.font='bold 17px system-ui';X.textAlign='center';
+    X.fillText(card.name,px,py+22);
+    X.fillStyle='#ffd75e';X.font='bold 14px system-ui';
+    X.fillText((newFlag?'新收录! ':'')+'+'+card.v+' 分',px,py+42);
+  }
+  X.fillStyle='#0c1428';X.fillRect(0,380,W,260);
+  X.fillStyle='#7fd4ff';X.font='bold 15px system-ui';X.textAlign='left';
+  X.fillText('鱼类图鉴',16,404);
+  for(i=0;i<8;i++){
+    var cxx=16+(i%4)*116,cy=414+Math.floor(i/4)*104,ok=!!found[dex[i][0]];
+    X.fillStyle=ok?'rgba(30,48,80,.9)':'rgba(20,26,44,.9)';
+    X.fillRect(cxx,cy,108,92);
+    X.strokeStyle=ok?'rgba(255,215,94,.6)':'rgba(80,92,120,.5)';X.lineWidth=1.5;
+    X.strokeRect(cxx,cy,108,92);
+    if(ok)drawFish(cxx+50,cy+34,dex[i][2],1.7);
+    else{
+      X.fillStyle='rgba(90,100,130,.6)';X.font='bold 22px system-ui';X.textAlign='center';
+      X.fillText('?',cxx+50,cy+42);
+    }
+    X.fillStyle=ok?'#ffffff':'rgba(120,130,160,.8)';X.font='13px system-ui';
+    X.fillText(ok?dex[i][0]:'???',cxx+50,cy+64);
+    X.fillStyle='#ffd75e';X.font='12px system-ui';
+    X.fillText(ok?dex[i][1]+'分':'—',cxx+50,cy+82);
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 15px system-ui';X.textAlign='center';X.fillText(msg,W/2,60);
+}
+cv.addEventListener('pointerdown',function(e){
+  var r=cv.getBoundingClientRect();
+  var mx=(e.clientX-r.left)*(W/r.width),my=(e.clientY-r.top)*(H/r.height);
+  if(state!=='play')return;
+  if(my>=80&&my<=350)cast(mx<240?0:1);
+});
+document.addEventListener('keydown',function(e){
+  if(state!=='play'){
+    if(e.key===' '||e.key==='Enter'){e.preventDefault();start()}
+    return;
+  }
+  if(e.key==='1')cast(0);
+  else if(e.key==='2')cast(1);
+  else if(e.key===' '){e.preventDefault();cast(zone)}
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eD.textContent=fCnt+'/8';eC.textContent=casts;eS.textContent=score;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

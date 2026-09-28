@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>成语猜猜看</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#f78c6b;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#f78c6b}
+#emo{text-align:center;font-size:42px;letter-spacing:6px;padding:18px 6px;background:#232a48;border-radius:12px;margin-bottom:12px;min-height:88px}
+#hint{text-align:center;color:#9aa3c0;font-size:13px;margin-bottom:10px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:11px 13px;font-size:16px;margin-bottom:8px;cursor:pointer;text-align:center;font-family:inherit;letter-spacing:2px}
+.opt:hover{border-color:#f78c6b}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:13px;color:#cdd6f4;min-height:38px;margin-top:6px;line-height:1.7}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#f78c6b;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#f78c6b;color:#20101a;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>成语猜猜看</h1>
+  <p class="tips">看一串表情符号,猜出它代表的成语!不限时、可慢慢想;答对得 100 分,连对有连击加成;答错扣一条命并展示正确答案与释义。共 10 题,3 条命。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/10</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="st">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div id="emo">🏹✌️🦅</div>
+    <div id="hint">—— 这些表情让你想到哪个成语? ——</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">成语猜猜看</h2><p id="ovp">· 每题给出一组表情,暗示一个常见成语<br>· 从四个选项中点选正确答案,不限时<br>· 答对 +100,连击每层额外 +20(最多 +100)<br>· 答错 -1 条命,并显示成语释义帮你记住<br>· 共 10 题,3 命用完提前结束</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{e:'🏹✌️🦅',o:['一箭双雕','百步穿杨','双喜临门','两全其美'],x:'一箭射中两只雕,比喻做一件事同时达到两个目的。'},
+{e:'🐍🖌️👣',o:['画蛇添足','蛇鼠一窝','虎头蛇尾','笔走龙蛇'],x:'给蛇画上脚,比喻做了多余的事,反而弄巧成拙。'},
+{e:'🌳🐇⏳',o:['守株待兔','刻舟求剑','缘木求鱼','拔苗助长'],x:'守在树桩旁等兔子撞死,比喻不主动努力,妄想不劳而获。'},
+{e:'🕳️🐸👀',o:['井底之蛙','杯弓蛇影','瓮中捉鳖','浑水摸鱼'],x:'井底的青蛙只能看见一小片天,比喻见识短浅的人。'},
+{e:'🦊🐯👑',o:['狐假虎威','狼狈为奸','装腔作势','为虎作伥'],x:'狐狸借着老虎的威风吓走百兽,比喻倚仗他人势力欺压人。'},
+{e:'🙉🔔🏃',o:['掩耳盗铃','亡羊补牢','买椟还珠','郑人买履'],x:'捂住自己的耳朵去偷铃铛,比喻自己欺骗自己。'},
+{e:'🐑🕳️🔨',o:['亡羊补牢','未雨绸缪','改邪归正','浪子回头'],x:'丢了羊再修羊圈,比喻出了问题后及时补救还不算晚。'},
+{e:'🐉👁️✨',o:['画龙点睛','点石成金','神来之笔','锦上添花'],x:'画龙最后点上眼睛,比喻在关键处点明要旨,使内容传神。'},
+{e:'🐂🎻🙄',o:['对牛弹琴','牛刀小试','琴瑟和鸣','无的放矢'],x:'对着牛弹琴,比喻对不懂道理的人讲道理,白费口舌。'},
+{e:'🐅🐍🔚',o:['虎头蛇尾','龙争虎斗','打草惊蛇','狼吞虎咽'],x:'头大如虎、尾细如蛇,比喻做事有始无终,后劲不足。'},
+{e:'🦢🐔👥',o:['鹤立鸡群','鸡飞蛋打','杀鸡儆猴','闻鸡起舞'],x:'鹤站在鸡群中格外突出,比喻才能或仪表十分出众。'},
+{e:'🍷🏹🐍',o:['杯弓蛇影','觥筹交错','借酒浇愁','醉翁之意'],x:'把酒杯里的弓影当成蛇,比喻疑神疑鬼,自己吓自己。'},
+{e:'💧💧🪨',o:['水滴石穿','铁杵成针','愚公移山','川流不息'],x:'水不停地滴能把石头滴穿,比喻坚持不懈终能成功。'},
+{e:'❄️🧍🔥🎁',o:['雪中送炭','火上浇油','锦上添花','落井下石'],x:'下雪天给人送炭取暖,比喻在别人急需时给予帮助。'},
+{e:'🐒📅❓',o:['猴年马月','猴头猴脑','尖嘴猴腮','杀鸡儆猴'],x:'指遥遥无期的漫长岁月,形容事情不知要等到什么时候。'},
+{e:'🐔🐶🌪️',o:['鸡飞狗跳','鸡鸣狗盗','偷鸡摸狗','鸡犬升天'],x:'鸡吓得乱飞、狗吓得乱跳,形容惊乱得一团糟。'},
+{e:'🪨2️⃣🐦',o:['一石二鸟','石破天惊','笨鸟先飞','惊弓之鸟'],x:'扔一块石头打到两只鸟,比喻一举两得。'},
+{e:'🔥👁️👁️',o:['火眼金睛','炯炯有神','眼疾手快','有眼无珠'],x:'孙悟空识破妖怪的眼睛,形容眼光锐利、识别力强。'},
+{e:'🐴☁️🌌',o:['天马行空','万马奔腾','马到成功','龙马精神'],x:'神马在天上飞驰,比喻思维奔放不受拘束。'},
+{e:'🌸🌕🎊',o:['花好月圆','镜花水月','春花秋月','昙花一现'],x:'花开正盛、月亮正圆,比喻美好圆满,多用于祝贺新婚。'},
+{e:'🍳🚢⚔️',o:['破釜沉舟','背水一战','孤注一掷','义无反顾'],x:'打破锅、凿沉船,下决心不留退路,拼到底。'},
+{e:'🌊🪡⏰',o:['大海捞针','海底捞月','探囊取物','缘木求鱼'],x:'在大海里捞一根针,形容极难找到目标或达成目的。'},
+{e:'🐺🍚🐯😋',o:['狼吞虎咽','细嚼慢咽','饥不择食','风卷残云'],x:'像狼和虎一样吞咽食物,形容吃得又急又猛。'},
+{e:'🐉🦅🖋️',o:['龙飞凤舞','龙腾虎跃','生龙活虎','藏龙卧虎'],x:'形容书法笔势舒展活泼,也形容山势蜿蜒雄壮。'},
+{e:'🐦📢🏆',o:['一鸣惊人','百鸟朝凤','鸦雀无声','莺歌燕舞'],x:'平时默默无闻,一下子做出惊人的成绩。'},
+{e:'7️⃣⬆️8️⃣⬇️',o:['七上八下','七零八落','乱七八糟','七嘴八舌'],x:'七个上去八个下来,形容心里慌乱不安、忐忑不定。'},
+{e:'🌾🌾😊',o:['五谷丰登','硕果累累','六畜兴旺','春华秋实'],x:'各种粮食庄稼丰收,形容年成好。'},
+{e:'👆🦌➡️🐴',o:['指鹿为马','指桑骂槐','张冠李戴','李代桃僵'],x:'指着鹿硬说是马,比喻故意颠倒黑白、混淆是非。'},
+{e:'🐅👀⚡',o:['虎视眈眈','虎口拔牙','如虎添翼','谈虎色变'],x:'像老虎那样凶狠地盯着,形容心怀不善、伺机而动。'},
+{e:'🐓💃🌅',o:['闻鸡起舞','鸡犬升天','金鸡独立','舞刀弄枪'],x:'听到鸡叫就起来舞剑,形容有志之士及时奋发努力。'}
+];
+var N=10;
+var quiz=[],idx=0,score=0,lives=3,streak=0,playing=false,over=false,waitT=0,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;streak=0;over=false;playing=true;waitT=0;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';$('st').textContent='0';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('emo').textContent=it.e;
+  $('hint').textContent='—— 这些表情让你想到哪个成语? ——';
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over)return;
+  var it=quiz[idx];
+  var btns=$('opts').children,i,ok=btn.dataset.ok==='1';
+  if(ok){
+    streak++;
+    var bonus=Math.min(streak-1,5)*20;
+    score+=100+bonus;
+    btn.classList.add('ok');
+    $('st').textContent=streak;
+    $('msg').textContent='✔ '+it.o[0]+'　+'+(100+bonus)+' 分';
+  }else{
+    lives--;streak=0;
+    $('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    $('st').textContent='0';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent='✘ 正确答案:'+it.o[0]+'。'+it.x;
+  }
+  $('sc').textContent=score;
+  idx++;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else showQ();
+  },2100);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1400?'成语大师!':(score>=1000?'出口成章!':(score>=600?'渐入佳境!':'继续积累!'));
+  $('ovt').textContent=win?'挑战完成 · '+rank:'生命耗尽…';
+  $('ovp').innerHTML='本轮共 '+Math.min(idx,N)+' 题,最高理解力靠日积月累<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 多看释义,再来一局!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over){
+    var s=1+0.04*Math.sin(t/260);
+    $('emo').style.transform='scale('+s.toFixed(3)+')';
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

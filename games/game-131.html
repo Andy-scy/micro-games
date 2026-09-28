@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双井同屏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#2dd4bf;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#2dd4bf;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#2dd4bf}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#2dd4bf;color:#03302a;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>双井同屏</h1>
+  <p class="hint">← → 移动 · ↑ 旋转 · 空格 硬降<br>一套操作同时控制甲、乙两口井,任一井堆满即输!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>行数 <b id="lines">0</b></span>
+    <span>等级 <b id="level">1</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="272" height="320"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">双井同屏</h2>
+      <p id="ovDesc">左右两口井同时下落各自的方块,而你的每一次移动、旋转、硬降都会同时作用在两口井上(各自独立判定是否可行)。一心二用,消行得分,任何一口井被堆满就结束!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">双线开战</button>
+    </div>
+  </div>
+  <div class="pads" id="pads">
+    <button data-a="left">◀</button>
+    <button data-a="down">▼</button>
+    <button data-a="rot">⟳</button>
+    <button data-a="right">▶</button>
+    <button data-a="drop">⤓</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var CELL=16,WC=7,ROWS=20,MX=12,GAP=24;
+var WX=[MX,MX+WC*CELL+GAP];
+var W=(MX+WC*CELL)*2+GAP,H=ROWS*CELL;
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elLines=$("lines"),elLevel=$("level"),elBest=$("best");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var COLORS=[null,"#22d3ee","#facc15","#c084fc","#4ade80","#f87171","#60a5fa","#fb923c"];
+var TYPES=["I","O","T","S","Z","J","L"];
+var TYPEID={I:1,O:2,T:3,S:4,Z:5,J:6,L:7};
+var SHAPES={
+ I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+ O:[[1,1],[1,1]],
+ T:[[0,1,0],[1,1,1],[0,0,0]],
+ S:[[0,1,1],[1,1,0],[0,0,0]],
+ Z:[[1,1,0],[0,1,1],[0,0,0]],
+ J:[[1,0,0],[1,1,1],[0,0,0]],
+ L:[[0,0,1],[1,1,1],[0,0,0]]
+};
+var KICKS=[[0,0],[-1,0],[1,0],[-2,0],[2,0],[0,-1],[-1,-1],[1,-1]];
+var wells,bag,score,lines,level;
+var state="menu",lastT=0,acc=0,soft=false;
+var msg="",msgC="#fff",msgT=0;
+var best=loadBest("mg_b131");
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function flash(t,c){msg=t;msgC=c;msgT=1100;}
+function emptyRow(){var r=[],i;for(i=0;i<WC;i++)r.push(0);return r;}
+function refillBag(){
+  var t=TYPES.slice(),i,j,tmp;
+  for(i=t.length-1;i>0;i--){j=(Math.random()*(i+1))|0;tmp=t[i];t[i]=t[j];t[j]=tmp;}
+  bag=bag.concat(t);
+}
+function nextType(){if(bag.length<2)refillBag();return bag.shift();}
+function clone(m){return m.map(function(r){return r.slice();});}
+function collideW(w,m,px,py){
+  var x,y,bx,by;
+  for(y=0;y<m.length;y++)for(x=0;x<m[y].length;x++){
+    if(!m[y][x])continue;
+    bx=px+x;by=py+y;
+    if(bx<0||bx>=WC||by>=ROWS)return true;
+    if(by>=0&&w.b[by][bx])return true;
+  }
+  return false;
+}
+function mkWell(){
+  var b=[],y;
+  for(y=0;y<ROWS;y++)b.push(emptyRow());
+  return {b:b,cur:null};
+}
+function spawnOne(i){
+  var t=nextType(),w=wells[i],m=clone(SHAPES[t]);
+  w.cur={t:t,m:m,c:TYPEID[t],x:((WC-m[0].length)/2)|0,y:0};
+  if(collideW(w,w.cur.m,w.cur.x,w.cur.y)){
+    w.cur=null;
+    gameOver((i===0?"甲":"乙")+" 井被堆满了!");
+  }
+}
+function fillSpawns(){
+  var i;
+  for(i=0;i<2;i++){
+    if(state==="playing"&&!wells[i].cur)spawnOne(i);
+  }
+}
+function moveAll(dx){
+  var i,w;
+  if(state!=="playing")return;
+  for(i=0;i<2;i++){
+    w=wells[i];
+    if(w.cur&&!collideW(w,w.cur.m,w.cur.x+dx,w.cur.y))w.cur.x+=dx;
+  }
+}
+function rotMat(m,dir){
+  var h=m.length,wd=m[0].length,r=[],x,y;
+  for(y=0;y<wd;y++)r.push([]);
+  for(y=0;y<wd;y++)for(x=0;x<h;x++){
+    r[y][x]=dir>0?m[h-1-x][y]:m[x][wd-1-y];
+  }
+  return r;
+}
+function rotateAll(dir){
+  var i,w,nm,j,k;
+  if(state!=="playing")return;
+  for(i=0;i<2;i++){
+    w=wells[i];
+    if(!w.cur)continue;
+    nm=rotMat(w.cur.m,dir);
+    for(j=0;j<KICKS.length;j++){
+      k=KICKS[j];
+      if(!collideW(w,nm,w.cur.x+k[0],w.cur.y+k[1])){
+        w.cur.m=nm;w.cur.x+=k[0];w.cur.y+=k[1];break;
+      }
+    }
+  }
+}
+function gravMs(){var s=560-(level-1)*40;return s<90?90:s;}
+function tickWells(){
+  var i,w;
+  for(i=0;i<2;i++){
+    w=wells[i];
+    if(!w.cur)continue;
+    if(!collideW(w,w.cur.m,w.cur.x,w.cur.y+1)){w.cur.y++;if(soft)score++;}
+    else lockW(i);
+  }
+  fillSpawns();
+}
+function hardDropAll(){
+  var i,w,d;
+  if(state!=="playing")return;
+  for(i=0;i<2;i++){
+    w=wells[i];
+    if(!w.cur)continue;
+    d=0;
+    while(!collideW(w,w.cur.m,w.cur.x,w.cur.y+1)){w.cur.y++;d++;}
+    score+=d*2;
+    lockW(i);
+  }
+  fillSpawns();
+}
+function lockW(i){
+  var w=wells[i],x,y,bx,by,topOut=false;
+  for(y=0;y<w.cur.m.length;y++)for(x=0;x<w.cur.m[y].length;x++){
+    if(!w.cur.m[y][x])continue;
+    bx=w.cur.x+x;by=w.cur.y+y;
+    if(by<0){topOut=true;continue;}
+    w.b[by][bx]=w.cur.c;
+  }
+  if(topOut){w.cur=null;gameOver((i===0?"甲":"乙")+" 井被堆满了!");return;}
+  w.cur=null;
+  clearW(w);
+}
+function rowFullW(w,r){var x;for(x=0;x<WC;x++){if(!r[x])return false;}return true;}
+function clearW(w){
+  var keep=[],n=0,y;
+  for(y=0;y<ROWS;y++){if(rowFullW(w,w.b[y]))n++;else keep.push(w.b[y]);}
+  if(n===0)return;
+  while(keep.length<ROWS)keep.unshift(emptyRow());
+  w.b=keep;
+  score+=[0,100,300,500,800][n]*level;
+  lines+=n;
+  level=1+((lines/10)|0);
+  if(n>=2)flash("双井消 "+n+" 行!","#2dd4bf");
+}
+function updateHud(){
+  elScore.textContent=score;
+  elLines.textContent=lines;
+  elLevel.textContent=level;
+  elBest.textContent=best;
+}
+function gameOver(reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_b131",best);}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=reason+"\n两口井合计消行 "+lines+" 行";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  reset();
+  state="playing";
+  ov.classList.add("hide");
+}
+function reset(){
+  bag=[];refillBag();
+  wells=[mkWell(),mkWell()];
+  score=0;lines=0;level=1;
+  acc=0;soft=false;msgT=0;
+  fillSpawns();
+}
+function block(px,py,color){
+  ctx.fillStyle=color;
+  ctx.fillRect(px+1,py+1,CELL-2,CELL-2);
+  ctx.fillStyle="rgba(255,255,255,0.22)";
+  ctx.fillRect(px+1,py+1,CELL-2,3);
+}
+function drawMini(t,cx,cy,s){
+  var m=SHAPES[t],x,y,w=m[0].length,h=m.length,ox,oy;
+  ox=cx-w*s/2;oy=cy-h*s/2;
+  for(y=0;y<h;y++)for(x=0;x<w;x++){
+    if(m[y][x]){
+      ctx.fillStyle=COLORS[TYPEID[t]];
+      ctx.fillRect(ox+x*s+1,oy+y*s+1,s-2,s-2);
+    }
+  }
+}
+function drawWell(i){
+  var w=wells[i],ox=WX[i],x,y,c;
+  ctx.fillStyle="#10142a";
+  ctx.fillRect(ox,0,WC*CELL,ROWS*CELL);
+  ctx.strokeStyle="rgba(255,255,255,0.05)";
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  for(x=1;x<WC;x++){ctx.moveTo(ox+x*CELL,0);ctx.lineTo(ox+x*CELL,ROWS*CELL);}
+  for(y=1;y<ROWS;y++){ctx.moveTo(ox,y*CELL);ctx.lineTo(ox+WC*CELL,y*CELL);}
+  ctx.stroke();
+  ctx.fillStyle="#8b90b0";
+  ctx.font="11px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText(i===0?"甲井":"乙井",ox+WC*CELL/2,12);
+  for(y=0;y<ROWS;y++)for(x=0;x<WC;x++){
+    c=w.b[y][x];
+    if(c)block(ox+x*CELL,y*CELL,COLORS[c]);
+  }
+  if(state==="playing"&&w.cur){
+    var gy=w.cur.y;
+    while(!collideW(w,w.cur.m,w.cur.x,gy+1))gy++;
+    ctx.strokeStyle="rgba(255,255,255,0.35)";
+    ctx.lineWidth=1.5;
+    for(y=0;y<w.cur.m.length;y++)for(x=0;x<w.cur.m[y].length;x++){
+      if(w.cur.m[y][x]&&gy+y>=0)ctx.strokeRect(ox+(w.cur.x+x)*CELL+2,(gy+y)*CELL+2,CELL-4,CELL-4);
+    }
+    for(y=0;y<w.cur.m.length;y++)for(x=0;x<w.cur.m[y].length;x++){
+      if(w.cur.m[y][x]&&w.cur.y+y>=0)block(ox+(w.cur.x+x)*CELL,(w.cur.y+y)*CELL,COLORS[w.cur.c]);
+    }
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawWell(0);
+  drawWell(1);
+  ctx.fillStyle="#8b90b0";
+  ctx.font="11px system-ui,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText("下一",W/2,30);
+  if(bag.length)drawMini(bag[0],W/2,56,10);
+  if(msgT>0){
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,msgT/400);
+    ctx.fillStyle=msgC;
+    ctx.font="bold 15px system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText(msg,W/2,110);
+    ctx.restore();
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);
+  lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    acc+=dt;
+    var iv=soft?40:gravMs();
+    var guard=0;
+    while(acc>=iv&&state==="playing"&&guard<6){acc-=iv;tickWells();guard++;}
+  }
+  updateHud();
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(state!=="playing"){
+    if(k===" "||k==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  if(k==="ArrowLeft"){e.preventDefault();moveAll(-1);}
+  else if(k==="ArrowRight"){e.preventDefault();moveAll(1);}
+  else if(k==="ArrowDown"){e.preventDefault();soft=true;}
+  else if(k==="ArrowUp"||k==="x"||k==="X"){e.preventDefault();if(!e.repeat)rotateAll(1);}
+  else if(k==="z"||k==="Z"){e.preventDefault();if(!e.repeat)rotateAll(-1);}
+  else if(k===" "){e.preventDefault();if(!e.repeat)hardDropAll();}
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowDown")soft=false;
+});
+document.getElementById("pads").addEventListener("click",function(e){
+  var a=e.target.getAttribute&&e.target.getAttribute("data-a");
+  if(!a||state!=="playing")return;
+  if(a==="left")moveAll(-1);
+  else if(a==="right")moveAll(1);
+  else if(a==="rot")rotateAll(1);
+  else if(a==="down")tickWells();
+  else if(a==="drop")hardDropAll();
+});
+btnGo.addEventListener("click",startGame);
+reset();
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>千窟马拉松</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+#wrap{max-width:680px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:8px 0 2px;color:#ffd166;letter-spacing:1px}
+p.tip{margin:4px 0 10px;font-size:13px;color:#aab0d0;line-height:1.7}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#cfd3ee;margin:0 2px 8px}
+#hud b{color:#ffd166}
+#stage{position:relative;border-radius:14px;overflow:hidden;border:1px solid #2c3154;background:#0f1220}
+canvas{display:block;width:100%;height:auto}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(10,12,26,.84);text-align:center;padding:16px}
+.hidden{display:none}
+.ovBig{font-size:26px;font-weight:bold;color:#ffd166}
+#ovTitle{font-size:26px;font-weight:bold;color:#ff5d73}
+#ovInfo{font-size:14px;color:#aab0d0}
+button{background:#ffd166;color:#141628;border:none;border-radius:10px;padding:10px 28px;font-size:16px;font-weight:bold;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.95)}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>千窟马拉松</h1>
+<p class="tip">一命马拉松!按住 鼠标 / 触屏 / 空格 上升,松开下坠。洞穴每 16 秒变换一种地貌:乱流带颠簸、反重窟上下颠倒、浓雾窟遮住视线、石笋林尖石密布,轮番上阵考验你的肌肉记忆,看你能跑多远!</p>
+<div id="hud"><span>距离:<b id="score">0</b> m</span><span>地貌:<b id="zone">静流洞窟</b></span><span>最佳:<b id="best">0</b> m</span></div>
+<div id="stage">
+<canvas id="cv" width="640" height="420"></canvas>
+<div id="ovStart" class="overlay"><div class="ovBig">马拉松开始</div><div style="font-size:13px;color:#aab0d0">每 16 秒换地貌 · 一命到底</div><button id="btnStart">开始游戏</button></div>
+<div id="ovOver" class="overlay hidden"><div id="ovTitle">马拉松止步!</div><div id="ovInfo"></div><button id="btnRe">再来一局</button></div>
+</div>
+</div>
+<script>
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d");
+var W=cv.width,H=cv.height;
+var COL=8;
+var state="ready",holding=false,tG=0;
+var scrollX,speed,dist,py,vy,cols,genX,parts,score;
+var zoneT,zoneIdx,spires,nextSpikeX;
+var ZONES=[
+  {n:"静流洞窟",s:"稳定飞行"},
+  {n:"乱流带",s:"气流颠簸!"},
+  {n:"反重窟",s:"上下颠倒!"},
+  {n:"浓雾窟",s:"视野受限!"},
+  {n:"石笋林",s:"尖石密布!"}
+];
+var best=0;
+function loadBest(k){try{var v=localStorage.getItem(k);return v?(parseInt(v,10)||0):0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+best=loadBest("mg900best");
+$("best").textContent=best;
+
+function reset(){
+  scrollX=0;speed=150;dist=0;score=0;
+  py=H/2;vy=0;cols=[];genX=-48;parts=[];
+  zoneT=0;zoneIdx=0;spires=[];nextSpikeX=0;
+  while(genX<W+96){pushCol();}
+  updHud();
+}
+function terrainC(x){
+  return H/2+Math.sin(x*0.0042)*52+Math.sin(x*0.0117+1.3)*28+Math.sin(x*0.031+4.1)*9;
+}
+function gapAt(x){return 186+Math.sin(x*0.005+2.0)*16;}
+function pushCol(){
+  var g=gapAt(genX),c=terrainC(genX);
+  var m=g/2+26;
+  c=Math.max(m,Math.min(H-m,c));
+  cols.push({x:genX,t:c-g/2,b:c+g/2});
+  genX+=COL;
+}
+function colAt(x){
+  if(!cols.length)return{t:0,b:H};
+  var i=Math.floor((x-cols[0].x)/COL);
+  if(i<0)i=0;if(i>cols.length-2)i=cols.length-2;
+  return cols[i];
+}
+function pX(){return scrollX+150;}
+function updHud(){
+  $("score").textContent=score;
+  $("zone").textContent=ZONES[zoneIdx].n;
+}
+function update(dt){
+  var prevZone=zoneIdx;
+  zoneT+=dt;
+  zoneIdx=Math.floor(zoneT/16)%5;
+  if(zoneIdx!==prevZone){
+    if(zoneIdx===4){spires=[];nextSpikeX=scrollX+W+60;}
+    updHud();
+  }
+  speed=Math.min(285,150+dist*0.008);
+  scrollX+=speed*dt;
+  dist+=speed*dt;
+  score=Math.floor(dist/10);
+  while(genX<scrollX+W+96)pushCol();
+  while(cols.length>2&&cols[0].x+COL<scrollX-64)cols.shift();
+  if(zoneIdx===1){
+    vy+=(holding?-560:500)*dt;
+    vy+=Math.sin(tG*2.7)*330*dt;
+  }else if(zoneIdx===2){
+    vy+=(holding?520:-430)*dt;
+  }else{
+    vy+=(holding?-560:500)*dt;
+  }
+  vy=Math.max(-290,Math.min(330,vy));
+  py+=vy*dt;
+  if(py<8){py=8;vy=Math.max(vy,0);}
+  if(py>H-8){py=H-8;vy=Math.min(vy,0);}
+  var c=colAt(pX());
+  if(py-11<c.t||py+11>c.b){die();return;}
+  if(zoneIdx===4){
+    while(nextSpikeX<scrollX+W+60){
+      var side=Math.random()<0.5?"top":"bot";
+      spires.push({x:nextSpikeX,side:side,len:55+Math.random()*40});
+      nextSpikeX+=240+Math.random()*180;
+    }
+    var si;
+    for(si=spires.length-1;si>=0;si--){
+      if(spires[si].x<scrollX-40)spires.splice(si,1);
+    }
+    for(si=0;si<spires.length;si++){
+      var s=spires[si];
+      if(Math.abs(s.x-pX())>13)continue;
+      var sc=colAt(s.x);
+      if(s.side==="top"){
+        if(py-11<sc.t+s.len){die();return;}
+      }else{
+        if(py+11>sc.b-s.len){die();return;}
+      }
+    }
+  }
+  var i;
+  if(holding&&Math.random()<0.5)parts.push({x:132,y:py+5,life:0.45});
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.life-=dt;p.x-=(speed+120)*dt;if(p.life<=0)parts.splice(i,1);}
+  updHud();
+}
+function die(){
+  if(state!=="play")return;
+  state="over";
+  if(score>best){best=score;saveBest("mg900best",best);$("best").textContent=best;}
+  $("ovInfo").textContent="跑过了 "+score+" m,倒在了「"+ZONES[zoneIdx].n+"」。最佳 "+best+" m";
+  $("ovOver").classList.remove("hidden");
+}
+function start(){reset();state="play";$("ovStart").classList.add("hidden");$("ovOver").classList.add("hidden");holding=false;}
+function onHold(b){
+  if(state==="ready"&&b){start();}
+  if(state==="over")return;
+  holding=b;
+}
+function drawBg(){
+  var bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,"#141a2e");bg.addColorStop(1,"#0b0e1c");
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  if(zoneIdx===1){
+    ctx.strokeStyle="rgba(103,232,249,0.18)";ctx.lineWidth=1.5;
+    var i;
+    for(i=0;i<12;i++){
+      var yy=(i*97+tG*260)%H;
+      var xx=(i*173)%W;
+      ctx.beginPath();ctx.moveTo(xx,yy);ctx.lineTo(xx-18,yy);ctx.stroke();
+    }
+  }
+}
+function drawCave(){
+  if(cols.length<2)return;
+  var i0=0;
+  while(i0<cols.length-1&&cols[i0].x+COL<scrollX-16)i0++;
+  var last=cols.length-1;
+  var ex=Math.min(W+16,cols[last].x-scrollX);
+  ctx.fillStyle=zoneIdx===2?"#33264a":"#262b47";
+  ctx.beginPath();ctx.moveTo(cols[i0].x-scrollX,0);
+  for(var i=i0;i<cols.length&&cols[i].x<scrollX+W+16;i++)ctx.lineTo(cols[i].x-scrollX,cols[i].t);
+  ctx.lineTo(ex,0);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(cols[i0].x-scrollX,H);
+  for(var j=i0;j<cols.length&&cols[j].x<scrollX+W+16;j++)ctx.lineTo(cols[j].x-scrollX,cols[j].b);
+  ctx.lineTo(ex,H);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=zoneIdx===2?"#a88fd6":"#6f7ec9";ctx.lineWidth=3;
+  ctx.beginPath();var st=false;
+  for(var k=i0;k<cols.length&&cols[k].x<scrollX+W+16;k++){var sx=cols[k].x-scrollX;if(!st){ctx.moveTo(sx,cols[k].t);st=true;}else ctx.lineTo(sx,cols[k].t);}
+  ctx.stroke();
+  ctx.beginPath();st=false;
+  for(var k2=i0;k2<cols.length&&cols[k2].x<scrollX+W+16;k2++){var sx2=cols[k2].x-scrollX;if(!st){ctx.moveTo(sx2,cols[k2].b);st=true;}else ctx.lineTo(sx2,cols[k2].b);}
+  ctx.stroke();
+  if(zoneIdx===4){
+    ctx.fillStyle="#3d466f";
+    for(var s=0;s<spires.length;s++){
+      var sp=spires[s];
+      var bx=sp.x-scrollX;
+      if(bx<-20||bx>W+20)continue;
+      var cc=colAt(sp.x);
+      ctx.beginPath();
+      if(sp.side==="top"){
+        ctx.moveTo(bx-13,cc.t);ctx.lineTo(bx+13,cc.t);ctx.lineTo(bx,cc.t+sp.len);
+      }else{
+        ctx.moveTo(bx-13,cc.b);ctx.lineTo(bx+13,cc.b);ctx.lineTo(bx,cc.b-sp.len);
+      }
+      ctx.closePath();ctx.fill();
+    }
+  }
+}
+function drawShip(){
+  ctx.save();ctx.translate(150,py);
+  ctx.rotate(Math.max(-0.5,Math.min(0.5,vy*0.0016)));
+  if(zoneIdx===2)ctx.scale(1,-1);
+  ctx.fillStyle="rgba(255,209,102,0.7)";
+  for(var i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillRect(p.x-150+16,p.y-py,3,3);}
+  ctx.globalAlpha=1;
+  ctx.fillStyle=zoneIdx===2?"#c9a8ff":"#ffd166";
+  ctx.beginPath();ctx.moveTo(16,0);ctx.lineTo(-10,-9);ctx.lineTo(-6,0);ctx.lineTo(-10,9);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#ff9f43";ctx.beginPath();ctx.arc(-2,0,4,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+function drawZoneFx(){
+  if(zoneIdx===3){
+    var g=ctx.createRadialGradient(150,py,60,150,py,120);
+    g.addColorStop(0,"rgba(6,7,16,0)");
+    g.addColorStop(1,"rgba(6,7,16,0.9)");
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  }
+  var rem=zoneT%16;
+  if(rem<2.4&&state==="play"){
+    var a=Math.max(0,1-rem/2.4);
+    ctx.globalAlpha=a;
+    ctx.fillStyle="#ffd166";
+    ctx.font="bold 26px system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText(ZONES[zoneIdx].n,W/2,70);
+    ctx.font="bold 15px system-ui,sans-serif";
+    ctx.fillStyle="#ff8fab";
+    ctx.fillText(ZONES[zoneIdx].s,W/2,96);
+    ctx.globalAlpha=1;
+    ctx.textAlign="left";
+  }
+}
+function draw(){
+  drawBg();
+  drawCave();
+  drawShip();
+  drawZoneFx();
+}
+$("btnStart").addEventListener("click",function(){start();});
+$("btnRe").addEventListener("click",function(){start();});
+cv.addEventListener("mousedown",function(e){e.preventDefault();onHold(true);});
+window.addEventListener("mouseup",function(){onHold(false);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();onHold(true);},{passive:false});
+window.addEventListener("touchend",function(){onHold(false);});
+window.addEventListener("touchcancel",function(){onHold(false);});
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW"){e.preventDefault();if(!e.repeat)onHold(true);}
+});
+window.addEventListener("keyup",function(e){
+  if(e.code==="Space"||e.code==="ArrowUp"||e.code==="KeyW")onHold(false);
+});
+window.addEventListener("blur",function(){holding=false;});
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  var dt=Math.min(0.033,((t-lastT)/1000)||0);lastT=t;
+  tG+=dt;
+  if(state==="play")update(dt);
+  draw();
+}
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

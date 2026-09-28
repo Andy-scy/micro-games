@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三位密码疑云</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:14px}
+.wrap{width:100%;max-width:440px}
+h1{text-align:center;font-size:22px;margin:6px 0}
+.tip{text-align:center;color:#8f97c0;font-size:13px;line-height:1.5;margin-bottom:10px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:10px}
+.panel{background:#181d33;border:1px solid #262d52;border-radius:14px;padding:12px;margin-bottom:10px}
+#clues{font-size:13px;color:#c6cdf2;line-height:2}
+#clues b{color:#fbbf24;font-size:15px;letter-spacing:2px}
+#input{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+.slot{width:44px;height:52px;background:#232946;border:2px solid #3a4470;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#ffd668}
+#keys{display:grid;grid-template-columns:repeat(5,58px);gap:6px;justify-content:center}
+.kb{height:40px;background:#2a3157;border:none;border-radius:9px;color:#e8eaf6;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.kb:hover{background:#343d6e}
+#msg{text-align:center;min-height:20px;font-size:13px;color:#ff9aa8;margin-top:8px}
+.btn{background:#2a3157;color:#e8eaf6;border:none;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.btn.pri{background:#4f6ef7;color:#fff}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:10px}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:26px 32px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:10px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:16px;line-height:1.8}
+.code{font-size:26px;font-weight:800;color:#ffd668;letter-spacing:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>三位密码疑云</h1>
+<p class="tip">三位密码,每位数字 0–9 且互不重复。只凭下面几条审讯记录,<br>推理出完整密码。没有尝试反馈,答错扣机会!</p>
+<div class="hud"><span id="hQ">第 1/3 题</span><span id="hLife">机会 3</span></div>
+<div class="panel"><div id="clues"></div></div>
+<div class="panel">
+  <div id="input"><div class="slot">·</div><div class="slot">·</div><div class="slot">·</div></div>
+  <div id="keys"></div>
+  <div id="msg"></div>
+</div>
+<div class="btnrow"><button class="btn pri" id="bSub">提交答案</button><button class="btn" id="bNew">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn pri" id="ovB">再来一局</button></div></div>
+<script>
+"use strict";
+const TYTXT={none:"没有一个数字正确",exact1:"恰有 1 位数字正确,且位置正确",wrong1:"恰有 1 位数字正确,但位置错误",wrong2:"恰有 2 位数字正确,但位置都错误"};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function digitsOf(n){return [Math.floor(n/100),Math.floor(n/10)%10,n%10];}
+function commonC(a,b){
+  const ca=new Array(10).fill(0),cb=new Array(10).fill(0);
+  for(let i=0;i<3;i++){ca[a[i]]++;cb[b[i]]++;}
+  let s=0;for(let d=0;d<10;d++)s+=Math.min(ca[d],cb[d]);
+  return s;
+}
+function exactC(a,b){let s=0;for(let i=0;i<3;i++)if(a[i]===b[i])s++;return s;}
+function checkClue(cl,t){
+  const c=commonC(cl.g,t),e=exactC(cl.g,t);
+  if(cl.ty==="none")return c===0;
+  if(cl.ty==="exact1")return e===1&&c===1;
+  if(cl.ty==="wrong1")return e===0&&c===1;
+  return e===0&&c===2;
+}
+function genRound(){
+  for(let t=0;t<800;t++){
+    const ans=shuffle([0,1,2,3,4,5,6,7,8,9]).slice(0,3);
+    const clues=[];
+    for(let k=0;k<6;k++){
+      const g=shuffle([0,1,2,3,4,5,6,7,8,9]).slice(0,3);
+      const c=commonC(g,ans),e=exactC(g,ans);
+      let ty=null;
+      if(c===0)ty="none";
+      else if(e===1&&c===1)ty="exact1";
+      else if(e===0&&c===1)ty="wrong1";
+      else if(e===0&&c===2)ty="wrong2";
+      if(ty)clues.push({g:g,ty:ty});
+    }
+    if(clues.length<4)continue;
+    let sols=0;
+    for(let n=0;n<1000;n++){
+      const arr=digitsOf(n);
+      if(arr[0]===arr[1]||arr[1]===arr[2]||arr[0]===arr[2])continue;
+      let ok=true;
+      for(const cl of clues){if(!checkClue(cl,arr)){ok=false;break;}}
+      if(ok){sols++;if(sols>1)break;}
+    }
+    if(sols===1)return {ans:ans,clues:clues};
+  }
+  return {ans:[0,4,2],clues:[{g:[6,8,2],ty:"exact1"},{g:[6,1,4],ty:"wrong1"},{g:[2,0,6],ty:"wrong2"},{g:[7,3,8],ty:"none"},{g:[7,8,0],ty:"wrong1"}]};
+}
+let rnd=null,input=[],lvl=0,lives=3,over=false,lock=false;
+const slotEls=[];
+const inputEl=document.getElementById("input");
+for(let i=0;i<3;i++){const d=document.createElement("div");d.className="slot";inputEl.appendChild(d);slotEls.push(d);}
+const keysEl=document.getElementById("keys");
+for(let d=0;d<=9;d++){
+  const b=document.createElement("button");
+  b.className="kb";b.textContent=String(d);
+  b.addEventListener("click",()=>typeKey(d));
+  keysEl.appendChild(b);
+}
+const delB=document.createElement("button");delB.className="kb";delB.textContent="删除";delB.addEventListener("click",()=>{if(!over&&!lock){input.pop();renderIn();}});keysEl.appendChild(delB);
+const clrB=document.createElement("button");clrB.className="kb";clrB.textContent="清空";clrB.addEventListener("click",()=>{if(!over&&!lock){input=[];renderIn();}});keysEl.appendChild(clrB);
+function typeKey(d){
+  if(over||lock)return;
+  if(input.length>=3)return;
+  input.push(d);renderIn();
+}
+function renderIn(){
+  for(let i=0;i<3;i++)slotEls[i].textContent=input[i]!==undefined?String(input[i]):"·";
+}
+function loadRound(){
+  rnd=genRound();input=[];lock=false;
+  const cl=document.getElementById("clues");
+  cl.innerHTML="";
+  for(const c of rnd.clues){
+    const d=document.createElement("div");
+    d.innerHTML="<b>"+c.g.join("")+"</b> —— "+TYTXT[c.ty];
+    cl.appendChild(d);
+  }
+  document.getElementById("hQ").textContent="第 "+(lvl+1)+"/3 题";
+  document.getElementById("msg").textContent="";
+  renderIn();
+}
+function submit(){
+  if(over||lock)return;
+  const msg=document.getElementById("msg");
+  if(input.length<3){msg.textContent="请输入完整的三位密码";return;}
+  if(input[0]===rnd.ans[0]&&input[1]===rnd.ans[1]&&input[2]===rnd.ans[2]){
+    lock=true;msg.textContent="密码正确!";
+    setTimeout(()=>{
+      lvl++;
+      if(lvl>=3){over=true;show("神探附体!","连续破译 3 组密码,逻辑满分");}
+      else loadRound();
+    },800);
+  }else{
+    lives--;
+    document.getElementById("hLife").textContent="机会 "+lives;
+    msg.textContent="密码错误!这条线索组合只有唯一解,再推推";
+    if(lives<=0){
+      over=true;
+      show("破解失败","正确密码是 <span class='code'>"+rnd.ans.join("")+"</span>");
+    }
+  }
+}
+function show(t,p){document.getElementById("ovT").innerHTML=t;document.getElementById("ovP").innerHTML=p;document.getElementById("ov").classList.remove("hide");}
+function init(){
+  over=false;lvl=0;lives=3;lock=false;
+  document.getElementById("hLife").textContent="机会 3";
+  document.getElementById("ov").classList.add("hide");
+  loadRound();
+}
+document.getElementById("bSub").addEventListener("click",submit);
+document.getElementById("bNew").addEventListener("click",init);
+document.getElementById("ovB").addEventListener("click",init);
+document.addEventListener("keydown",e=>{
+  if(e.key>="0"&&e.key<="9")typeKey(parseInt(e.key,10));
+  else if(e.key==="Backspace"){if(!over&&!lock){input.pop();renderIn();}}
+});
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>质数猎手</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#f87171;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#f87171;font-size:16px}
+.timebar{height:8px;background:#0b0e1a;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.timebar i{display:block;height:100%;background:#f87171;width:100%}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.grid button{background:#232949;color:#e8eaf6;border:2px solid transparent;border-radius:10px;padding:16px 0;font-size:19px;font-weight:800;cursor:pointer;font-family:inherit}
+.grid button:active{transform:scale(.93)}
+.grid button.hit{background:#14351f;border-color:#4ade80;color:#4ade80;opacity:.35}
+.grid button.bad{background:#3a1620;border-color:#f87171;color:#f87171}
+.grid button.rest{opacity:.3}
+.msg{text-align:center;font-size:14px;min-height:20px;margin-top:12px;color:#8b90b0}
+.msg.good{color:#4ade80}
+.msg.badc{color:#f87171}
+.stage{position:relative}
+.overlay{position:absolute;inset:-6px;background:rgba(8,10,22,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;z-index:5}
+.overlay.hide{display:none}
+.overlay h2{font-size:25px;color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#3d0a0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>质数猎手</h1>
+  <p class="hint">点掉棋盘上所有质数 · 误点合数或超时都会掉一颗心 · 波次无限,越猎越难</p>
+  <div class="hud">
+    <span>第 <b id="wave">1</b> 波</span>
+    <span>时间 <b id="time">25</b>s</span>
+    <span>剩余 <b id="left">0</b></span>
+    <span>生命 <b id="lives">❤❤❤</b></span>
+    <span>得分 <b id="score">0</b></span>
+  </div>
+  <div class="timebar"><i id="tbar"></i></div>
+  <div class="stage">
+    <div class="grid" id="grid"></div>
+    <div class="msg" id="msg"></div>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">质数猎手</h2>
+      <p id="ovD">棋盘上混着质数与合数。把质数全部点掉即可进入下一波,数字范围会越来越大;误点合数扣一颗心,三心用完出局!</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btnGo">开始狩猎</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var elWave=$("wave"),elTime=$("time"),elLeft=$("left"),elLives=$("lives"),elScore=$("score");
+var elTbar=$("tbar"),elGrid=$("grid"),elMsg=$("msg");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btnGo=$("btnGo");
+var state,wave,score,lives,timeLeft,WAVE_MS,primesLeft,cells,lastT;
+
+function rnd(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function isPrime(n){
+  if(n<2)return false;
+  if(n<4)return true;
+  if(n%2===0)return false;
+  var i;
+  for(i=3;i*i<=n;i+=2){if(n%i===0)return false;}
+  return true;
+}
+function randPrime(lo,hi){
+  var n,t=0;
+  do{n=rnd(lo,hi);t++;}while(!isPrime(n)&&t<400);
+  return isPrime(n)?n:2;
+}
+function randComp(lo,hi){
+  var n,t=0;
+  do{n=rnd(lo,hi);t++;}while(isPrime(n)&&t<400);
+  return isPrime(n)?n+1:n;
+}
+function updHud(){
+  elWave.textContent=wave;
+  elScore.textContent=score;
+  elLeft.textContent=primesLeft;
+  var h="",i;
+  for(i=0;i<3;i++)h+=i<lives?"❤":"♡";
+  elLives.textContent=h;
+}
+function build(){
+  var hi=Math.min(30+wave*12,99);
+  var nPrime=Math.min(3+wave,9);
+  var nums=[],i;
+  for(i=0;i<nPrime;i++)nums.push(randPrime(2,hi));
+  while(nums.length<20)nums.push(randComp(4,hi));
+  for(i=nums.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=nums[i];nums[i]=nums[j];nums[j]=t;}
+  primesLeft=nPrime;
+  elGrid.innerHTML="";
+  cells=[];
+  for(i=0;i<20;i++){
+    var b=document.createElement("button");
+    b.textContent=nums[i];
+    b.addEventListener("click",function(ev){tap(ev.currentTarget);});
+    elGrid.appendChild(b);
+    cells.push({btn:b,v:nums[i],prime:isPrime(nums[i]),done:false});
+  }
+  updHud();
+}
+function tap(c){
+  if(state!=="playing"||c.done)return;
+  if(lives<=0)return;
+  if(c.prime){
+    c.done=true;
+    c.btn.className="hit";
+    primesLeft--;
+    score+=15+wave*2;
+    updHud();
+    if(primesLeft<=0){
+      score+=30;
+      setMsg("第 "+wave+" 波清空!+30 波次奖励","good");
+      wave++;
+      WAVE_MS=Math.max(15000,26000-wave*1000);
+      timeLeft=WAVE_MS;
+      updHud();
+      setTimeout(function(){if(state==="playing"){setMsg("");build();}},900);
+    }
+  }else{
+    c.done=true;
+    c.btn.className="bad";
+    loseLife("误点合数 "+c.v+"!");
+  }
+}
+function loseLife(msg){
+  lives--;
+  setMsg(msg+" 生命 -1","badc");
+  updHud();
+  if(lives<=0)setTimeout(gameOver,700);
+}
+function setMsg(t,cls){
+  elMsg.textContent=t;
+  elMsg.className="msg"+(cls?" "+cls:"");
+}
+function timeout(){
+  var i;
+  for(i=0;i<cells.length;i++){
+    if(cells[i].prime&&!cells[i].done)cells[i].btn.className="rest";
+  }
+  wave++;
+  WAVE_MS=Math.max(15000,26000-wave*1000);
+  timeLeft=WAVE_MS;
+  loseLife("超时!漏掉的质数已变暗");
+  if(state==="playing")setTimeout(function(){if(state==="playing"){setMsg("");build();}},1000);
+}
+function gameOver(){
+  state="over";
+  ovT.textContent="狩猎结束";
+  ovD.textContent="你坚守到第 "+wave+" 波,猎获颇丰!";
+  ovS.style.display="block";
+  ovS.textContent="得分 "+score;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){
+  state="playing";wave=1;score=0;lives=3;
+  WAVE_MS=25000;timeLeft=WAVE_MS;lastT=0;
+  setMsg("");
+  build();
+  ov.classList.add("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();startGame();}
+  }
+});
+btnGo.addEventListener("click",startGame);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(100,t-lastT);lastT=t;
+  if(state==="playing"){
+    timeLeft-=dt;
+    if(timeLeft<=0){timeLeft=WAVE_MS;timeout();}
+    elTime.textContent=Math.ceil(timeLeft/1000);
+    elTbar.style.width=(timeLeft/WAVE_MS*100)+"%";
+  }
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

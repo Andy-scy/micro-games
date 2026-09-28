@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星河年轮</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#c4b5fd;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#fbbf24;font-size:15px}
+.eras{display:flex;gap:5px;justify-content:center;margin-bottom:8px}
+.eras span{width:16px;height:16px;border-radius:50%;border:1px solid #3b4266;background:#151a30;font-size:9px;line-height:15px;text-align:center;color:#565f8a}
+.eras span.on{background:#c4b5fd;color:#2e1065;border-color:#c4b5fd}
+.timebar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.timebar button{background:#232946;color:#c7cbe8;border:1px solid #2f3a5e;border-radius:8px;padding:5px 14px;cursor:pointer;font-family:inherit;font-size:12px}
+.timebar input{flex:1;accent-color:#c4b5fd}
+.timebar span{font-size:12px;color:#8b90b0;min-width:70px;text-align:right}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#c4b5fd}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#c4b5fd;color:#2e1065;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>星河年轮</h1>
+  <p class="hint">拖动时间轴或按下播放 · 走过十纪,点亮全部年轮即圆满</p>
+  <div class="hud">
+    <span>纪元 <b id="hEra">第零纪</b></span>
+    <span>在世星 <b id="hAlive">0</b></span>
+  </div>
+  <div class="eras" id="eras">
+    <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span>
+    <span>六</span><span>七</span><span>八</span><span>九</span><span>十</span>
+  </div>
+  <div class="timebar">
+    <button id="btnPlay">播放</button>
+    <input type="range" id="sT" min="0" max="100" step="0.1" value="0">
+    <span id="hT">0.0 亿年</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">星河年轮</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开始漫游</button>
+      <button id="btnMore" style="display:none">漫游继续</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hEra=$("hEra"),hAlive=$("hAlive"),hT=$("hT"),sT=$("sT"),btnPlay=$("btnPlay");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=300,CX=235,CY=150,TAU=Math.PI*2;
+function sr(n){var x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x);}
+var stars=[],i;
+for(i=0;i<140;i++){
+  var rr=18+Math.sqrt(sr(i*3+1))*132;
+  var th=(i%2)*Math.PI+rr*0.05+(sr(i*3+2)-0.5)*0.9;
+  var b=sr(i*3+3)*78,life=26+sr(i*3+4)*66;
+  if(b+life>103)life=103-b;
+  if(life<9)life=9;
+  stars.push({r:rr,a:th,w:26/(0.5+rr/70),b:b,life:life,sz:1.1+sr(i*3+6)*1.7});
+}
+var t=0,playing=false,state="menu",goalDone=false;
+var visited=[],eraDots=$("eras").getElementsByTagName("span");
+var POEMS=["旋臂初醒,微尘聚光","蓝星灼灼,幼团初绽","星火相传,银汉生辉","红超爆散,云翳重生","次代星辰,接棒而燃","星团疏朗,光晕温润","老星沉静,红光满川","星流缓行,银盘澄澈","余烬温柔,星风低语","万象归寂,再孕新纪"];
+var ERN=["第零纪","第一纪","第二纪","第三纪","第四纪","第五纪","第六纪","第七纪","第八纪","第九纪"];
+for(i=0;i<10;i++)visited.push(false);
+function step(dt){
+  if(playing){
+    t+=dt*2.6;
+    if(t>=100){t=100;playing=false;btnPlay.textContent="播放";}
+    sT.value=t;
+  }
+  var era=Math.min(9,Math.floor(t/10));
+  visited[era]=true;
+  var k,dot;
+  for(k=0;k<10;k++){
+    dot="on";
+    if(!visited[k])dot="";
+    if(eraDots[k].className!==dot)eraDots[k].className=dot;
+  }
+  var alive=0;
+  for(k=0;k<stars.length;k++){
+    var age=t-stars[k].b;
+    if(age>=0&&age<=stars[k].life)alive++;
+  }
+  hAlive.textContent=alive;
+  hEra.textContent=ERN[era];
+  hT.textContent=t.toFixed(1)+" 亿年";
+  if(!goalDone){
+    var all=true;
+    for(k=0;k<10;k++)if(!visited[k])all=false;
+    if(all){
+      goalDone=true;state="zen";playing=false;btnPlay.textContent="播放";
+      ovT.textContent="年轮圆满";
+      ovD.textContent="十纪走遍:从旋臂初醒到万象归寂。\n"+POEMS.join("。\n")+"。";
+      btnMore.style.display="inline-block";
+      ov.classList.remove("hide");
+    }
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var k;
+  var cg=ctx.createRadialGradient(CX,CY,2,CX,CY,40);
+  cg.addColorStop(0,"rgba(196,181,253,.8)");
+  cg.addColorStop(1,"rgba(196,181,253,0)");
+  ctx.fillStyle=cg;ctx.fillRect(CX-40,CY-40,80,80);
+  ctx.fillStyle="#1a1230";
+  ctx.beginPath();ctx.arc(CX,CY,7,0,TAU);ctx.fill();
+  for(k=0;k<stars.length;k++){var s=stars[k];
+    var age=t-s.b;
+    if(age<0||age>s.life)continue;
+    var ang=s.a+s.w*t;
+    var x=CX+Math.cos(ang)*s.r,y=CY+Math.sin(ang)*s.r*0.62;
+    var col,sz=s.sz;
+    if(age<12){col="159,199,255";sz*=1.25;}
+    else if(age<40)col="232,234,255";
+    else col="255,201,138";
+    if(age<3){
+      ctx.fillStyle="rgba("+col+","+(0.5-age*0.15).toFixed(2)+")";
+      ctx.beginPath();ctx.arc(x,y,(3-age)*5+4,0,TAU);ctx.fill();
+    }
+    if(age>s.life-2.5){
+      var rp=(age-(s.life-2.5))*26;
+      ctx.strokeStyle="rgba(255,210,125,"+Math.max(0,1-rp/78).toFixed(2)+")";
+      ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(x,y,rp+3,0,TAU);ctx.stroke();
+      continue;
+    }
+    ctx.fillStyle="rgba("+col+",.9)";
+    ctx.beginPath();ctx.arc(x,y,sz,0,TAU);ctx.fill();
+  }
+}
+sT.addEventListener("input",function(){t=parseFloat(sT.value);});
+btnPlay.addEventListener("click",function(){
+  if(state!=="play")return;
+  if(t>=100)t=0;
+  playing=!playing;
+  btnPlay.textContent=playing?"暂停":"播放";
+});
+var lastT=0;
+function loop(ts){requestAnimationFrame(loop);
+  if(!lastT)lastT=ts;
+  var dt=Math.min((ts-lastT)/1000,0.05);lastT=ts;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="星河年轮";
+  ovD.textContent="这是一条百亿年的时间轴,星河在其中生灭:\n蓝星初生、恒星老去、超新星爆发。\n拖动时间轴或点「播放」,走过十纪,\n点亮十枚年轮,即算圆满。";
+  btnGo.textContent="开始漫游";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

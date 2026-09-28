@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逆行狂奔</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:440px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>逆行狂奔</h1>
+  <p class="tips">你开错了方向!所有车头冲你而来,相对速度爆表,有的车还会突然变道。护栏一碰就完,坚持 1000 米掉头点!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">里程</div><div class="big" id="sd">0/1000</div></div>
+    <div class="stat"><div class="mut">时速</div><div class="big" id="sv">0</div></div>
+    <div class="stat"><div class="mut">惊险擦身</div><div class="big" id="sx">0</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="400" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">逆行狂奔</h2><p id="ovp">玩法说明:<br>· ← → 或 A / D 移动(触屏拖动)<br>· 对向车流<b>迎面扑来</b>,还会左右变道<br>· 从车旁 1 个车身内擦过记一次「惊险擦身」<br>· 轻碰护栏立即出局<br>· 跑到 1000 米处的掉头点获胜</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=400,H=560,TOTAL=1000,RL=26,RR=W-26,LANES=4;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var LW=(RR-RL)/LANES;
+var px,speed,dist,near,running,stripe,spawnT;
+var cars=[];
+var keys={};
+var PY=H-100;
+function $i(id){return document.getElementById(id)}
+function reset(){
+  px=W/2;speed=340;dist=0;near=0;stripe=0;spawnT=0.4;
+  cars.length=0;
+  upd();
+}
+function upd(){
+  $i('sd').textContent=Math.min(TOTAL,Math.floor(dist))+'/1000';
+  $i('sv').textContent=Math.floor(speed*0.42);
+  $i('sx').textContent=near;
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function spawn(){
+  var blocked=0,i,l,cand=[];
+  for(i=0;i<cars.length;i++)if(cars[i].y<220&&cars[i].y>-70)blocked|=(1<<cars[i].lane);
+  for(l=0;l<LANES;l++){if(!(blocked&(1<<l)))cand.push(l);}
+  if(cand.length<=1)return;
+  l=cand[Math.floor(Math.random()*cand.length)];
+  var cx=RL+LW*l+LW/2;
+  for(i=0;i<cars.length;i++){
+    if(Math.abs(cars[i].x-cx)<70&&cars[i].y<260)return;
+  }
+  cars.push({x:cx,y:-100,lane:l,spd:240+Math.random()*90,
+    tx:cx,retarget:1.2+Math.random()*1.8,passed:false,
+    c:['#4da3ff','#51d88a','#b07cff','#ff9f43'][Math.floor(Math.random()*4)]});
+}
+function update(dt){
+  speed=Math.min(540,340+dist*0.14);
+  dist+=speed*dt/10;
+  stripe=(stripe+speed*dt)%60;
+  spawnT-=dt;
+  if(spawnT<=0){spawn();spawnT=Math.max(0.34,0.62-dist*0.0003);}
+  var st=380;
+  if(keys.ArrowLeft||keys.a||keys.A)px-=st*dt;
+  if(keys.ArrowRight||keys.d||keys.D)px+=st*dt;
+  if(px<RL+18||px>RR-18){
+    endRun('撞上护栏!','逆行 '+Math.floor(dist)+' m / 1000 m<br>惊险擦身 '+near+' 次<br>护栏比车流更无情,贴中间走!');
+    return;
+  }
+  var i,c;
+  for(i=cars.length-1;i>=0;i--){
+    c=cars[i];
+    c.y+=(speed+c.spd)*dt;
+    c.retarget-=dt;
+    if(c.retarget<=0){
+      c.retarget=1.2+Math.random()*1.8;
+      c.tx=Math.max(RL+26,Math.min(RR-26,c.x+(Math.random()*2-1)*95));
+    }
+    c.x+=(c.tx-c.x)*Math.min(1,dt*0.9);
+    if(!c.passed&&c.y>PY+42){
+      c.passed=true;
+      if(Math.abs(c.x-px)<52)near++;
+    }
+    if(c.y>H+110){cars.splice(i,1);continue;}
+    if(Math.abs(c.x-px)<36&&Math.abs(c.y-PY)<62){
+      endRun('迎面相撞!','逆行 '+Math.floor(dist)+' m / 1000 m<br>惊险擦身 '+near+' 次<br>盯远处变道的车灯,提前让位!');
+      return;
+    }
+  }
+  if(dist>=TOTAL){
+    endRun('抵达掉头点!','逆行 1000 m,惊险擦身 '+near+' 次<br>这波操作,回忆够吹一年!');
+    return;
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function drawCar(x,y,c){
+  ctx.fillStyle=c;rr(x-19,y-33,38,66,10);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';rr(x-14,y-19,28,19,5);ctx.fill();
+  ctx.fillStyle='rgba(8,12,28,.6)';rr(x-14,y+5,28,17,5);ctx.fill();
+  ctx.fillStyle='#fff3b0';
+  ctx.fillRect(x-16,y-36,9,5);ctx.fillRect(x+7,y-36,9,5);
+}
+function draw(){
+  ctx.fillStyle='#181c36';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2b3158';ctx.fillRect(RL,0,RR-RL,H);
+  ctx.fillStyle='#8b93b8';
+  ctx.fillRect(RL-8,0,8,H);ctx.fillRect(RR,0,8,H);
+  ctx.strokeStyle='rgba(255,80,80,.5)';ctx.lineWidth=3;
+  ctx.setLineDash([20,26]);ctx.lineDashOffset=-stripe;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,255,255,.18)';
+  ctx.beginPath();ctx.moveTo(RL+LW,0);ctx.lineTo(RL+LW,H);ctx.moveTo(RL+LW*2,0);ctx.lineTo(RL+LW*2,H);ctx.moveTo(RL+LW*3,0);ctx.lineTo(RL+LW*3,H);ctx.stroke();
+  var i;
+  for(i=0;i<cars.length;i++)drawCar(cars[i].x,cars[i].y,cars[i].c);
+  drawCar(px,PY,'#ff5c5c');
+  ctx.fillStyle='#ff3b3b';ctx.fillRect(px-16,PY+27,9,5);ctx.fillRect(px+7,PY+27,9,5);
+  var gl=ctx.createRadialGradient(px,PY-40,20,px,PY-40,140);
+  gl.addColorStop(0,'rgba(255,240,190,.12)');
+  gl.addColorStop(1,'rgba(255,240,190,0)');
+  ctx.fillStyle=gl;
+  ctx.beginPath();ctx.arc(px,PY-40,140,0,6.2832);ctx.fill();
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+var dragOn=false;
+function ptrX(e){
+  var rect=cv.getBoundingClientRect();
+  return (e.clientX-rect.left)*W/rect.width;
+}
+cv.addEventListener('pointerdown',function(e){dragOn=true;});
+cv.addEventListener('pointermove',function(e){
+  if(dragOn&&running)px=Math.max(RL+18,Math.min(RR-18,ptrX(e)));
+});
+window.addEventListener('pointerup',function(){dragOn=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

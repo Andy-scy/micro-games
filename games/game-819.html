@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出餐流水线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#93c5fd;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.6}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#93c5fd;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0d1424;border-radius:10px;touch-action:none}
+.stops{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.stop{border:none;border-radius:10px;padding:12px 4px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;color:#0d1424}
+.stop small{display:block;font-size:10px;opacity:.7;font-weight:400}
+.stop:active{transform:scale(.95)}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#93c5fd}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fde047;font-weight:700}
+.overlay button{margin-top:6px;background:#93c5fd;color:#0d1b33;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>出餐流水线</h1>
+  <p class="hint">餐盘沿传送带前进,每盘要按 <b style="color:#93c5fd">洗→切→炒→装</b> 依次加工<br>在盘子经过对应工位时点工位按钮(或按 1~4),漏工序出白盘扣命!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>连击 <b id="combo">0</b></span>
+    <span>生命 <b id="life">♥♥♥</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="240"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">出餐流水线</h2>
+      <p id="ovDesc">盘子头顶会标出下一道工序,等它进入对应彩色工位时点按钮:每加工一道 +5,四道全完成驶出即出餐 +20。按错工位会打翻盘子,没做完就驶出则扣命,共 3 条命!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+  <div class="stops" id="stops"></div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var elScore=$("score"),elCombo=$("combo"),elLife=$("life"),elBest=$("best");
+var stopsEl=$("stops");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s819");
+var ZN=[["洗","#7ad0ff",70],["切","#7ed957",190],["炒","#ff8a4d",310],["装","#ffd23f",430]];
+var HALF=52;
+var state="menu",dishes,score,combo,lives,spawnT,speed,lastT,elapsed;
+var stopBtns=[];
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function buildStops(){
+  for(var i=0;i<ZN.length;i++){
+    var b=document.createElement("button");
+    b.className="stop";
+    b.style.background=ZN[i][1];
+    b.innerHTML=ZN[i][0]+"<small>工位"+(i+1)+" · 键盘 "+(i+1)+"</small>";
+    b.setAttribute("data-i",String(i));
+    stopsEl.appendChild(b);
+    stopBtns.push(b);
+  }
+}
+function reset(){
+  dishes=[];score=0;combo=0;lives=3;spawnT=0.5;speed=65;elapsed=0;
+  updateHud();
+}
+function updateHud(){
+  elScore.textContent=score;elCombo.textContent=combo;elBest.textContent=best;
+  var s="";for(var i=0;i<lives;i++)s+="♥";elLife.textContent=s||"—";
+}
+function process(i){
+  if(state!=="playing")return;
+  var hit=false;
+  for(var j=dishes.length-1;j>=0;j--){
+    var d=dishes[j];
+    if(Math.abs(d.x-ZN[i][2])<HALF){
+      hit=true;
+      if(d.step===i){
+        d.step++;score+=5;
+      }else{
+        dishes.splice(j,1);
+        score=Math.max(0,score-8);combo=0;
+      }
+    }
+  }
+  if(hit)updateHud();
+}
+function gameOver(){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s819",best);}
+  ovTitle.textContent="流水线翻车";
+  ovDesc.textContent="三盘白盘端了出去,品控经理当场拍桌。";
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,480,240);
+  for(i=0;i<ZN.length;i++){
+    ctx.fillStyle="rgba(255,255,255,.05)";
+    ctx.fillRect(ZN[i][2]-HALF,30,HALF*2,170);
+    ctx.fillStyle=ZN[i][1];
+    rr(ZN[i][2]-HALF,30,HALF*2,26,8);ctx.fill();
+    ctx.fillStyle="#0d1424";
+    ctx.font="bold 15px system-ui";ctx.textAlign="center";
+    ctx.fillText(ZN[i][0]+" 工位",ZN[i][2],49);
+  }
+  ctx.fillStyle="#1c2c3a";
+  ctx.fillRect(0,150,480,12);
+  ctx.fillStyle="#2a3f52";
+  for(var bx=(elapsed*speed)%30-30;bx<480;bx+=30)ctx.fillRect(bx,150,18,12);
+  for(i=0;i<dishes.length;i++){
+    var d=dishes[i];
+    ctx.fillStyle="#efe6df";
+    ctx.beginPath();ctx.arc(d.x,140,16,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#93c5fd";
+    ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    if(d.step<4)ctx.fillText("待:"+ZN[d.step][0],d.x,110);
+    else ctx.fillText("✓ 完成",d.x,110);
+    ctx.fillStyle="#0d1424";
+    ctx.font="bold 11px system-ui";
+    ctx.fillText(d.step+"/4",d.x,144);
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  var dts=dt/1000;
+  if(state!=="playing"){draw();return;}
+  elapsed+=dts;
+  speed=Math.min(150,65+elapsed*1.6);
+  spawnT-=dts;
+  if(spawnT<=0){
+    spawnT=Math.max(0.9,1.7-elapsed*0.035);
+    dishes.push({x:-24,step:0});
+  }
+  for(var i=dishes.length-1;i>=0;i--){
+    var d=dishes[i];
+    d.x+=speed*dts;
+    if(d.x>505){
+      dishes.splice(i,1);
+      if(d.step>=4){
+        combo++;score+=20+combo*2;
+        updateHud();
+      }else{
+        lives--;combo=0;
+        updateHud();
+        if(lives<=0){draw();gameOver();return;}
+      }
+    }
+  }
+  draw();
+}
+stopsEl.addEventListener("click",function(e){
+  var n=e.target;
+  while(n&&n!==stopsEl&&!n.getAttribute("data-i"))n=n.parentNode;
+  if(n&&n!==stopsEl)process(parseInt(n.getAttribute("data-i"),10));
+});
+document.addEventListener("keydown",function(e){
+  var map={"1":0,"2":1,"3":2,"4":3};
+  if(map[e.key]!==undefined){e.preventDefault();if(state==="playing")process(map[e.key]);}
+  else if(e.key===" "||e.code==="Space"){e.preventDefault();if(state!=="playing")startGame();}
+});
+btnGo.addEventListener("click",startGame);
+buildStops();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜像双子</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#67e8f9;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:6px;align-items:center}
+.hud b{font-size:16px}
+.msg{color:#67e8f9;font-size:13px;min-height:18px;text-align:center;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#67e8f9;color:#053043;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>镜像双子</h1>
+  <p class="hint">方向键 / WASD 同时驱动双子 · 触屏滑动 · 双子各自踏上同色光环</p>
+  <div class="hud">
+    <span style="color:#67e8f9">青灵 <b id="stA">未归位</b></span>
+    <span style="color:#f9a8d4">粉灵 <b id="stB">未归位</b></span>
+    <span>步数 <b style="color:#67e8f9" id="steps">0</b></span>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="462" height="462"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">镜像双子</h2>
+      <p id="ovDesc">青灵与粉灵受同一咒语束缚:你按左,青灵向左而粉灵向右;你按上,她们一起向上。只要有一方撞墙,这一步就谁也无法移动。指挥这对镜像双子,让她们分别站上同色的归位光环!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">唤醒双子</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv");
+var ctx=cv.getContext("2d");
+var COLS=21,ROWS=21,CELL=22,W=462,H=462;
+function $(id){return document.getElementById(id);}
+var elA=$("stA"),elB=$("stB"),elSteps=$("steps"),elMsg=$("msg");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var best=loadBest("mg_s276");
+var state="menu";
+var grid,entA,entB,tgtA,tgtB,lockA,lockB,steps,elapsed,pulse,msgT,msgText,shakeT;
+
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+
+function genMaze(C,R){
+  var w2=C*2+1,h2=R*2+1,g=[],i,j;
+  for(j=0;j<h2;j++){g.push([]);for(i=0;i<w2;i++)g[j].push(1);}
+  var st=[[0,0]],vis={};
+  vis["0,0"]=true;
+  g[1][1]=0;
+  while(st.length){
+    var cur=st[st.length-1],cx=cur[0],cy=cur[1],nbs=[],dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(i=0;i<4;i++){
+      var nx=cx+dirs[i][0],ny=cy+dirs[i][1];
+      if(nx>=0&&ny>=0&&nx<C&&ny<R&&!vis[nx+","+ny])nbs.push(dirs[i]);
+    }
+    if(nbs.length){
+      var d=nbs[(Math.random()*nbs.length)|0],tx=cx+d[0],ty=cy+d[1];
+      vis[tx+","+ty]=true;
+      g[cy*2+1+d[1]][cx*2+1+d[0]]=0;
+      g[ty*2+1][tx*2+1]=0;
+      st.push([tx,ty]);
+    }else st.pop();
+  }
+  return g;
+}
+function canGo(e,dx,dy){
+  var nx=e.x+dx,ny=e.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS)return false;
+  return grid[ny][nx]===0;
+}
+function setMsg(s){msgText=s;msgT=2.2;}
+function reset(){
+  grid=genMaze(10,10);
+  entA={x:1,y:1};
+  entB={x:COLS-2,y:1};
+  tgtA={x:COLS-2,y:ROWS-2};
+  tgtB={x:1,y:ROWS-2};
+  lockA=false;lockB=false;
+  steps=0;elapsed=0;pulse=0;msgT=0;shakeT=0;
+  updateHud();
+}
+function updateHud(){
+  elA.textContent=lockA?"已归位":"未归位";
+  elB.textContent=lockB?"已归位":"未归位";
+  elSteps.textContent=steps;
+}
+function tryMove(dx,dy){
+  if(state!=="playing")return;
+  var dA={x:dx,y:dy};
+  var dB={x:-dx,y:dy};
+  var okA=lockA||canGo(entA,dA.x,dA.y);
+  var okB=lockB||canGo(entB,dB.x,dB.y);
+  if(!okA||!okB){
+    shakeT=1;
+    setMsg("有一侧被墙挡住,双子纹丝不动");
+    return;
+  }
+  if(!lockA){entA.x+=dA.x;entA.y+=dA.y;}
+  if(!lockB){entB.x+=dB.x;entB.y+=dB.y;}
+  steps++;
+  if(!lockA&&entA.x===tgtA.x&&entA.y===tgtA.y){
+    lockA=true;setMsg("青灵归位!现在护送粉灵。");
+  }
+  if(!lockB&&entB.x===tgtB.x&&entB.y===tgtB.y){
+    lockB=true;setMsg("粉灵归位!");
+  }
+  updateHud();
+  if(lockA&&lockB)win();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||steps<best){best=steps;saveBest("mg_s276",best);isNew=true;}
+  ovTitle.textContent="双子团圆!";
+  ovDesc.textContent=isNew?"新纪录!你用最少的指令驾驭了镜像咒语。":"两道光环绕在一起,咒语应声而解。";
+  ovScore.style.display="block";
+  ovScore.textContent="步数 "+steps+" · 最少步纪录 "+(best>0?best:"--");
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");lastT=0;}
+function drawWall(x,y){
+  ctx.fillStyle="#232a4d";
+  ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  ctx.fillStyle="#2c3560";
+  ctx.fillRect(x*CELL,y*CELL,CELL,3);
+}
+function drawTarget(t,col){
+  var cx=t.x*CELL+CELL/2,cy=t.y*CELL+CELL/2;
+  ctx.strokeStyle=col;
+  ctx.lineWidth=2.5;
+  ctx.shadowColor=col;ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(cx,cy,8+Math.sin(pulse*2)*2,0,Math.PI*2);ctx.stroke();
+  ctx.globalAlpha=0.35;
+  ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.lineWidth=1;ctx.shadowBlur=0;
+}
+function drawEnt(e,col,ring){
+  var cx=e.x*CELL+CELL/2,cy=e.y*CELL+CELL/2;
+  ctx.fillStyle=col;
+  ctx.shadowColor=col;ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(cx,cy,8,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  if(ring){
+    ctx.strokeStyle=col;
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(cx,cy,11,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fill();
+}
+function draw(){
+  var x,y;
+  ctx.save();
+  if(shakeT>0){
+    ctx.translate(Math.sin(shakeT*40)*3,0);
+    shakeT=Math.max(0,shakeT-0.05);
+  }
+  ctx.clearRect(-4,0,W+8,H);
+  for(y=0;y<ROWS;y++)for(x=0;x<COLS;x++){
+    if(grid[y][x]===1)drawWall(x,y);
+  }
+  drawTarget(tgtA,"#22d3ee");
+  drawTarget(tgtB,"#f472b6");
+  drawEnt(entA,lockA?"#22d3ee":"#a5f3fc",lockA);
+  drawEnt(entB,lockB?"#f472b6":"#f9a8d4",lockB);
+  ctx.restore();
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(60,t-lastT);lastT=t;
+  pulse+=dt*0.005;
+  if(msgT>0){msgT-=dt/1000;elMsg.textContent=msgText;}
+  else elMsg.textContent="";
+  if(state==="playing")elapsed+=dt/1000;
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  var k=e.key;
+  if(k==="ArrowUp"||k==="w"||k==="W"){e.preventDefault();tryMove(0,-1);}
+  else if(k==="ArrowDown"||k==="s"||k==="S"){e.preventDefault();tryMove(0,1);}
+  else if(k==="ArrowLeft"||k==="a"||k==="A"){e.preventDefault();tryMove(-1,0);}
+  else if(k==="ArrowRight"||k==="d"||k==="D"){e.preventDefault();tryMove(1,0);}
+});
+var tsx=0,tsy=0;
+cv.addEventListener("touchstart",function(e){var t=e.changedTouches[0];tsx=t.clientX;tsy=t.clientY;e.preventDefault();},{passive:false});
+cv.addEventListener("touchend",function(e){
+  var t=e.changedTouches[0],dx=t.clientX-tsx,dy=t.clientY-tsy;
+  if(Math.abs(dx)<18&&Math.abs(dy)<18){e.preventDefault();return;}
+  if(Math.abs(dx)>Math.abs(dy))tryMove(dx>0?1:-1,0);
+  else tryMove(0,dy>0?1:-1);
+  e.preventDefault();
+},{passive:false});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字母暴雨</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#151a30;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#6ee7a0}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>字母暴雨</h1>
+<div id="tip">字母雨点般落下：按下对应按键，同字母的雨点会被一起击碎；雨点落地会削护盾</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始游戏</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var letters,parts,score,shield,kills,combo,level,spawnT,elapsed,shake,running,raf,tPrev,flash;
+var COLORS=['#7c9cff','#6ee7a0','#ffd76a','#ff8fb1','#6bd6ff'];
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function hudUpd(){hud.textContent='得分 '+score+'　连击 '+combo+'　护盾 '+shield+'　等级 '+level;}
+function reset(){letters=[];parts=[];score=0;shield=5;kills=0;combo=0;level=1;spawnT=0.5;elapsed=0;shake=0;flash=0;hudUpd();}
+function spawn(){
+  var ch=String.fromCharCode(97+Math.floor(Math.random()*26));
+  var xx=rnd(28,Math.max(40,cv.width-52));
+  letters.push({ch:ch,x:xx,y:-26,vy:44+level*7+rnd(0,22),c:COLORS[Math.floor(Math.random()*COLORS.length)],rot:rnd(-0.6,0.6)});
+}
+function boom(x,y,col,n){for(var i=0;i<(n||8);i++)parts.push({x:x,y:y,vx:rnd(-110,110),vy:rnd(-150,20),life:rnd(.25,.55),c:col});}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var hit=0;
+  for(var i=letters.length-1;i>=0;i--){
+    if(letters[i].ch===ch){
+      var L=letters[i];
+      boom(L.x+16,L.y+16,L.c,7);
+      letters.splice(i,1);hit++;
+    }
+  }
+  if(hit>0){
+    kills+=hit;combo+=hit;
+    score+=hit*(8+Math.min(12,combo));
+    if(kills%15===0)level=Math.min(9,level+1);
+    hudUpd();
+  }else{
+    combo=0;shake=Math.max(shake,3);flash=0.18;hudUpd();
+  }
+}
+function update(dt){
+  elapsed+=dt;shake=Math.max(0,shake-dt*12);flash=Math.max(0,flash-dt);
+  spawnT-=dt;
+  if(spawnT<=0&&letters.length<12){spawn();spawnT=Math.max(0.55,1.5-level*0.1);}
+  for(var i=letters.length-1;i>=0;i--){
+    var L=letters[i];L.y+=L.vy*dt;
+    if(L.y>cv.height-44){
+      letters.splice(i,1);
+      shield--;combo=0;shake=6;flash=0.25;
+      boom(L.x+16,cv.height-40,'#ff6b6b',12);hudUpd();
+      if(shield<=0){end(false);return;}
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=340*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  if(flash>0){ctx.fillStyle='rgba(255,80,80,'+(flash*0.5)+')';ctx.fillRect(0,0,cv.width,cv.height);}
+  ctx.strokeStyle='rgba(110,231,160,.5)';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  ctx.beginPath();ctx.moveTo(0,cv.height-26);ctx.lineTo(cv.width,cv.height-26);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font='bold 24px system-ui, sans-serif';
+  ctx.textAlign='center';
+  for(var i=0;i<letters.length;i++){
+    var L=letters[i];
+    ctx.fillStyle='rgba(21,26,48,.85)';rr(L.x,L.y,34,34,8);ctx.fill();
+    ctx.strokeStyle=L.c;ctx.lineWidth=2;rr(L.x,L.y,34,34,8);ctx.stroke();
+    ctx.fillStyle=L.c;ctx.fillText(L.ch,L.x+17,L.y+25);
+  }
+  ctx.textAlign='left';
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2.2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'暴雨停歇':'护盾破碎';
+  ovX.textContent='得分 '+score+'\n击碎字母 '+kills+' 个　最高连击 '+combo+'\n等级 '+level+'　坚持 '+Math.round(elapsed)+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  fit();reset();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='字母暴雨';
+ovX.textContent='雨点一样的字母不断落下。\n按下键盘上对应的字母键，屏幕上所有相同字母会被一起击碎。\n雨点落地扣 1 格护盾，按错字母会重置连击，护盾 5 格耗尽则失败。';
+btn.textContent='开始游戏';
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安全守护者</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#ffb84d;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffb84d}
+#stage{text-align:center;font-size:15px;font-weight:800;color:#ffb84d;background:#2a2210;border:1px solid #4d3d14;border-radius:10px;padding:8px 0;margin-bottom:10px}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#ffb84d;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:10px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#ffb84d}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffb84d;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#ffb84d;color:#2a1c06;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>安全守护者</h1>
+  <p class="tips">生活安全情景考核:四个关卡(家居用电 / 交通出行 / 消防应急 / 急救防骗),每关 5 道情景题,答对 4 题才能过关进入下一关;一关内错满 2 题立即考核失败!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/4</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">本关失误</div><div class="big" id="wr">0/2</div></div>
+  </div></div>
+  <div class="card">
+    <div id="stage">第一关 · 家居用电</div>
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">安全守护者</h2><p id="ovp">· 四大关卡:家居用电、交通出行、<br>　消防应急、急救防骗<br>· 每关 5 道情景选择题,限时 15 秒<br>· 答对 +100,过关再 +150<br>· 每关最多错 1 题,错满 2 题直接失败<br>· 通关 4 关成为安全守护者!</p><button class="btn" id="obtn">开始考核</button></div></div>
+<script>
+'use strict';
+var STAGES=[
+{name:'第一关 · 家居用电',pool:[
+{q:'发现电器冒烟起火,第一步应该?',o:['立即切断电源','端水泼上去','用扇子扇风','继续观察使用']},
+{q:'手上沾满水时,可以触碰电源开关吗?',o:['不可以,先擦干手','可以,没关系','戴着戒指就可以','看心情决定']},
+{q:'同一个插座上能同时插满大功率电器吗?',o:['不能,容易过载','能,插得下就行','冬天可以','用细插座可以']},
+{q:'电器长期不用时,正确的做法是?',o:['拔掉插头或断电','一直通电保温','调小音量即可','多盖一块布']},
+{q:'发现电线外皮破损裸露,应该?',o:['找电工维修,别自行触碰','用湿手把它移开','自己缠胶布继续用','不管它,能用就行']},
+{q:'雷雨天在室内,比较安全的做法是?',o:['少用大功率电器','开着窗看闪电','边充电边玩手机','站在窗边打电话']}
+]},
+{name:'第二关 · 交通出行',pool:[
+{q:'过马路应该走?',o:['斑马线','任意位置','马路中间','绿化带旁边']},
+{q:'红灯亮起时,正确的做法是?',o:['停下等待','快步跑过','慢慢蹭过去','绕到路对面再过']},
+{q:'乘坐汽车时,儿童应该?',o:['使用安全座椅或系好安全带','坐副驾驶最前面','站起来看风景','把头伸出天窗']},
+{q:'骑自行车上路,正确的做法是?',o:['靠右行驶','逆行抄近路','双手离把炫技','跟着红灯抢行']},
+{q:'在站台等公交车,应该?',o:['站安全线内排队','探身到马路上看车','追逐打闹','车没停稳先挤门']},
+{q:'乘车遇到急刹车,应该?',o:['抓紧扶手','立刻跳车','大声唱歌','闭眼不动任晃']}
+]},
+{name:'第三关 · 消防应急',pool:[
+{q:'发生火灾时,应拨打的火警电话是?',o:['119','110','120','122']},
+{q:'身上衣物着火,正确的做法是?',o:['就地打滚压灭火苗','迎风快跑','用手拍打衣服','站着呼救不动']},
+{q:'火场逃生时应该?',o:['湿毛巾捂口鼻,低姿前行','乘电梯快速下楼','直立奔跑呼救','返回取贵重物品']},
+{q:'油锅起火,正确的做法是?',o:['盖上锅盖隔绝空气','泼水降温','把油倒进水池','端起锅往外跑']},
+{q:'发现燃气泄漏,首先应该?',o:['关阀开窗,不动电器开关','打开排风扇抽气','点火测试哪里漏','开灯看清楚现场']},
+{q:'楼下起火、楼道全是烟,应该?',o:['关门堵缝,窗口呼救等待','立刻冲下楼','先跳窗再说','开门看看火势']}
+]},
+{name:'第四关 · 急救防骗',pool:[
+{q:'有人突然倒地无意识,应先拨打?',o:['120','119','114','12315']},
+{q:'陌生电话说你中奖但要先交手续费,应该?',o:['不理会并告知家人','先交小额试试','提供银行卡号','帮对方垫付']},
+{q:'流鼻血时正确的做法是?',o:['低头前倾捏住鼻翼','立刻仰起头','平躺不动','用力揉鼻子']},
+{q:'皮肤烫伤后第一时间应该?',o:['流动冷水冲洗','涂牙膏','抹酱油','挑破水泡']},
+{q:'网上有人送游戏皮肤但要家长的支付密码,应该?',o:['拒绝并告诉家长','输一次没关系','告诉同学密码','输个假密码试试']},
+{q:'同学落水,正确的做法是?',o:['大声呼救找大人或漂浮物','立刻跳下水救人','手拉手下水','悄悄离开别惹麻烦']}
+]}
+];
+var PER=5,QLEN=15;
+var stage=0,order=[],si=0,wrongs=0,score=0,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+var CN=['1/4','2/4','3/4','4/4'];
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;stage=0;score=0;over=false;playing=true;locked=false;
+  $('sc').textContent='0';
+  $('overlay').classList.add('hide');
+  beginStage();
+}
+function beginStage(){
+  wrongs=0;si=0;
+  order=shuffle(STAGES[stage].pool.slice()).slice(0,PER);
+  $('lv').textContent=CN[stage];
+  $('stage').textContent=STAGES[stage].name;
+  $('wr').textContent='0/2';
+  showQ();
+}
+function showQ(){
+  var it=order[si];
+  locked=false;qLeft=QLEN;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  resolve(btn.dataset.ok==='1',btn);
+}
+function resolve(good,btn){
+  locked=true;
+  var btns=$('opts').children,i;
+  if(good){
+    score+=100;
+    if(btn)btn.classList.add('ok');
+    $('msg').textContent='处理正确!+100';
+  }else{
+    wrongs++;
+    $('wr').textContent=wrongs+'/2';
+    if(btn)btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=(qLeft<=0?'超时!':'处理不当!')+'正确答案已标出';
+  }
+  $('sc').textContent=score;
+  schedule(function(){
+    if(!playing||over)return;
+    if(wrongs>=2){finish(false);return;}
+    si++;
+    if(si>=PER){
+      score+=150;$('sc').textContent=score;
+      stage++;
+      if(stage>=4){finish(true);return;}
+      $('msg').textContent='本关通过!+150,进入下一关';
+      schedule(beginStage,1000);
+      return;
+    }
+    showQ();
+  },1400);
+}
+function finish(win){
+  playing=false;over=true;
+  if(win){
+    $('ovt').textContent='考核通过 · 安全守护者';
+    $('ovp').innerHTML='四大关卡全部达标!<br>最终得分 <b>'+score+'</b> 分<br>安全知识牢记心间,守护自己也提醒家人!';
+  }else{
+    $('ovt').textContent='考核未通过…';
+    $('ovp').innerHTML='止步于「'+STAGES[stage].name.replace('第','第')+'」<br>最终得分 <b>'+score+'</b> 分<br>安全无小事,记住错题再战一局!';
+  }
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)resolve(false,null);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

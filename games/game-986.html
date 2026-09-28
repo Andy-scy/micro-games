@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鱼缸慢时光</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#67e8f9;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.dex{display:flex;justify-content:center;gap:8px;font-size:12px;margin-bottom:8px}
+.dex span{color:#4b5372;border:1px solid #2b3154;border-radius:8px;padding:2px 10px}
+.dex span.on{color:#ffd27d;border-color:#8a6d2f}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#67e8f9}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#67e8f9;color:#083344;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>鱼缸慢时光</h1>
+  <p class="hint">点按水面投下鱼食 · 鱼儿衔食而长,历经四相终成锦鲤</p>
+  <div class="hud">
+    <span>成长 <b id="hGrow">0</b></span>
+    <span>阶段 <b id="hStage">鱼苗</b></span>
+  </div>
+  <div class="dex">
+    <span id="d0">鱼苗</span><span id="d1">幼鱼</span><span id="d2">成鱼</span><span id="d3">锦鲤</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">鱼缸慢时光</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">静守鱼缸</button>
+      <button id="btnMore" style="display:none">继续陪伴</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hGrow=$("hGrow"),hStage=$("hStage");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=300,TAU=Math.PI*2,WY=40,SY=272;
+var STAGES=[
+ {n:"鱼苗",need:100,scale:0.7,col:"#ff9e6d"},
+ {n:"幼鱼",need:240,scale:0.95,col:"#ffc46b"},
+ {n:"成鱼",need:420,scale:1.2,col:"#ff7b5a"},
+ {n:"锦鲤",need:600,scale:1.45,col:"#fff1e0"}];
+var fish={x:120,y:150,vx:30,vy:0,tx:300,ty:120,wt:0,stage:0,growth:0};
+var pellets=[],bubbles=[],fx=[];
+var state="menu",goalDone=false,time=0;
+var ac=null;
+function beep(f,d,v){try{
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+  var o=ac.createOscillator(),g=ac.createGain();
+  o.type="triangle";o.frequency.value=f;g.gain.value=v||0.05;
+  g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+d);
+  o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d);
+}catch(e){}}
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function dexUpd(){
+  var i;
+  for(i=0;i<4;i++)$("d"+i).className=(i<=fish.stage)?"on":"";
+}
+function step(dt){
+  var i;
+  var tgt=null,best=1e9;
+  for(i=0;i<pellets.length;i++){var p=pellets[i];
+    var dx=p.x-fish.x,dy=p.y-fish.y,d=dx*dx+dy*dy;
+    if(d<best){best=d;tgt=p;}}
+  var dvx,dvy;
+  if(tgt&&best<180*180){
+    var d=Math.sqrt(best)||1;
+    dvx=(tgt.x-fish.x)/d*92;dvy=(tgt.y-fish.y)/d*92;
+  }else{
+    fish.wt-=dt;
+    if(fish.wt<=0){fish.wt=2+Math.random()*2;
+      fish.tx=40+Math.random()*390;fish.ty=WY+30+Math.random()*180;}
+    var ex=fish.tx-fish.x,ey=fish.ty-fish.y,ed=Math.sqrt(ex*ex+ey*ey)||1;
+    dvx=ex/ed*48;dvy=ey/ed*48;
+  }
+  fish.vx+=(dvx-fish.vx)*Math.min(1,2.6*dt);
+  fish.vy+=(dvy-fish.vy)*Math.min(1,2.6*dt);
+  fish.x+=fish.vx*dt;fish.y+=fish.vy*dt;
+  if(fish.x<24){fish.x=24;fish.vx=Math.abs(fish.vx);}
+  if(fish.x>W-24){fish.x=W-24;fish.vx=-Math.abs(fish.vx);}
+  if(fish.y<WY+14){fish.y=WY+14;fish.vy=Math.abs(fish.vy);}
+  if(fish.y>SY-14){fish.y=SY-14;fish.vy=-Math.abs(fish.vy);}
+  if(tgt){
+    var gx=tgt.x-fish.x,gy=tgt.y-fish.y;
+    if(gx*gx+gy*gy<15*15){
+      pellets.splice(pellets.indexOf(tgt),1);
+      fish.growth+=9;hGrow.textContent=fish.growth;
+      addFx(fish.x,fish.y-18,"+9","#86efac");
+      beep(520+Math.random()*160,0.09,0.04);
+      while(fish.stage<3&&fish.growth>=STAGES[fish.stage+1].need){
+        fish.stage++;
+        hStage.textContent=STAGES[fish.stage].n;
+        dexUpd();
+        addFx(W/2,120,"蜕变!"+STAGES[fish.stage].n,"#67e8f9");
+        beep(660,0.25,0.06);
+        if(fish.stage===3&&!goalDone){
+          goalDone=true;state="zen";
+          ovT.textContent="锦鲤养成";
+          ovD.textContent="从一尾小鱼到锦鲤,食 "+Math.round(fish.growth/9)+" 粒。\n图鉴四相已集齐,此后相伴,慢慢游。";
+          btnMore.style.display="inline-block";
+          ov.classList.remove("hide");
+        }
+      }
+    }
+  }
+  for(i=pellets.length-1;i>=0;i--){var p2=pellets[i];
+    p2.y+=42*dt;p2.x+=Math.sin(time*3+p2.ph)*9*dt;
+    if(p2.y>SY-4)pellets.splice(i,1);}
+  if(pellets.length>6)pellets.splice(0,pellets.length-6);
+  if(Math.random()<dt*2)bubbles.push({x:30+Math.random()*410,y:SY-4,v:14+Math.random()*16,r:1+Math.random()*2});
+  for(i=bubbles.length-1;i>=0;i--){var b=bubbles[i];
+    b.y-=b.v*dt;b.x+=Math.sin(time*2+i)*6*dt;
+    if(b.y<WY+6)bubbles.splice(i,1);}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  var g=ctx.createLinearGradient(0,WY,0,SY);
+  g.addColorStop(0,"rgba(56,120,170,.30)");
+  g.addColorStop(1,"rgba(16,40,70,.42)");
+  ctx.fillStyle=g;ctx.fillRect(0,WY,W,SY-WY);
+  ctx.strokeStyle="rgba(190,230,255,.4)";ctx.lineWidth=2;
+  ctx.beginPath();
+  for(i=0;i<=W;i+=10)ctx.lineTo(i,WY+Math.sin(i*0.05+time*1.6)*2.2);
+  ctx.stroke();
+  ctx.fillStyle="#232b40";ctx.fillRect(0,SY,W,H-SY);
+  ctx.fillStyle="#2e3852";
+  for(i=0;i<14;i++)ctx.fillRect(12+i*34,SY+6+((i*37)%9),10,3);
+  for(i=0;i<3;i++){
+    var px=50+i*185,sw=Math.sin(time*1.4+i*2)*6;
+    ctx.strokeStyle="#2f6b4f";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(px,SY);
+    ctx.quadraticCurveTo(px+sw,SY-30,px+sw*1.6,SY-58);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(px+8,SY);
+    ctx.quadraticCurveTo(px+8-sw,SY-22,px+10-sw*1.4,SY-44);ctx.stroke();}
+  for(i=0;i<bubbles.length;i++){var b=bubbles[i];
+    ctx.strokeStyle="rgba(200,235,255,.4)";ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.stroke();}
+  for(i=0;i<pellets.length;i++){var p2=pellets[i];
+    ctx.fillStyle="#d9a066";
+    ctx.beginPath();ctx.arc(p2.x,p2.y,2.6,0,TAU);ctx.fill();}
+  var st=STAGES[fish.stage],sc=st.scale;
+  ctx.save();ctx.translate(fish.x,fish.y);
+  if(fish.vx<0)ctx.scale(-1,1);
+  var wig=Math.sin(time*8)*0.35;
+  ctx.fillStyle=st.col;
+  ctx.beginPath();ctx.moveTo(-16*sc,0);
+  ctx.lineTo(-26*sc,(-9+wig*6)*sc);ctx.lineTo(-26*sc,(9+wig*6)*sc);
+  ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.ellipse(0,0,17*sc,9*sc,0,0,TAU);ctx.fill();
+  ctx.beginPath();ctx.moveTo(-2*sc,-8*sc);
+  ctx.lineTo((-7+wig*3)*sc,-16*sc);ctx.lineTo(4*sc,-8*sc);ctx.closePath();ctx.fill();
+  if(fish.stage===3){
+    ctx.fillStyle="#ff5d5d";
+    ctx.beginPath();ctx.ellipse(5*sc,-2*sc,6*sc,4*sc,0.4,0,TAU);ctx.fill();
+    ctx.fillStyle="#f7a32b";
+    ctx.beginPath();ctx.ellipse(-7*sc,3*sc,5*sc,3.4*sc,-0.3,0,TAU);ctx.fill();}
+  ctx.fillStyle="#fff";
+  ctx.beginPath();ctx.arc(9*sc,-2.5*sc,2.6*sc,0,TAU);ctx.fill();
+  ctx.fillStyle="#16213a";
+  ctx.beginPath();ctx.arc(9.8*sc,-2.5*sc,1.3*sc,0,TAU);ctx.fill();
+  ctx.restore();
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(e){
+  if(state!=="play")return;
+  var rc=cv.getBoundingClientRect();
+  var x=(e.clientX-rc.left)*W/rc.width;
+  if(x<12)x=12;
+  if(x>W-12)x=W-12;
+  if(pellets.length<6)pellets.push({x:x,y:WY+4,ph:Math.random()*TAU});
+});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="鱼缸慢时光";
+  ovD.textContent="点按水面,鱼食缓缓下沉,鱼儿会循味而来。\n每食一粒成长 +9:鱼苗、幼鱼、成鱼,终成锦鲤。\n图鉴四相点亮之时,便是圆满。";
+  btnGo.textContent="静守鱼缸";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+dexUpd();
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分秒营救</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px}
+h1{font-size:20px;color:#7c9cff;margin-bottom:6px}
+#tip{font-size:13px;color:#9aa3c0;margin-bottom:8px;text-align:center}
+#hud{font-size:14px;color:#c7cdf0;margin-bottom:6px}
+#wrap{position:relative;width:100%;max-width:760px}
+canvas{display:block;width:100%;background:#101c30;border-radius:14px}
+#overlay{position:absolute;inset:0;background:rgba(10,12,26,.9);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+#overlay.hide{display:none}
+#ovTitle{font-size:24px;color:#6ee7a0}
+#ovText{font-size:14px;color:#c7cdf0;line-height:1.8;white-space:pre-line}
+button{background:#7c9cff;color:#10142a;border:0;border-radius:10px;padding:10px 24px;font-size:16px;font-family:inherit;cursor:pointer}
+button:hover{background:#9ab1ff}
+</style>
+</head>
+<body>
+<h1>分秒营救</h1>
+<div id="tip">每个字母都被封在倒计时气泡里：按对应按键立即救出；读秒归零的气泡会沉没</div>
+<div id="hud"></div>
+<div id="wrap">
+<canvas id="cv" width="760" height="470"></canvas>
+<div id="overlay">
+<div id="ovTitle"></div>
+<div id="ovText"></div>
+<button id="ovBtn">开始营救</button>
+</div>
+</div>
+<input id="kc" autocomplete="off" style="position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px">
+<script>
+(function(){
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var wrap=document.getElementById('wrap'),hud=document.getElementById('hud');
+var ov=document.getElementById('overlay'),ovT=document.getElementById('ovTitle'),ovX=document.getElementById('ovText'),btn=document.getElementById('ovBtn');
+var kc=document.getElementById('kc');
+var bubbles,parts,score,rescued,missed,spawnT,elapsed,shake,running,raf,tPrev,flash;
+var TMAX=6;
+function fit(){var w=wrap.clientWidth||640;cv.width=w;cv.height=Math.max(340,Math.min(500,Math.round(w*0.6)));}
+window.addEventListener('resize',fit);
+function rnd(a,b){return a+Math.random()*(b-a);}
+function hudUpd(){hud.textContent='得分 '+score+'　已救出 '+rescued+'　沉没 '+missed+'/5　用时 '+Math.round(elapsed)+'s';}
+function reset(){bubbles=[];parts=[];score=0;rescued=0;missed=0;spawnT=0.4;elapsed=0;shake=0;flash=0;hudUpd();}
+function spawn(){
+  var ch=String.fromCharCode(97+Math.floor(Math.random()*26));
+  for(var i=0;i<bubbles.length;i++){if(bubbles[i].ch===ch)return;}
+  var t0=TMAX-rnd(0,1.5);
+  bubbles.push({ch:ch,x:rnd(50,cv.width-50),y:cv.height*0.62+rnd(0,cv.height*0.3),t:t0,tmax:TMAX,vx:rnd(-9,9)});
+}
+function boom(x,y,col,n){for(var i=0;i<(n||10);i++)parts.push({x:x,y:y,vx:rnd(-90,90),vy:rnd(-120,30),life:rnd(.3,.7),c:col});}
+function handleChar(ch){
+  if(!running)return;
+  if(ch==='\b')return;
+  ch=ch.toLowerCase();
+  if(!/^[a-z]$/.test(ch))return;
+  var best=-1,bt=1e9;
+  for(var i=0;i<bubbles.length;i++){
+    if(bubbles[i].ch===ch&&bubbles[i].t<bt){bt=bubbles[i].t;best=i;}
+  }
+  if(best>=0){
+    var b=bubbles[best];
+    score+=10+Math.round(b.t*3);
+    rescued++;
+    boom(b.x,b.y,'#6ee7a0',12);
+    bubbles.splice(best,1);
+    hudUpd();
+  }else{
+    score=Math.max(0,score-4);
+    flash=0.15;shake=Math.max(shake,2);
+    hudUpd();
+  }
+}
+function update(dt){
+  elapsed+=dt;shake=Math.max(0,shake-dt*12);flash=Math.max(0,flash-dt);
+  spawnT-=dt;
+  if(spawnT<=0&&bubbles.length<7){spawn();spawnT=Math.max(0.8,1.6-elapsed*0.02);}
+  for(var i=bubbles.length-1;i>=0;i--){
+    var b=bubbles[i];
+    b.t-=dt;
+    b.y-=24*dt;
+    b.x+=b.vx*dt;
+    if(b.x<30)b.vx=Math.abs(b.vx);
+    if(b.x>cv.width-30)b.vx=-Math.abs(b.vx);
+    if(b.t<=0){
+      bubbles.splice(i,1);
+      missed++;flash=0.25;shake=5;
+      hudUpd();
+      if(missed>=5){end(false);return;}
+    }
+  }
+  for(var j=parts.length-1;j>=0;j--){
+    var p=parts[j];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=60*dt;
+    if(p.life<=0)parts.splice(j,1);
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  if(shake>0)ctx.translate(rnd(-shake,shake),rnd(-shake,shake));
+  if(flash>0){ctx.fillStyle='rgba(255,80,80,'+flash*0.45+')';ctx.fillRect(0,0,cv.width,cv.height);}
+  ctx.textAlign='center';
+  for(var i=0;i<bubbles.length;i++){
+    var b=bubbles[i];
+    var frac=Math.max(0,b.t/b.tmax);
+    var danger=b.t<2;
+    ctx.fillStyle=danger?'rgba(255,107,107,.12)':'rgba(110,231,160,.1)';
+    ctx.beginPath();ctx.arc(b.x,b.y,26,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=danger?'#ff6b6b':'rgba(110,231,160,.6)';
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(b.x,b.y,26,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle=danger?'#ff6b6b':'#6ee7a0';
+    ctx.lineWidth=4;
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,26,-Math.PI/2,-Math.PI/2+frac*Math.PI*2);
+    ctx.stroke();
+    ctx.font='bold 26px system-ui, sans-serif';
+    ctx.fillStyle=danger?'#ff8f8f':'#6ee7a0';
+    ctx.fillText(b.ch,b.x,b.y+9);
+    ctx.font='11px system-ui, sans-serif';
+    ctx.fillStyle='#9aa3c0';
+    ctx.fillText(b.t.toFixed(1)+'s',b.x,b.y+44);
+  }
+  ctx.textAlign='left';
+  for(var j=0;j<parts.length;j++){
+    var p=parts[j];ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,4,4);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+function loop(ts){
+  if(!running)return;
+  var dt=Math.min(0.05,(ts-tPrev)/1000||0);tPrev=ts;
+  update(dt);draw();
+  raf=requestAnimationFrame(loop);
+}
+function end(win){
+  running=false;
+  ovT.textContent=win?'全员获救':'太多字母沉没';
+  ovX.textContent='得分 '+score+'\n救出 '+rescued+' 个字母　沉没 '+missed+' 个\n营救时长 '+Math.round(elapsed)+' 秒';
+  btn.textContent='再来一局';
+  ov.classList.remove('hide');
+}
+function start(){
+  reset();fit();ov.classList.add('hide');running=true;tPrev=0;
+  raf=requestAnimationFrame(loop);
+  kc.focus();
+}
+function bindTyping(fn){
+  kc.addEventListener('keydown',function(e){
+    if(e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  window.addEventListener('keydown',function(e){
+    if(document.activeElement!==kc&&e.key&&e.key.length===1){e.preventDefault();fn(e.key);}
+    else if(document.activeElement!==kc&&e.key==='Backspace'){e.preventDefault();fn('\b');}
+  });
+  kc.addEventListener('input',function(e){
+    if(kc.value===''){if(e.inputType==='deleteContentBackward')fn('\b');return;}
+    var v=kc.value;kc.value='';
+    for(var i=0;i<v.length;i++)fn(v.charAt(i));
+  });
+  wrap.addEventListener('click',function(){kc.focus();});
+  window.addEventListener('touchstart',function(){kc.focus();},{passive:true});
+}
+bindTyping(handleChar);
+btn.addEventListener('click',start);
+fit();reset();
+ovT.textContent='分秒营救';
+ovX.textContent='每个气泡里的字母都有独立的倒计时。\n按下对应字母键，剩余时间最短的气泡立刻获救。\n救援得分与剩余时间挂钩，越快越高；沉没 5 个气泡任务失败。';
+btn.textContent='开始营救';
+})();
+</script>
+</body>
+</html>

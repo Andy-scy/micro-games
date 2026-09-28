@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>赛道最优线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>赛道最优线</h1>
+  <p class="tips">椭圆赛道计时圈:压住绿色虚线「最优路线」就能额外加速,冲出路面只剩草地慢速。跑满 3 圈!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">圈数</div><div class="big" id="sl">0/3</div></div>
+    <div class="stat"><div class="mut">本圈</div><div class="big" id="cu">0.0 s</div></div>
+    <div class="stat"><div class="mut">总时间</div><div class="big" id="tt">0.0 s</div></div>
+    <div class="stat"><div class="mut">最佳圈</div><div class="big" id="bl">--</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="460" height="540"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">赛道最优线</h2><p id="ovp">玩法说明:<br>· ↑ 油门、↓ 刹车、← → 转向(W A S D 同样有效)<br>· 沿<b>绿色虚线</b>(最优路线)行驶可自动提速<br>· 离开柏油路会大幅减速<br>· 顺时针跑满 3 圈,限时 120 秒<br>· 转弯提前松油门,出弯再全开</p><button class="btn" id="obtn">发车</button></div></div>
+<script>
+'use strict';
+var W=460,H=540;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var A=320,B=210,HW=46;
+var cl=[],ideal=[];
+var carX,carY,carA,spd,lap,lapT,totalT,bestLap,prog,prevAng,onTrack,onIdeal,running;
+var keys={};
+function $i(id){return document.getElementById(id)}
+function buildTrack(){
+  var i,a;
+  cl.length=0;ideal.length=0;
+  for(i=0;i<144;i++){
+    a=i/144*Math.PI*2;
+    cl.push({x:Math.cos(a)*A,y:Math.sin(a)*B});
+    ideal.push({x:Math.cos(a)*A*0.86,y:Math.sin(a)*B*0.86});
+  }
+}
+function distTo(arr,x,y){
+  var best=1e12,i,p,dx,dy,d;
+  for(i=0;i<arr.length;i++){
+    p=arr[i];dx=p.x-x;dy=p.y-y;d=dx*dx+dy*dy;
+    if(d<best)best=d;
+  }
+  return Math.sqrt(best);
+}
+function reset(){
+  carX=0;carY=B;carA=Math.PI;spd=0;
+  lap=0;lapT=0;totalT=0;bestLap=null;prog=0;prevAng=Math.PI/2;
+  onTrack=true;onIdeal=false;
+  upd();
+}
+function upd(){
+  $i('sl').textContent=lap+'/3';
+  $i('cu').textContent=lapT.toFixed(1)+' s';
+  $i('tt').textContent=totalT.toFixed(1)+' s';
+  $i('bl').textContent=bestLap===null?'--':bestLap.toFixed(1)+' s';
+}
+function endRun(title,html){
+  running=false;
+  $i('ovt').textContent=title;
+  $i('ovp').innerHTML=html;
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function finish(){
+  var stars='★';
+  if(totalT<62)stars='★★★';
+  else if(totalT<78)stars='★★';
+  endRun('完赛!','总时间 <b>'+totalT.toFixed(2)+' s</b><br>最佳单圈 '+(bestLap===null?'--':bestLap.toFixed(2)+' s')+'<br>评价 '+stars+'<br>更贴的最佳线,更短的单圈!');
+}
+function update(dt){
+  totalT+=dt;lapT+=dt;
+  var dCl=distTo(cl,carX,carY);
+  var dId=distTo(ideal,carX,carY);
+  onTrack=dCl<HW;
+  onIdeal=onTrack&&dId<24;
+  var maxS=onTrack?(onIdeal?400:330):130;
+  if(keys.ArrowUp||keys.w||keys.W)spd+=300*dt;
+  else spd-=90*dt;
+  if(keys.ArrowDown||keys.s||keys.S)spd-=460*dt;
+  if(onIdeal&&spd<maxS)spd+=80*dt;
+  spd=Math.max(0,Math.min(maxS,spd));
+  var steer=0;
+  if(keys.ArrowLeft||keys.a||keys.A)steer=-1;
+  if(keys.ArrowRight||keys.d||keys.D)steer=1;
+  carA+=steer*2.6*dt*Math.min(1,spd/170);
+  carX+=Math.cos(carA)*spd*dt;
+  carY+=Math.sin(carA)*spd*dt;
+  var ang=Math.atan2(carY/B,carX/A);
+  var d=ang-prevAng;
+  if(d>Math.PI)d-=Math.PI*2;
+  if(d<-Math.PI)d+=Math.PI*2;
+  prog+=d;prevAng=ang;
+  if(prog<=-Math.PI*2){
+    prog+=Math.PI*2;
+    if(bestLap===null||lapT<bestLap)bestLap=lapT;
+    lap++;lapT=0;
+    if(lap>=3){finish();return;}
+  }
+  if(totalT>=120){
+    endRun('超时未完赛','已完成 '+lap+'/3 圈<br>草地会吞掉你的速度,宁可减速也要留在柏油上!');
+    return;
+  }
+  upd();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  ctx.fillStyle='#0f1220';ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(W/2-carX,310-carY);
+  ctx.fillStyle='#152238';ctx.fillRect(carX-700,carY-700,1400,1400);
+  ctx.lineJoin='round';
+  ctx.strokeStyle='#3b4272';ctx.lineWidth=HW*2;
+  ctx.beginPath();ctx.ellipse(0,0,A,B,0,0,6.2832);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.5)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.ellipse(0,0,A+HW-4,B+HW-4,0,0,6.2832);ctx.stroke();
+  ctx.beginPath();ctx.ellipse(0,0,A-HW+4,B-HW+4,0,0,6.2832);ctx.stroke();
+  ctx.strokeStyle='rgba(90,230,150,.85)';ctx.lineWidth=4;
+  ctx.setLineDash([16,14]);
+  ctx.beginPath();ctx.ellipse(0,0,A*0.86,B*0.86,0,0,6.2832);ctx.stroke();
+  ctx.setLineDash([]);
+  var k;
+  for(k=0;k<10;k++){
+    ctx.fillStyle=(k%2===0)?'#f2f2f2':'#23263e';
+    ctx.fillRect(-9, B-HW+k*9.2, 18, 9.2);
+  }
+  if(onIdeal){
+    ctx.fillStyle='rgba(90,230,150,.25)';
+    ctx.beginPath();ctx.arc(carX,carY,34,0,6.2832);ctx.fill();
+  }
+  ctx.save();
+  ctx.translate(carX,carY);ctx.rotate(carA);
+  ctx.fillStyle='#ff5c5c';rr(-15,-25,30,50,8);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.32)';ctx.fillRect(-10,-16,20,15);
+  ctx.fillStyle='#ffe08a';ctx.fillRect(-12,17,8,5);ctx.fillRect(4,17,8,5);
+  ctx.restore();
+  if(onIdeal){
+    ctx.font='bold 15px system-ui';ctx.textAlign='center';
+    ctx.fillStyle='#5ce696';
+    ctx.fillText('贴线加速!',carX,carY-36);
+  }
+  ctx.restore();
+}
+window.addEventListener('keydown',function(e){
+  keys[e.key]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key)>=0)e.preventDefault();
+});
+window.addEventListener('keyup',function(e){keys[e.key]=false;});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+buildTrack();
+reset();
+var lastT=0;
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  if(running)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

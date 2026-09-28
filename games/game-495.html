@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暗夜猎影</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#b0bec5;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;color:#c7cbe8;margin-bottom:6px}
+.hud b{color:#b0bec5;font-size:15px}
+#msg{min-height:18px;text-align:center;color:#fbbf24;font-size:13px;margin-bottom:6px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#05060c;border-radius:10px;touch-action:none;cursor:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#b0bec5}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#b0bec5;color:#1c262b;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>暗夜猎影</h1>
+  <p class="hint">只有准星周围一圈灯光 · 灯圈会越来越小 · 命中可撑大灯圈 · 50 秒冲 220 分</p>
+  <div class="hud">
+    <span>得分 <b id="sc">0</b></span>
+    <span>时间 <b id="tm">50</b>秒</span>
+    <span>目标 <b>220</b></span>
+  </div>
+  <div id="msg"></div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="560"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">暗夜猎影</h2>
+      <p id="ovD">深夜的靶场一片漆黑,唯一的光是准星周围那一圈灯影。五只暗影靶在黑暗里缓缓游走,看见谁就射谁:命中 +20 并把灯圈撑大一截,空放一箭倒扣 5 分。灯圈还会随着时间慢慢缩小,越来越难。50 秒冲 220 分。</p>
+      <p class="big" id="ovS" style="display:none"></p>
+      <button id="btn">入夜</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+const $=function(id){return document.getElementById(id);};
+const cv=$("cv"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+const ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),ovS=$("ovS"),btn=$("btn");
+const elSc=$("sc"),elTm=$("tm"),elMsg=$("msg");
+const GOAL=220,DUR=50;
+let state="menu",score=0,timeLeft=DUR,tp=0,lightR=110;
+let mouse={x:240,y:280},targets=[],shots=[];
+function evPos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function newTarget(){
+  return{x:40+Math.random()*400,y:40+Math.random()*480,r:20,
+    vx:(Math.random()<0.5?-1:1)*(20+Math.random()*25),
+    vy:(Math.random()<0.5?-1:1)*(20+Math.random()*25)};
+}
+function resetTargets(){
+  targets=[];
+  for(let i=0;i<5;i++)targets.push(newTarget());
+}
+function shoot(){
+  if(state!=="play")return;
+  shots.push({x:mouse.x,y:mouse.y,t:0});
+  let hit=null;
+  for(let i=0;i<targets.length;i++){
+    if(Math.hypot(mouse.x-targets[i].x,mouse.y-targets[i].y)<targets[i].r+5){hit=targets[i];break;}
+  }
+  if(hit){
+    score+=20;
+    lightR=Math.min(110,lightR+8);
+    elMsg.textContent="暗中命中!+20";
+    targets.splice(targets.indexOf(hit),1);
+    targets.push(newTarget());
+  }else{
+    score=Math.max(0,score-5);
+    elMsg.textContent="黑暗里放空了 -5";
+  }
+  elSc.textContent=score;
+}
+function startGame(){
+  score=0;timeLeft=DUR;tp=0;lightR=110;
+  shots=[];resetTargets();
+  elMsg.textContent="";elSc.textContent="0";elTm.textContent=DUR;
+  state="play";ov.classList.add("hide");
+}
+function finish(){
+  state="over";
+  const win=score>=GOAL;
+  ovT.textContent=win?"黑夜属于你":"影影绰绰";
+  ovT.style.color=win?"#b0bec5":"#ef9a9a";
+  ovD.textContent=win?"灯圈缩到最小的那一刻,你依然箭箭咬肉。":"夜靶三诀:先找影,再稳手,别乱开弓——每一发空枪都在偷你的灯。";
+  ovS.textContent="得分 "+score+" · 目标 "+GOAL+" 分";
+  btn.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+btn.addEventListener("click",function(){startGame();});
+cv.addEventListener("mousemove",function(e){mouse=evPos(e);});
+cv.addEventListener("mousedown",function(e){mouse=evPos(e);shoot();});
+cv.addEventListener("touchstart",function(e){mouse=evPos(e.touches[0]);shoot();e.preventDefault();},{passive:false});
+cv.addEventListener("touchmove",function(e){mouse=evPos(e.touches[0]);e.preventDefault();},{passive:false});
+document.addEventListener("keydown",function(e){
+  if((e.key===" "||e.key==="Enter")&&state!=="play"){e.preventDefault();startGame();}
+});
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  tp+=dt;
+  if(state==="play"){
+    timeLeft-=dt;
+    elTm.textContent=Math.max(0,Math.ceil(timeLeft));
+    lightR=Math.max(55,lightR-1.1*dt);
+    for(let i=0;i<targets.length;i++){
+      const tr=targets[i];
+      tr.x+=tr.vx*dt;tr.y+=tr.vy*dt;
+      if(tr.x<24&&tr.vx<0)tr.vx=-tr.vx;
+      if(tr.x>456&&tr.vx>0)tr.vx=-tr.vx;
+      if(tr.y<24&&tr.vy<0)tr.vy=-tr.vy;
+      if(tr.y>536&&tr.vy>0)tr.vy=-tr.vy;
+    }
+    for(let i=shots.length-1;i>=0;i--){
+      shots[i].t+=dt*3.5;
+      if(shots[i].t>=1)shots.splice(i,1);
+    }
+    if(timeLeft<=0)finish();
+  }
+  draw();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0a0d18";
+  ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(90,100,140,0.25)";ctx.lineWidth=1;
+  for(let i=0;i<8;i++){
+    ctx.beginPath();ctx.moveTo(40+i*60,0);ctx.lineTo(40+i*60,H);ctx.stroke();
+  }
+  for(let i=0;i<targets.length;i++){
+    const tr=targets[i];
+    ctx.save();ctx.translate(tr.x,tr.y);ctx.rotate(tp*0.8+i);
+    ctx.fillStyle="#26343f";
+    ctx.beginPath();ctx.arc(0,0,tr.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#e53935";
+    ctx.beginPath();ctx.arc(0,0,tr.r*0.4,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  ctx.beginPath();
+  ctx.rect(0,0,W,H);
+  ctx.arc(mouse.x,mouse.y,lightR,0,Math.PI*2);
+  ctx.fillStyle="rgba(2,3,8,0.955)";
+  ctx.fill("evenodd");
+  ctx.strokeStyle="rgba(176,190,197,0.35)";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(mouse.x,mouse.y,lightR,0,Math.PI*2);ctx.stroke();
+  for(let i=0;i<shots.length;i++){
+    const s=shots[i];
+    ctx.globalAlpha=Math.max(0,1-s.t);
+    ctx.strokeStyle="#fff8e1";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x,s.y,8+s.t*26,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  ctx.strokeStyle="#eceff1";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(mouse.x,mouse.y,7,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(mouse.x-13,mouse.y);ctx.lineTo(mouse.x-4,mouse.y);
+  ctx.moveTo(mouse.x+4,mouse.y);ctx.lineTo(mouse.x+13,mouse.y);
+  ctx.moveTo(mouse.x,mouse.y-13);ctx.lineTo(mouse.x,mouse.y-4);
+  ctx.moveTo(mouse.x,mouse.y+4);ctx.lineTo(mouse.x,mouse.y+13);ctx.stroke();
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

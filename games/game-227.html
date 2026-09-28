@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连环急靶</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fbbf24;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fbbf24;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fbbf24}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#fbbf24;color:#3a2503;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>连环急靶</h1>
+  <p class="hint">连续命中 30 个靶 · 目标越打越小,超时脱靶加罚时</p>
+  <div class="hud">
+    <span>进度 <b id="prog">0/30</b></span>
+    <span>用时 <b id="time">0.0s</b></span>
+    <span>罚时 <b id="pen">0</b> 次</span>
+    <span>最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">连环急靶</h2>
+      <p id="ovDesc">一次只出现一个靶,连续命中 30 个,纯拼手速与准度!靶会越来越小、停留越来越短;靶消失或点空都会加罚时。总用时越短越强!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始挑战</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,KEY="mg_s227";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elProg=$("prog"),elTime=$("time"),elPen=$("pen"),elBest=$("best");
+var state="menu",idx=0,tx=0,ty=0,bornAt=0,totalMs=0,penCount=0,pulse=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseFloat(localStorage.getItem(k));return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function targetR(){return 26-idx*0.45;}
+function targetLife(){return 2600-idx*45;}
+function respawn(){
+  var tries=0,x,y;
+  do{
+    x=70+Math.random()*(W-140);
+    y=70+Math.random()*(H-140);
+    tries++;
+  }while(Math.hypot(x-tx,y-ty)<95&&tries<30);
+  tx=x;ty=y;
+  bornAt=performance.now();
+}
+function updateHud(){
+  elProg.textContent=idx+"/30";
+  elTime.textContent=(totalMs/1000).toFixed(1)+"s";
+  elPen.textContent=penCount;
+  elBest.textContent=best>0?best.toFixed(1)+"s":"--";
+}
+function finish(){
+  state="over";
+  if(best===0||totalMs/1000<best){best=totalMs/1000;saveBest(KEY,best);}
+  ovTitle.textContent="30 靶全破!";
+  ovDesc.textContent="罚时 "+penCount+" 次 · 平均每靶 "+(totalMs/30/1000).toFixed(2)+" 秒";
+  ovScore.style.display="block";
+  ovScore.textContent="总用时 "+(totalMs/1000).toFixed(1)+" 秒";
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="rgba(59,69,124,0.35)";
+  var i;
+  for(i=1;i<6;i++){
+    ctx.beginPath();ctx.moveTo(0,i*H/6);ctx.lineTo(W,i*H/6);ctx.stroke();
+  }
+  if(state!=="playing")return;
+  var r=targetR();
+  var pr=r+4+Math.sin(pulse)*2.5;
+  ctx.strokeStyle="#fbbf24";
+  ctx.beginPath();ctx.arc(tx,ty,pr,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle="rgba(251,191,36,0.25)";
+  ctx.beginPath();ctx.arc(tx,ty,r,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#fde68a";
+  ctx.beginPath();ctx.arc(tx,ty,r*0.55,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle="#fbbf24";
+  ctx.beginPath();ctx.arc(tx,ty,2.5,0,Math.PI*2);ctx.fill();
+  var remain=1-(t-bornAt)/targetLife();
+  if(remain<0)remain=0;
+  ctx.strokeStyle=remain>0.3?"#4ade80":"#f87171";
+  ctx.beginPath();
+  ctx.arc(tx,ty,r+12,-Math.PI/2,-Math.PI/2+Math.PI*2*remain);
+  ctx.stroke();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  pulse+=dt*0.008;
+  if(state==="playing"){
+    totalMs+=dt;
+    if(t-bornAt>targetLife()){
+      totalMs+=500;
+      penCount++;
+      respawn();
+    }
+    updateHud();
+  }
+  draw(t);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function onTap(e){
+  if(state==="menu"||state==="over"){startGame();return;}
+  var p=pos(e);
+  if(Math.hypot(p.x-tx,p.y-ty)<=targetR()+6){
+    idx++;
+    if(idx>=30){finish();return;}
+    respawn();
+  }else{
+    totalMs+=250;
+  }
+  updateHud();
+}
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onTap(e);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+function startGame(){
+  idx=0;totalMs=0;penCount=0;tx=W/2;ty=H/2;
+  state="playing";
+  ov.classList.add("hide");
+  respawn();
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

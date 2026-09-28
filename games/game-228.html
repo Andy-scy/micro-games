@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幻影闪烁</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#a78bfa;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a78bfa;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#a78bfa}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#a78bfa;color:#2e1065;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>幻影闪烁</h1>
+  <p class="hint">黑暗中只有一个金色方块是真身,其余圆影全是陷阱 · 点错扣机会</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>等级 <b id="level">1</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="360"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">幻影闪烁</h2>
+      <p id="ovDesc">黑暗中散布着若干忽明忽暗的幻影:金色方块是真目标,彩色圆点是陷阱。每个幻影按自己的节奏闪烁,盯住方块的位置,亮或不亮都可以点它!点到陷阱扣一次机会,等级越高幻影越多、闪得越快。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=360,KEY="mg_s228";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elLevel=$("level"),elLives=$("lives"),elBest=$("best");
+var state="menu",score=0,hits=0,level=1,lives=3,entities=[],rebuildAt=0;
+var flashUntil=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseInt(localStorage.getItem(k)||"0",10);return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elScore.textContent=score;
+  elLevel.textContent=level;
+  elLives.textContent=lives;
+  elBest.textContent=best;
+}
+function lit(e,t){
+  var cyc=(t+e.phase)%e.period;
+  return cyc<e.period*0.42;
+}
+function buildRound(){
+  entities=[];
+  var decoys=Math.min(6,level+1);
+  var total=decoys+1;
+  var placed=[],i,j,tries;
+  for(i=0;i<total;i++){
+    var x,y,ok;
+    tries=0;
+    do{
+      x=60+Math.random()*(W-120);
+      y=60+Math.random()*(H-120);
+      ok=true;
+      for(j=0;j<placed.length;j++){
+        if(Math.hypot(x-placed[j].x,y-placed[j].y)<78){ok=false;break;}
+      }
+      tries++;
+    }while(!ok&&tries<60);
+    var pmin=Math.max(360,640-level*30);
+    placed.push({x:x,y:y,isTarget:i===0,period:pmin+Math.random()*320,phase:Math.random()*1000});
+  }
+  entities=placed;
+}
+function endGame(){
+  state="over";
+  if(score>best){best=score;saveBest(KEY,best);}
+  ovTitle.textContent="幻影吞没了你";
+  ovDesc.textContent="命中真身 "+hits+" 次 · 到达等级 "+level;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="rgba(59,69,124,0.25)";
+  var i;
+  for(i=1;i<6;i++){
+    ctx.beginPath();ctx.moveTo(0,i*H/6);ctx.lineTo(W,i*H/6);ctx.stroke();
+  }
+  for(i=1;i<8;i++){
+    ctx.beginPath();ctx.moveTo(i*W/8,0);ctx.lineTo(i*W/8,H);ctx.stroke();
+  }
+  if(state==="playing"&&flashUntil>t){
+    ctx.fillStyle="rgba(239,68,68,0.18)";
+    ctx.fillRect(0,0,W,H);
+  }
+  if(state!=="playing")return;
+  for(i=0;i<entities.length;i++){
+    var e=entities[i];
+    if(!lit(e,t))continue;
+    if(e.isTarget){
+      ctx.fillStyle="#fbbf24";
+      ctx.shadowColor="#fbbf24";ctx.shadowBlur=18;
+      ctx.fillRect(e.x-16,e.y-16,32,32);
+      ctx.shadowBlur=0;
+    }else{
+      ctx.fillStyle="#38bdf8";
+      ctx.beginPath();ctx.arc(e.x,e.y,15,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==="playing"){
+    if(entities.length===0&&t>=rebuildAt)buildRound();
+  }
+  draw(t);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x,y;
+  if(e.changedTouches&&e.changedTouches.length){x=e.changedTouches[0].clientX;y=e.changedTouches[0].clientY;}
+  else{x=e.clientX;y=e.clientY;}
+  return{x:(x-r.left)*(W/r.width),y:(y-r.top)*(H/r.height)};
+}
+function onTap(e){
+  if(state==="menu"||state==="over"){startGame();return;}
+  if(entities.length===0)return;
+  var p=pos(e),i,target=null,decoy=null,bd=1e9;
+  for(i=0;i<entities.length;i++){
+    var d=Math.hypot(p.x-entities[i].x,p.y-entities[i].y);
+    if(d<28){
+      if(entities[i].isTarget){target=entities[i];break;}
+      if(!decoy||d<bd){decoy=entities[i];bd=d;}
+    }
+  }
+  if(target){
+    hits++;
+    score+=15+level*5;
+    level=1+Math.floor(hits/3);
+    entities=[];
+    rebuildAt=performance.now()+350;
+  }else if(decoy){
+    lives--;
+    flashUntil=performance.now()+300;
+    if(lives<=0){endGame();return;}
+  }
+  updateHud();
+}
+cv.addEventListener("mousedown",onTap);
+cv.addEventListener("touchstart",function(e){e.preventDefault();onTap(e);},{passive:false});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();if(state!=="playing")startGame();}
+});
+function startGame(){
+  score=0;hits=0;level=1;lives=3;entities=[];
+  rebuildAt=performance.now()+300;
+  state="playing";
+  ov.classList.add("hide");
+  updateHud();
+}
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

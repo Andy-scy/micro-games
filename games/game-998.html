@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>磁悬陀螺</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#f0abfc;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f0abfc}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#f0abfc;color:#4a044e;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>磁悬陀螺</h1>
+  <p class="hint">移动指针即移动磁掌,陀螺会追着磁掌走 · 单次稳悬 60 秒圆满</p>
+  <div class="hud">
+    <span>本次稳悬 <b id="hT">0.0</b>s</span>
+    <span>最佳 <b id="hBest">0.0</b>s</span>
+    <span>里程碑 <b id="hMs">0</b>/3</span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">磁悬陀螺</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">起旋悬置</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hT=$("hT"),hBest=$("hBest"),hMs=$("hMs");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo");
+var W=470,H=310,TAU=Math.PI*2,FLOOR=272,WL=44,WR=426;
+var MST=[10,30,60];
+var top={x:235,vx:0},spinA=0;
+var runT=0,best=0,msFlags=[false,false,false],crashT=0,crashed=false;
+var pointerX=null,state="menu",goalDone=false,time=0;
+var fx=[];
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function resetRun(){
+  top.x=235;top.vx=0;runT=0;crashT=0;crashed=false;
+  msFlags=[false,false,false];
+  hMs.textContent="0";hT.textContent="0.0";
+}
+function msCount(){var n=0,i;for(i=0;i<3;i++)if(msFlags[i])n++;return n;}
+function crash(){
+  crashed=true;crashT=1.1;
+}
+function step(dt){
+  var i;
+  if(crashed){
+    crashT-=dt;
+    if(crashT<=0){
+      if(runT>best){best=runT;hBest.textContent=best.toFixed(1);}
+      state="done";
+      ovT.textContent="陀螺落定";
+      ovD.textContent="本次稳悬 "+runT.toFixed(1)+" 秒\n历史最佳 "+best.toFixed(1)+" 秒\n里程碑 "+msCount()+"/3\n按「再悬一次」重新起旋。";
+      btnGo.textContent="再悬一次";
+      ov.classList.remove("hide");
+    }
+    return;
+  }
+  runT+=dt;
+  var amp=26+Math.min(runT*1.15,96);
+  var w=(Math.sin(time*0.9)*0.55+Math.sin(time*2.17+1.3)*0.3+Math.sin(time*4.3+2.1)*0.15)*amp;
+  top.vx+=w*dt*3;
+  if(pointerX!==null)top.vx+=(pointerX-top.x)*6*dt;
+  top.vx*=(1-1.8*dt);
+  top.x+=top.vx*dt;
+  for(i=0;i<3;i++){
+    if(!msFlags[i]&&runT>=MST[i]){
+      msFlags[i]=true;
+      hMs.textContent=msCount();
+      addFx(top.x,150,"稳悬 "+MST[i]+" 秒!","#f0abfc");
+      if(MST[i]===60&&!goalDone){
+        goalDone=true;
+        if(runT>best){best=runT;hBest.textContent=best.toFixed(1);}
+        state="zen";
+        ovT.textContent="心手合一";
+        ovD.textContent="稳悬六十秒,陀螺如被无形的掌心托着。\n气流渐狂,而你的引力不乱。\n可继续稳悬,亦可重新起旋。";
+        btnGo.textContent="再悬一次";
+        ov.classList.remove("hide");
+        return;
+      }
+    }
+  }
+  if(top.x<WL||top.x>WR)crash();
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  hT.textContent=runT.toFixed(1);
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#151b30";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(240,171,252,.16)";ctx.lineWidth=1.5;
+  ctx.setLineDash([3,6]);
+  var i;
+  for(i=1;i<=3;i++){
+    ctx.beginPath();ctx.arc(235,268,60+i*52,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle="#2a3155";
+  ctx.fillRect(20,FLOOR,26,26);
+  ctx.fillRect(424,FLOOR,26,26);
+  ctx.fillStyle="#0b0e1a";ctx.fillRect(0,FLOOR+22,W,H-FLOOR-22);
+  ctx.fillStyle="#232b4a";ctx.fillRect(0,FLOOR+26,W,4);
+  var ty=crashed?FLOOR-2:(196+Math.sin(time*3.1)*4+Math.min(Math.abs(top.vx)*0.08,26));
+  var spin=crashed?spinA*0.2:spinA;
+  ctx.fillStyle="rgba(0,0,0,.4)";
+  ctx.beginPath();ctx.ellipse(top.x,FLOOR+4,16-Math.min(10,(FLOOR-ty)/40),3.5,0,0,TAU);ctx.fill();
+  ctx.save();ctx.translate(top.x,ty);ctx.rotate(spin*0.12);
+  ctx.fillStyle="#e9d5ff";
+  ctx.beginPath();ctx.moveTo(0,-16);ctx.lineTo(5,-2);ctx.lineTo(0,4);ctx.lineTo(-5,-2);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#c084fc";
+  ctx.beginPath();ctx.ellipse(0,6,10,4.5,0,0,TAU);ctx.fill();
+  ctx.fillStyle="#f0abfc";
+  ctx.beginPath();ctx.moveTo(0,10);ctx.lineTo(2,20);ctx.lineTo(-2,20);ctx.closePath();ctx.fill();
+  ctx.restore();
+  ctx.fillStyle="rgba(240,171,252,.9)";
+  for(i=0;i<3;i++){
+    var da=spin+i*TAU/3;
+    ctx.beginPath();ctx.arc(top.x+Math.cos(da)*15,ty+Math.sin(da)*15,1.6,0,TAU);ctx.fill();
+  }
+  if(pointerX!==null&&!crashed){
+    var g=ctx.createRadialGradient(pointerX,ty,2,pointerX,ty,30);
+    g.addColorStop(0,"rgba(240,171,252,.4)");
+    g.addColorStop(1,"rgba(240,171,252,0)");
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(pointerX,ty,30,0,TAU);ctx.fill();
+    ctx.strokeStyle="rgba(240,171,252,.6)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(pointerX,ty,10,0,TAU);ctx.stroke();
+  }
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+function ptrX(e){var t=(e.touches&&e.touches[0])?e.touches[0]:e;var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*W/rc.width;}
+window.addEventListener("mousemove",function(e){pointerX=ptrX(e);});
+cv.addEventListener("touchstart",function(e){e.preventDefault();pointerX=ptrX(e);},{passive:false});
+cv.addEventListener("touchmove",function(e){e.preventDefault();pointerX=ptrX(e);},{passive:false});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  spinA=(spinA+dt*14)%TAU;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="磁悬陀螺";
+  ovD.textContent="陀螺悬在两块磁极之间,气流会不断把它推偏。\n你的指针就是一只无形的磁掌:陀螺会追着它走。\n带它稳稳悬住:10 秒、30 秒、60 秒,三枚里程碑;\n单次稳悬 60 秒即圆满。失手落下也不责罚,再悬一次便是。";
+  btnGo.textContent="起旋悬置";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){resetRun();state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

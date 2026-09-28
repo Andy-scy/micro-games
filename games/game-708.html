@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>闪现冲刺</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>闪现冲刺</h1>
+  <p class="tips">←→ 移动,空格跳跃;普通跳不过的深渊,按 Shift / X 或「冲刺」按钮向前闪现。落地后冲刺立即恢复,跨越 3 段裂谷。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">冲刺</div><div class="big" id="ds">就绪</div></div>
+    <div class="stat"><div class="mut">关卡</div><div class="big" id="lv">1/3</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">跳</button><button class="tb" id="bD">冲刺</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">闪现冲刺</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃<br>· Shift / X / K 或「冲刺」按钮:向面前高速闪现一小段<br>· 空中可冲刺一次,落地立刻恢复<br>· 裂谷比普通跳跃更宽,必须借助冲刺<br>· 坠谷 -1 生命,共 3 条生命<br>· 晶石 +50,过关 +200,共 3 关</p><button class="btn" id="obtn">出发</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var LEVELS=[
+{w:800,px:16,py:294,
+ solids:[[0,320,130,40],[340,320,120,40],[690,320,110,40]],
+ gems:[[225,240],[255,215],[520,235],[555,255]],door:[730,268]},
+{w:800,px:16,py:294,
+ solids:[[0,320,110,40],[230,250,80,14],[340,320,70,40],[645,320,155,40]],
+ gems:[[180,230],[270,215],[520,240]],door:[740,268]},
+{w:800,px:16,py:294,
+ solids:[[0,320,100,40],[330,320,55,40],[540,250,80,14],[700,320,100,40]],
+ gems:[[205,240],[455,190],[645,200]],door:[730,268]}
+];
+var lv=0,solids=[],gems=[],worldW=800;
+var door={x:0,y:0,w:34,h:52};
+var px=16,py=294,vx=0,vy=0,pw=22,ph=26,onG=false,face=1;
+var camX=0,score=0,lives=3,have=0,total=0;
+var dashT=0,dashCd=0,dashDir=1,airUsed=false,trail=[];
+var running=false,lastT=0,bannerT=0,parts=[];
+var keys={L:false,R:false,J:false},jHeld=false,wantDash=false;
+function loadLv(n){
+  var L=LEVELS[n],i;
+  solids=[];
+  for(i=0;i<L.solids.length;i++)solids.push({x:L.solids[i][0],y:L.solids[i][1],w:L.solids[i][2],h:L.solids[i][3]});
+  gems=[];
+  for(i=0;i<L.gems.length;i++)gems.push({x:L.gems[i][0],y:L.gems[i][1],got:false});
+  door.x=L.door[0];door.y=L.door[1];
+  worldW=L.w;have=0;total=gems.length;
+  px=L.px;py=L.py;vx=0;vy=0;camX=0;face=1;
+  dashT=0;dashCd=0;airUsed=false;trail=[];bannerT=1.4;
+}
+function reset(){score=0;lives=3;lv=0;parts=[];loadLv(0);hud()}
+function hud(){
+  $i('ds').textContent=dashCd<=0&&dashT<=0?'就绪':'冷却';
+  $i('lv').textContent=(lv+1)+'/3';
+  $i('sc').textContent=score;
+  var h='';for(var i=0;i<3;i++)h+=i<lives?'♥':'♡';
+  $i('hp').textContent=h;
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function physics(dt){
+  var i,s;
+  if(dashT>0){
+    dashT-=dt;
+    vx=560*dashDir;vy=0;
+    trail.push({x:px,y:py,t:0.25});
+    if(dashT<=0)vx*=0.35;
+  }else{
+    var acc=onG?1600:1400,mx=210;
+    if(keys.L){vx-=acc*dt;face=-1}
+    if(keys.R){vx+=acc*dt;face=1}
+    if(!keys.L&&!keys.R)vx-=vx*Math.min(1,(onG?12:2)*dt);
+    if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+    vy+=1500*dt;if(vy>900)vy=900;
+  }
+  px+=vx*dt;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(vx>0)px=s.x-pw;else if(vx<0)px=s.x+s.w;
+      vx=0;dashT=0;
+    }}
+  if(px<0)px=0;if(px+pw>worldW)px=worldW-pw;
+  py+=vy*dt;onG=false;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(vy>0){py=s.y-ph;vy=0;onG=true}
+      else if(vy<0){py=s.y+s.h;vy=0}
+    }}
+  if(onG){airUsed=false}
+  if(dashCd>0)dashCd-=dt;
+  if(wantDash){
+    wantDash=false;
+    if(dashCd<=0&&dashT<=0&&!( !onG&&airUsed )){
+      dashT=0.16;dashCd=0.9;
+      dashDir=(keys.L&&!keys.R)?-1:(keys.R&&!keys.L)?1:face;
+      if(dashDir!==face){face=dashDir}
+      if(!onG)airUsed=true;
+      burst(px+pw/2,py+ph/2,'#ff8fa3',8);
+    }
+  }
+  if(keys.J&&!jHeld&&onG&&dashT<=0){vy=-560;onG=false}
+}
+function hurt(){
+  if(!running)return;
+  lives--;hud();
+  burst(px+pw/2,H-6,'#ff5c5c',12);
+  if(lives<=0){lives=0;hud();endGame(false);return}
+  loadLv(lv);hud();
+}
+function endGame(win){
+  running=false;
+  if(win){score+=lives*100;hud();$i('ovt').textContent='闪现大师!';$i('ovp').innerHTML='三段裂谷全部跨越!<br>最终得分:<b>'+score+'</b>';}
+  else{$i('ovt').textContent='坠入裂谷…';$i('ovp').innerHTML='冲刺要用在刀刃上!<br>最终得分:<b>'+score+'</b><br>止步于第 '+(lv+1)+' 关';}
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  for(i=trail.length-1;i>=0;i--){trail[i].t-=dt;if(trail[i].t<=0)trail.splice(i,1)}
+  if(bannerT>0)bannerT-=dt;
+  if(!running)return;
+  physics(dt);
+  var target=px-W/2;
+  if(target<0)target=0;if(target>worldW-W)target=worldW-W;
+  camX+=(target-camX)*Math.min(1,8*dt);
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    var dx=gm.x-(px+pw/2),dy=gm.y-(py+ph/2);
+    if(dx*dx+dy*dy<26*26){gm.got=true;score+=50;burst(gm.x,gm.y,'#4cc9f0',8);hud()}
+  }
+  if(px+pw>door.x&&px<door.x+door.w&&py+ph>door.y&&py<door.y+door.h){
+    score+=200;hud();
+    if(lv>=LEVELS.length-1){endGame(true);return}
+    lv++;loadLv(lv);hud();return;
+  }
+  if(py>H+80)hurt();
+  hud();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141a38');g.addColorStop(1,'#0c1026');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  ctx.save();ctx.translate(-Math.round(camX),0);
+  for(i=0;i<solids.length;i++){var s=solids[i];
+    ctx.fillStyle='#2b3358';rr(s.x,s.y,s.w,s.h,4);ctx.fill();
+    ctx.fillStyle='#4a5688';ctx.fillRect(s.x+2,s.y,s.w-4,3);
+  }
+  for(i=0;i<gems.length;i++){var gm=gems[i];
+    if(gm.got)continue;
+    ctx.save();ctx.translate(gm.x,gm.y+Math.sin(Date.now()*0.004+i)*3);ctx.rotate(0.785);
+    ctx.fillStyle='#4cc9f0';ctx.fillRect(-6,-6,12,12);
+    ctx.fillStyle='#aef1ff';ctx.fillRect(-3,-3,6,6);
+    ctx.restore();
+  }
+  ctx.fillStyle='#ff8fa3';
+  for(i=0;i<trail.length;i++){
+    ctx.globalAlpha=trail[i].t*2.2;
+    rr(trail[i].x,trail[i].y,pw,ph,6);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#b388ff';
+  rr(door.x,door.y,door.w,door.h,6);ctx.fill();
+  ctx.fillStyle='#1a1f36';
+  ctx.beginPath();ctx.arc(door.x+door.w/2,door.y+door.h/2,7,0,6.28);ctx.fill();
+  ctx.fillStyle='#8fd3ff';
+  rr(px,py,pw,ph,6);ctx.fill();
+  ctx.fillStyle='#081226';
+  var e1=face>0?px+11:px+3;
+  ctx.fillRect(e1,py+7,4,5);ctx.fillRect(e1+7,py+7,4,5);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  if(bannerT>0){
+    ctx.globalAlpha=Math.min(1,bannerT);
+    ctx.fillStyle='rgba(15,18,32,.55)';ctx.fillRect(0,H/2-34,W,68);
+    ctx.fillStyle='#ffd166';ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText('第 '+(lv+1)+' 段裂谷',W/2,H/2+9);
+    ctx.globalAlpha=1;
+  }
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();
+    if(prop==='D'){wantDash=true}else{keys[prop]=true}});
+  b.addEventListener('pointerup',function(e){e.preventDefault();if(prop!=='D')keys[prop]=false});
+  b.addEventListener('pointercancel',function(){if(prop!=='D')keys[prop]=false});
+  b.addEventListener('pointerleave',function(){if(prop!=='D')keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');bindBtn('bD','D');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=true;
+  if((e.code==='ShiftLeft'||e.code==='ShiftRight'||e.code==='KeyX'||e.code==='KeyK')&&!e.repeat)wantDash=true;
+  if(e.code==='Space'||e.code==='ArrowUp')e.preventDefault();
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

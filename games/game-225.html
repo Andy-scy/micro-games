@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>红灯绿灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f87171;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f87171;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#f87171}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#f87171;color:#450a0a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>红灯绿灯</h1>
+  <p class="hint">按住屏幕 / 空格冲刺 · 变红灯瞬间必须松手,否则被抓</p>
+  <div class="hud">
+    <span>进度 <b id="prog">0%</b></span>
+    <span>机会 <b id="lives">3</b></span>
+    <span>用时 <b id="time">0.0s</b></span>
+    <span>最佳 <b id="best">--</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="320"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">红灯绿灯</h2>
+      <p id="ovDesc">按住(鼠标 / 手指 / 空格)让小人冲刺,绿灯变黄灯是警告,红灯亮起的瞬间必须松手!红灯时仍按住会被抓,扣一次机会并被拉回。冲过终点即胜利,越快越好!</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var W=480,H=320,KEY="mg_s225";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(id){return document.getElementById(id);}
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elProg=$("prog"),elLives=$("lives"),elTime=$("time"),elBest=$("best");
+var state="menu",p=0,light="green",lightUntil=0,holding=false,stunUntil=0;
+var lives=3,survived=0,flashUntil=0,startAt=0,elapsed=0,lastT=0;
+var best=loadBest(KEY);
+function loadBest(k){try{var v=parseFloat(localStorage.getItem(k));return v>0?v:0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function updateHud(){
+  elProg.textContent=Math.round(p*100)+"%";
+  elLives.textContent=lives;
+  elTime.textContent=(elapsed/1000).toFixed(1)+"s";
+  elBest.textContent=best>0?best.toFixed(1)+"s":"--";
+}
+function setLight(l,t,dur){light=l;lightUntil=t+dur;}
+function caught(t){
+  lives--;
+  p-=0.15;
+  if(p<0)p=0;
+  stunUntil=t+800;
+  flashUntil=t+400;
+  setLight("green",t,2300+Math.random()*1000);
+  updateHud();
+  if(lives<=0)endGame(false);
+}
+function endGame(win){
+  state="over";
+  if(win){
+    var total=elapsed/1000;
+    if(best===0||total<best){best=total;saveBest(KEY,best);}
+    ovTitle.textContent="冲线成功!";
+    ovDesc.textContent="通过 "+survived+" 个红灯 · 剩余机会 "+lives;
+    ovScore.style.display="block";
+    ovScore.textContent="用时 "+total.toFixed(1)+" 秒";
+  }else{
+    ovTitle.textContent="被抓住了!";
+    ovDesc.textContent="在红灯亮起时没能及时松手\n最终进度 "+Math.round(p*100)+"%";
+    ovScore.style.display="block";
+    ovScore.textContent="坚持了 "+(elapsed/1000).toFixed(1)+" 秒";
+  }
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function step(t,dt){
+  if(t>=lightUntil){
+    if(light==="green")setLight("yellow",t,500);
+    else if(light==="yellow")setLight("red",t,900+Math.random()*700);
+    else{survived++;setLight("green",t,1500+Math.random()*1500);}
+  }
+  var canRun=holding&&t>stunUntil&&(light==="green"||light==="yellow");
+  if(canRun)p+=(0.085+survived*0.008)*dt/1000;
+  if(light==="red"&&holding&&t>stunUntil)caught(t);
+  if(p>=1){p=1;endGame(true);return;}
+  elapsed=t-startAt;
+  updateHud();
+}
+function draw(t){
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#232849";
+  ctx.lineWidth=8;
+  ctx.beginPath();ctx.moveTo(30,235);ctx.lineTo(450,235);ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.fillStyle="#334155";
+  ctx.fillRect(442,196,4,44);
+  ctx.fillStyle="#e2e8f0";
+  ctx.fillRect(446,196,14,10);
+  ctx.fillStyle="#94a3b8";
+  ctx.fillRect(446,206,14,10);
+  ctx.fillStyle="#e2e8f0";
+  ctx.fillRect(446,216,14,10);
+  var colors={green:"#4ade80",yellow:"#fbbf24",red:"#ef4444"};
+  ctx.beginPath();ctx.arc(420,64,22,0,Math.PI*2);
+  ctx.fillStyle=colors[light];ctx.fill();
+  ctx.shadowColor=colors[light];ctx.shadowBlur=22;
+  ctx.beginPath();ctx.arc(420,64,22,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#c7cbe8";
+  ctx.font="15px system-ui,sans-serif";
+  ctx.textAlign="center";
+  var msg=light==="green"?"绿灯 · 冲!":light==="yellow"?"黄灯 · 预备松手!":"红灯 · 松手!";
+  ctx.fillText(msg,200,50);
+  var rx=40+p*400;
+  ctx.beginPath();ctx.arc(rx,214,16,0,Math.PI*2);
+  ctx.fillStyle=flashUntil>t?"#ef4444":"#e8eaf6";
+  ctx.fill();
+  ctx.fillStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(rx-5,210,2.4,0,Math.PI*2);ctx.arc(rx+5,210,2.4,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#0b0e1a";
+  ctx.beginPath();ctx.arc(rx,220,5,0.15*Math.PI,0.85*Math.PI);ctx.stroke();
+  if(holding&&state==="playing"&&t>stunUntil){
+    ctx.strokeStyle="rgba(74,222,128,0.6)";
+    ctx.beginPath();ctx.arc(rx,214,22,0,Math.PI*2);ctx.stroke();
+  }
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(80,t-lastT);lastT=t;
+  if(state==="playing")step(t,dt);
+  if(state!=="menu")draw(t);
+}
+function startGame(){
+  p=0;lives=3;survived=0;holding=false;stunUntil=0;elapsed=0;
+  state="playing";
+  startAt=performance.now();
+  setLight("green",startAt,1500+Math.random()*1000);
+  ov.classList.add("hide");
+  updateHud();
+}
+cv.addEventListener("pointerdown",function(){holding=true;});
+window.addEventListener("pointerup",function(){holding=false;});
+cv.addEventListener("pointerleave",function(){holding=false;});
+document.addEventListener("keydown",function(e){
+  if(e.key===" "||e.key==="ArrowUp"){
+    e.preventDefault();
+    if(e.repeat)return;
+    if(state==="menu"||state==="over"){startGame();return;}
+    holding=true;
+  }
+});
+document.addEventListener("keyup",function(e){
+  if(e.key===" "||e.key==="ArrowUp")holding=false;
+});
+btnGo.addEventListener("click",startGame);
+updateHud();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

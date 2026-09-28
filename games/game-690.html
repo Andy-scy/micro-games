@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下压危机</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:460px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>下压危机</h1>
+  <p class="tips">顶部压泡板不断把泡泡往下挤!点击同色相连的泡泡组(至少 2 个)把它们消除,泡泡越少分越高,别让任何泡泡碰到红色警戒线。</p>
+  <div class="card">
+    <div class="row">
+      <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+      <div class="stat"><div class="mut">消除组数</div><div class="big" id="gp">0</div></div>
+      <div class="stat"><div class="mut">坚持时间</div><div class="big" id="tm">0 秒</div></div>
+    </div>
+  </div>
+  <div class="card"><canvas id="cv" width="420" height="560"></canvas></div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">下压危机</h2><p id="ovp">玩法说明:<br>· 泡泡整列下压,越到后面压得越快<br>· 点击 2 个及以上同色相邻(上下左右)泡泡即可消除<br>· 一次消 n 个得 n×n×2 分,大片消除才划算<br>· 消除后下方泡泡会向上浮动补位<br>· 任何泡泡触到红色警戒线即失败<br>· 消除还会让压板短暂回弹,争取喘息时间</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var W=420,H=560;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var COLS=8,CS=46,OX=26,OY=16,DEAD=516;
+var PAL=['#ff5c5c','#ffd166','#51d88a','#4da3ff'];
+var grid=[],topOff=0,score=0,groups=0,elapsed=0;
+var parts=[],floats=[],state='idle',lastT=0,flashT=0;
+function rnd(a,b){return a+Math.random()*(b-a)}
+function $i(id){return document.getElementById(id)}
+function cellX(c){return OX+c*CS+CS/2}
+function cellY(r){return OY+topOff+r*CS+CS/2}
+function makeRow(){
+  var a=[];
+  for(var c=0;c<COLS;c++){
+    if(c>0&&Math.random()<0.5)a.push(a[c-1]);
+    else a.push(Math.floor(Math.random()*PAL.length));
+  }
+  return a;
+}
+function newBoard(){
+  grid=[];
+  for(var r=0;r<7;r++)grid.push(makeRow());
+  topOff=0;
+}
+function resetGame(){
+  score=0;groups=0;elapsed=0;parts=[];floats=[];flashT=0;
+  newBoard();upd();
+}
+function upd(){
+  $i('sc').textContent=score;
+  $i('gp').textContent=groups;
+  $i('tm').textContent=Math.floor(elapsed)+' 秒';
+}
+function floodGroup(r0,c0){
+  var ci=grid[r0][c0],seen={},out=[],st=[[r0,c0]];
+  while(st.length){
+    var p=st.pop(),r=p[0],c=p[1];
+    if(r<0||c<0||r>=grid.length||c>=COLS)continue;
+    if(grid[r][c]!==ci)continue;
+    var k=r+'_'+c;if(seen[k])continue;seen[k]=1;out.push(p);
+    st.push([r-1,c],[r+1,c],[r,c-1],[r,c+1]);
+  }
+  return out;
+}
+function compact(){
+  for(var c=0;c<COLS;c++){
+    var vals=[];
+    for(var r=0;r<grid.length;r++)if(grid[r][c]>=0)vals.push(grid[r][c]);
+    for(r=0;r<grid.length;r++)grid[r][c]=r<vals.length?vals[r]:-1;
+  }
+  while(grid.length>1){
+    var allEmpty=true;
+    for(var c2=0;c2<COLS;c2++)if(grid[grid.length-1][c2]>=0)allEmpty=false;
+    if(!allEmpty)break;
+    grid.pop();
+  }
+}
+function removeGroup(grp){
+  var col=PAL[grid[grp[0][0]][grp[0][1]]];
+  for(var i=0;i<grp.length;i++)grid[grp[i][0]][grp[i][1]]=-1;
+  var n=grp.length;
+  score+=n*n*2;
+  groups++;
+  topOff=Math.max(0,topOff-10);
+  var c0=grp[0][1];
+  var cy=cellY(grp[0][0]);
+  floats.push({x:cellX(c0),y:cy,txt:'+'+(n*n*2)+(n>=5?' 妙!':''),c:'#ffd166',life:1});
+  for(i=0;i<grp.length;i++){
+    var a=rnd(0,6.28),s=rnd(40,150);
+    parts.push({x:cellX(grp[i][1]),y:cellY(grp[i][0]),vx:Math.cos(a)*s,vy:Math.sin(a)*s-50,r:rnd(2,5),c:col,life:0.5});
+  }
+  compact();
+}
+function loseCheck(){
+  for(var r=0;r<grid.length;r++)for(var c=0;c<COLS;c++){
+    if(grid[r][c]>=0&&cellY(r)+CS/2>=DEAD)return true;
+  }
+  return false;
+}
+function update(dt){
+  if(state!=='play')return;
+  elapsed+=dt;
+  if(flashT>0)flashT-=dt;
+  var speed=Math.min(30,7+elapsed*0.22);
+  topOff+=speed*dt;
+  if(topOff>=CS){
+    topOff-=CS;
+    grid.unshift(makeRow());
+    if(loseCheck()){gameOver();return;}
+  }
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=140*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(i=floats.length-1;i>=0;i--){var f=floats[i];f.y-=36*dt;f.life-=dt;if(f.life<=0)floats.splice(i,1);}
+  upd();
+}
+function gameOver(){
+  state='over';flashT=0;
+  $i('ovt').textContent='泡泡触线,危机爆发!';
+  $i('ovp').innerHTML='最终得分:<b>'+score+'</b><br>消除组数:'+groups+' 组<br>坚持了 '+Math.floor(elapsed)+' 秒';
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141b3c');g.addColorStop(1,'#0d1126');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#2a3154';
+  ctx.fillRect(OX-6,OY-10,COLS*CS+12,8);
+  var r,c;
+  for(r=0;r<grid.length;r++)for(c=0;c<COLS;c++){
+    if(grid[r][c]>=0){
+      var x=cellX(c),y=cellY(r);
+      ctx.beginPath();ctx.arc(x,y,CS*0.42,0,6.2832);
+      ctx.fillStyle=PAL[grid[r][c]];ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.25)';ctx.stroke();
+      ctx.beginPath();ctx.arc(x-6,y-6,5,0,6.2832);
+      ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();
+    }
+  }
+  ctx.setLineDash([7,7]);ctx.strokeStyle='rgba(255,92,92,.85)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(0,DEAD);ctx.lineTo(W,DEAD);ctx.stroke();ctx.setLineDash([]);
+  ctx.font='12px system-ui';ctx.fillStyle='rgba(255,92,92,.9)';ctx.textAlign='right';
+  ctx.fillText('警戒线',W-8,DEAD-6);
+  var i;
+  for(i=0;i<parts.length;i++){var p=parts[i];ctx.globalAlpha=Math.max(0,p.life*2);ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.2832);ctx.fillStyle=p.c;ctx.fill();ctx.globalAlpha=1;}
+  ctx.font='bold 16px system-ui';ctx.textAlign='center';
+  for(i=0;i<floats.length;i++){var f=floats[i];ctx.globalAlpha=Math.min(1,f.life*2);ctx.fillStyle=f.c;ctx.fillText(f.txt,f.x,f.y);ctx.globalAlpha=1;}
+  if(flashT>0){
+    ctx.globalAlpha=flashT*1.6;ctx.fillStyle='#ff5c5c';
+    ctx.fillRect(0,DEAD,W,6);ctx.globalAlpha=1;
+  }
+}
+function pt(e){
+  var rect=cv.getBoundingClientRect();
+  return {x:(e.clientX-rect.left)*W/rect.width,y:(e.clientY-rect.top)*H/rect.height};
+}
+cv.addEventListener('pointerdown',function(e){
+  if(state!=='play')return;
+  var p=pt(e);
+  var c=Math.floor((p.x-OX)/CS),r=Math.floor((p.y-OY-topOff)/CS);
+  if(r<0||c<0||r>=grid.length||c>=COLS)return;
+  if(grid[r][c]<0)return;
+  var grp=floodGroup(r,c);
+  if(grp.length<2){
+    floats.push({x:cellX(c),y:cellY(r),txt:'至少 2 个同色!',c:'#9aa3c0',life:0.8});
+    return;
+  }
+  removeGroup(grp);
+  upd();
+  if(loseCheck()){gameOver();return;}
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  resetGame();state='play';
+});
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

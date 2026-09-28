@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金币与木板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+#app{width:100%;max-width:480px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:4px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:10px}
+.card{background:#1a1f36;border-radius:14px;padding:10px 14px;margin-bottom:10px;display:flex;gap:10px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:12px}
+.big{font-size:17px;font-weight:800;color:#ffd166}
+canvas{width:100%;display:block;border-radius:12px;background:#141a33;touch-action:none}
+.btn{border:0;border-radius:10px;padding:11px 24px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>金币与木板</h1>
+  <p class="tips">金币一串串连发,宽木板却随时砸下来!← → 或 A/D 移篮,触屏拖动。接金币 +15、每 10 连击奖励 50;被木板砸中 -1 生命,共 3 条。</p>
+  <div class="card">
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+    <div class="stat"><div class="mut">连击</div><div class="big" id="ck">0</div></div>
+  </div>
+  <canvas id="cv" width="480" height="620"></canvas>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">金币与木板</h2><p id="ovp">玩法:连发财路,横板当道。<br>· 金币成串连发(竖列或斜排),接住 +15<br>· 每接 10 枚奖励 +50,漏一枚连击清零<br>· 宽木板缓慢砸落,碰到篮子 -1 生命<br>· 木板必留缺口,看清缺口再站位<br>· 键盘 ← → 或 A/D 移篮,触屏拖动</p><button class="btn" id="obtn">开始淘金</button></div></div>
+<script>
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+function $(id){return document.getElementById(id)}
+var S=null;
+function reset(){S={on:false,score:0,lives:3,streak:0,st:1.6,coinQ:0,coinT:0,base:0,pat:0,ci:0,pst:3.2,t:0,coins:[],planks:[],pops:[],bx:W/2,bw:86,flash:0,keys:{}}}
+reset();
+function startGame(){reset();S.on=true;$('sc').textContent='0';$('hp').textContent='♥♥♥';$('ck').textContent='0';$('overlay').classList.add('hide')}
+$('obtn').addEventListener('click',startGame);
+addEventListener('keydown',function(e){S.keys[e.key]=true;if(S.on&&(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' '))e.preventDefault()});
+addEventListener('keyup',function(e){S.keys[e.key]=false});
+function px(t){var rc=cv.getBoundingClientRect();return(t.clientX-rc.left)*(W/rc.width)}
+cv.addEventListener('mousemove',function(e){if(S.on)S.bx=px(e)});
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(S.on)S.bx=px(e.touches[0])},{passive:false});
+function pop(x,y,txt,c){S.pops.push({x:x,y:y,txt:txt,c:c,t:0.9})}
+function hearts(){return S.lives>0?new Array(S.lives+1).join('♥'):'0'}
+function spawnPlank(){
+  var pw=150+Math.random()*70;
+  var px2=pw/2+20;
+  for(var tr=0;tr<30;tr++){
+    var cx=px2+Math.random()*(W-pw-40);
+    var lg=cx-pw/2,rg=W-(cx+pw/2);
+    if(Math.max(lg,rg)>=140){S.planks.push({x:cx,y:-20,w:pw,v:135+Math.random()*30});return}
+  }
+  S.planks.push({x:W/2,y:-20,w:pw,v:135});
+}
+function update(dt){
+  S.t+=dt;
+  if(S.flash>0)S.flash-=dt;
+  var sp=350,l=S.keys['ArrowLeft']||S.keys['a']||S.keys['A'],r=S.keys['ArrowRight']||S.keys['d']||S.keys['D'];
+  if(l)S.bx-=sp*dt;
+  if(r)S.bx+=sp*dt;
+  S.bx=Math.max(S.bw/2,Math.min(W-S.bw/2,S.bx));
+  S.st-=dt;
+  if(S.st<=0){
+    S.st=2.4+Math.random();
+    S.coinQ=4+Math.floor(Math.random()*4);
+    S.base=60+Math.random()*(W-120);
+    S.pat=Math.random()<0.5?0:1;
+    S.ci=0;
+  }
+  if(S.coinQ>0){
+    S.coinT-=dt;
+    if(S.coinT<=0){
+      S.coinT=0.13;
+      S.coins.push({x:S.pat?S.base+S.ci*20:S.base+(Math.random()-0.5)*10,y:-12,v:250+Math.random()*60,rot:Math.random()*6});
+      S.coinQ--;S.ci++;
+    }
+  }
+  S.pst-=dt;
+  if(S.pst<=0){
+    S.pst=3.2+Math.random()*1.4;
+    spawnPlank();
+  }
+  var by=H-46;
+  for(var i=S.coins.length-1;i>=0;i--){
+    var c=S.coins[i];
+    c.y+=c.v*dt;c.rot+=dt*4;
+    if(c.y>=by-14&&c.y<=by+10&&Math.abs(c.x-S.bx)<S.bw/2+8){
+      S.score+=15;S.streak++;
+      $('sc').textContent=S.score;$('ck').textContent=S.streak;
+      if(S.streak%10===0){
+        S.score+=50;$('sc').textContent=S.score;
+        pop(c.x,by-32,'连击'+S.streak+'! +50','#ffd166');
+      }else{
+        pop(c.x,by-32,'+15','#ffd166');
+      }
+      S.coins.splice(i,1);continue;
+    }
+    if(c.y>H+14){
+      S.coins.splice(i,1);
+      if(S.streak>=5)pop(c.x,H-90,'连击中断','#9aa3c0');
+      S.streak=0;$('ck').textContent='0';
+    }
+  }
+  for(var k=S.planks.length-1;k>=0;k--){
+    var pl=S.planks[k];
+    pl.y+=pl.v*dt;
+    if(pl.y+9>=by&&pl.y-9<=by+26&&Math.abs(pl.x-S.bx)<pl.w/2+S.bw/2-12){
+      S.planks.splice(k,1);
+      S.lives--;$('hp').textContent=hearts();S.flash=0.4;
+      pop(S.bx,by-36,'被木板砸中!-1 生命','#ff6b6b');
+      if(S.lives<=0)gameOver();
+      continue;
+    }
+    if(pl.y>H+24)S.planks.splice(k,1);
+  }
+  for(var j=S.pops.length-1;j>=0;j--){var p=S.pops[j];p.t-=dt;p.y-=30*dt;if(p.t<=0)S.pops.splice(j,1)}
+}
+function gameOver(){
+  S.on=false;
+  $('ovt').textContent='被木板拍扁了…';
+  $('ovp').innerHTML='本局得分 <b>'+S.score+'</b><br>最高连击 <b>'+S.streak+'</b> 枚金币<br>盯紧缺口,金币串会指路!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#1c2444';ctx.fillRect(0,H-38,W,38);
+  for(var k=0;k<S.planks.length;k++){
+    var pl=S.planks[k];
+    ctx.fillStyle='#a4763f';
+    rr(pl.x-pl.w/2,pl.y-9,pl.w,18,4);ctx.fill();
+    ctx.strokeStyle='#6d4a20';ctx.lineWidth=2;
+    rr(pl.x-pl.w/2,pl.y-9,pl.w,18,4);ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,.25)';
+    for(var g=1;g<4;g++){
+      var gx=pl.x-pl.w/2+pl.w*g/4;
+      ctx.beginPath();ctx.moveTo(gx,pl.y-6);ctx.lineTo(gx,pl.y+6);ctx.stroke();
+    }
+  }
+  for(var i=0;i<S.coins.length;i++){
+    var c=S.coins[i];
+    ctx.save();ctx.translate(c.x,c.y);
+    var sx=Math.abs(Math.cos(c.rot))*0.7+0.3;
+    ctx.scale(sx,1);
+    ctx.fillStyle='#ffd166';
+    ctx.beginPath();ctx.arc(0,0,11,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#b8860b';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(0,0,11,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#b8860b';ctx.font='bold 11px system-ui';ctx.textAlign='center';
+    ctx.fillText('¥',0,4);
+    ctx.restore();
+  }
+  var by=H-46;
+  ctx.fillStyle='#c98a4b';rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.fill();
+  ctx.strokeStyle='#8a5a2b';ctx.lineWidth=2;rr(S.bx-S.bw/2,by,S.bw,24,7);ctx.stroke();
+  ctx.fillStyle='#ffe9c9';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+  ctx.fillText('淘金篮',S.bx,by+16);
+  ctx.font='bold 15px system-ui';
+  for(var j=0;j<S.pops.length;j++){
+    var p=S.pops[j];
+    ctx.globalAlpha=Math.min(1,p.t*2);ctx.fillStyle=p.c;ctx.fillText(p.txt,p.x,p.y);ctx.globalAlpha=1;
+  }
+  if(S.flash>0){ctx.fillStyle='rgba(255,140,60,'+(S.flash)+')';ctx.fillRect(0,0,W,H)}
+}
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.035,(t-last)/1000);last=t;
+  if(S.on)update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

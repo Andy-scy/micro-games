@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>呼吸引灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#fcd34d;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#fcd34d}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#fcd34d;color:#451a03;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>呼吸引灯</h1>
+  <p class="hint">光环胀时按住,光环缩时松开 · 同步则灯芯愈明 · 同步度满 100 圆满</p>
+  <div class="hud">
+    <span>同步度 <b id="hSync">0</b>/100</span>
+    <span>息数 <b id="hRound">0</b></span>
+    <span>灯阶 <b id="hLamp">未燃</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">呼吸引灯</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">燃灯静坐</button>
+      <button id="btnMore" style="display:none">保持禅定</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hSync=$("hSync"),hRound=$("hRound"),hLamp=$("hLamp");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,CX=235,CY=150,TAU=Math.PI*2;
+var PH=[["吸气",4],["屏息",2],["呼气",6],["静息",2]];
+var LAMP=["未燃","烛芯","油灯","宫灯","心灯"];
+var ph=0,pt=0,sync=0,rounds=0,okT=0,pressing=false,state="menu",goalDone=false;
+var motes=[],fx=[],time=0;
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function haloR(){
+  var k;
+  if(ph===0){k=pt/PH[0][1];return 64+66*(k*k*(3-2*k));}
+  if(ph===1)return 130;
+  if(ph===2){k=pt/PH[2][1];return 130-66*(k*k*(3-2*k));}
+  return 64;
+}
+function step(dt){
+  pt+=dt;
+  if(pt>=PH[ph][1]){
+    pt=0;ph++;
+    if(ph>=4){
+      ph=0;
+      var ratio=okT/14;
+      if(ratio>=0.85){rounds++;hRound.textContent=rounds;
+        addFx(CX,CY-120,"一息圆融 · 第 "+rounds+" 息","#86efac");}
+      okT=0;
+    }
+  }
+  var correct=(ph<2)?pressing:!pressing;
+  if(correct){sync=Math.min(100,sync+5.5*dt);okT+=dt;
+    if(Math.random()<dt*8)motes.push({x:CX+(Math.random()-0.5)*haloR()*1.4,y:CY+40,v:18+Math.random()*22,t:1});
+  }else sync=Math.max(0,sync-6.5*dt);
+  var i;
+  for(i=motes.length-1;i>=0;i--){var m=motes[i];
+    m.y-=m.v*dt;m.t-=dt*0.7;
+    if(m.t<=0)motes.splice(i,1);}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  hSync.textContent=Math.round(sync);
+  hLamp.textContent=LAMP[Math.min(4,Math.floor(sync/25))];
+  if(!goalDone&&sync>=100){
+    goalDone=true;state="zen";
+    ovT.textContent="心灯圆满";
+    ovD.textContent="同步度已满,灯焰如镜,呼吸自匀。\n共成 "+rounds+" 息圆融。\n可继续静坐,也可重新燃灯。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var r=haloR(),correct=(ph<2)?pressing:!pressing;
+  var warm=correct?"252,211,77":"122,138,180";
+  var g=ctx.createRadialGradient(CX,CY,r*0.3,CX,CY,r*1.5);
+  g.addColorStop(0,"rgba("+warm+",.16)");
+  g.addColorStop(1,"rgba("+warm+",0)");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=3;i>=1;i--){
+    ctx.strokeStyle="rgba("+warm+","+(0.55-i*0.13).toFixed(2)+")";
+    ctx.lineWidth=i===1?3:2;
+    ctx.beginPath();ctx.arc(CX,CY,r*(1-i*0.14),0,TAU);ctx.stroke();
+  }
+  ctx.strokeStyle="rgba("+warm+",.9)";ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.arc(CX,CY,r+10,-Math.PI/2,-Math.PI/2+TAU*(pt/PH[ph][1]));
+  ctx.stroke();
+  var lamp=Math.min(4,Math.floor(sync/25));
+  if(lamp>0){
+    var fl=5+lamp*2.4+Math.sin(time*7)*1.2;
+    if(!correct)fl*=0.55;
+    ctx.fillStyle="rgba(252,211,77,.9)";
+    ctx.beginPath();
+    ctx.moveTo(CX,CY-fl);
+    ctx.quadraticCurveTo(CX+fl*0.6,CY-fl*0.2,CX,CY+6);
+    ctx.quadraticCurveTo(CX-fl*0.6,CY-fl*0.2,CX,CY-fl);
+    ctx.fill();
+    ctx.fillStyle="rgba(255,244,214,.9)";
+    ctx.beginPath();ctx.arc(CX,CY-fl*0.28,fl*0.24,0,TAU);ctx.fill();
+  }
+  for(i=0;i<motes.length;i++){var m=motes[i];
+    ctx.fillStyle="rgba(252,211,77,"+(m.t*0.6).toFixed(2)+")";
+    ctx.beginPath();ctx.arc(m.x,m.y,1.8,0,TAU);ctx.fill();}
+  ctx.font="bold 21px system-ui";ctx.textAlign="center";
+  ctx.fillStyle="rgba("+warm+",1)";
+  ctx.fillText(PH[ph][0],CX,CY-56);
+  ctx.font="12.5px system-ui";
+  ctx.fillStyle="rgba(139,144,176,1)";
+  ctx.fillText(ph<2?"请按住":"请松开",CX,CY+92);
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+function down(e){if(state!=="play")return;e.preventDefault();pressing=true;}
+function up(){pressing=false;}
+cv.addEventListener("mousedown",down);window.addEventListener("mouseup",up);
+cv.addEventListener("touchstart",down,{passive:false});cv.addEventListener("touchend",up);
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="呼吸引灯";
+  ovD.textContent="灯前一环,随呼吸而胀缩:吸气四拍、屏息两拍、\n呼气六拍、静息两拍。胀与停时按住屏幕,\n缩与停时松开。同步则灯芯渐明,\n同步度满 100,心灯圆满。";
+  btnGo.textContent="燃灯静坐";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

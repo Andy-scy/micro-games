@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>斜影点灯</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:460px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#f472b6;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#f472b6;font-size:16px}
+.gbtn{background:#43152e;color:#f472b6;border:1px solid #f472b6;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#f472b6;font-size:13px;min-height:18px;text-align:center;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:360px;margin:0 auto;touch-action:manipulation;position:relative}
+.grid:before{content:"";position:absolute;left:50%;top:3%;bottom:3%;width:1px;background:linear-gradient(180deg,transparent,rgba(244,114,182,.35),transparent);transform:rotate(45deg)}
+.grid:after{content:"";position:absolute;left:50%;top:3%;bottom:3%;width:1px;background:linear-gradient(180deg,transparent,rgba(244,114,182,.35),transparent);transform:rotate(-45deg)}
+.cell{aspect-ratio:1/1;border-radius:11px;background:#111527;border:1px solid #252c52;cursor:pointer;transition:background .18s,box-shadow .18s,transform .08s}
+.cell.on{background:linear-gradient(145deg,#f9a8d4,#ec4899);border-color:#fce7f3;box-shadow:0 0 14px rgba(244,114,182,.55)}
+.cell.cur{outline:2px solid rgba(244,114,182,.75);outline-offset:2px}
+.cell:active{transform:scale(.92)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#f472b6;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:18px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#f472b6;color:#43152e;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>斜影点灯</h1>
+  <p class="hint">斜着影响世界:点击一盏灯,翻转的不是上下左右,而是它自己与四个对角线方向的斜影(斜线呈 × 形)。把 4×4 棋盘全部点亮。</p>
+  <div class="hud">
+    <span>步数 <b id="moves">0</b></span>
+    <span>已点亮 <b id="lit">0</b>/16</span>
+    <span>最少步纪录 <b id="best">--</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">斜影点灯</h2>
+    <p id="ovDesc">经典点灯的斜线变奏:影响范围是 × 形。角落的灯只会牵动一条斜线,中央的灯会牵动四条。直觉在这里会失灵,重新建立你的棋感吧。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始点灯</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var N=4,CNT=16;
+var gridEl=$("grid"),elMoves=$("moves"),elLit=$("lit"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var cells=[],board=[],moves=0,state="menu";
+var best=loadNum("mg324_best");
+
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+function setMsg(s){elMsg.textContent=s;clearTimeout(setMsg.t);setMsg.t=setTimeout(function(){elMsg.textContent="";},2200);}
+function build(){
+  gridEl.innerHTML="";cells=[];
+  for(var i=0;i<CNT;i++){
+    var d=document.createElement("div");
+    d.className="cell";d.dataset.i=i;
+    gridEl.appendChild(d);cells.push(d);
+  }
+}
+function paint(i){if(board[i])cells[i].classList.add("on");else cells[i].classList.remove("on");}
+function paintAll(){for(var i=0;i<CNT;i++)paint(i);}
+function diagList(r,c){
+  var list=[r*N+c],d;
+  for(d=-1;d<=1;d+=2){
+    if(r+d>=0&&r+d<N&&c+d>=0&&c+d<N)list.push((r+d)*N+(c+d));
+    if(r+d>=0&&r+d<N&&c-d>=0&&c-d<N)list.push((r+d)*N+(c-d));
+  }
+  return list;
+}
+function press(r,c,silent){
+  var list=diagList(r,c),i;
+  for(i=0;i<list.length;i++){board[list[i]]^=1;paint(list[i]);}
+  if(!silent)moves++;
+}
+function litCount(){var n=0,i;for(i=0;i<CNT;i++)if(board[i])n++;return n;}
+function pickCells(k){
+  var arr=[],i;
+  for(i=0;i<CNT;i++)arr.push(i);
+  for(i=arr.length-1;i>0;i--){var j=(Math.random()*(i+1))|0,t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  return arr.slice(0,k);
+}
+function updateHud(){
+  elMoves.textContent=moves;elLit.textContent=litCount();
+  elBest.textContent=best>0?best+" 步":"--";
+}
+function newGame(){
+  board=[];for(var i=0;i<CNT;i++)board.push(1);
+  moves=0;state="playing";
+  var ps=pickCells(5+((Math.random()*3)|0)),j;
+  for(j=0;j<ps.length;j++)press((ps[j]/N)|0,ps[j]%N,true);
+  paintAll();updateHud();
+}
+function doPress(i){
+  if(state!=="playing")return;
+  press((i/N)|0,i%N,false);
+  updateHud();
+  if(litCount()===CNT)win();
+}
+function win(){
+  state="over";
+  var isNew=false;
+  if(best===0||moves<best){best=moves;saveNum("mg324_best",best);isNew=true;}
+  ovTitle.textContent="斜影归位!";
+  ovDesc.textContent=isNew?"新纪录!× 形棋盘被你用最少步数点亮。":"所有斜影都化作光,棋盘亮如白昼。";
+  ovScore.style.display="block";
+  ovScore.textContent="本局步数 "+moves;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+  updateHud();
+}
+function start(){newGame();ov.classList.add("hide");}
+var cur=-1;
+function setCur(i){
+  if(cur>=0)cells[cur].classList.remove("cur");
+  cur=i;
+  if(cur>=0)cells[cur].classList.add("cur");
+}
+gridEl.addEventListener("click",function(e){
+  var t=e.target;
+  if(t&&t.classList&&t.classList.contains("cell"))doPress(parseInt(t.dataset.i,10));
+});
+document.addEventListener("keydown",function(e){
+  if(state!=="playing"){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}
+    return;
+  }
+  if(cur<0)setCur(5);
+  var r=(cur/N)|0,c=cur%N,k=e.key;
+  if(k==="ArrowUp"){r=(r+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowDown"){r=(r+1)%N;e.preventDefault();}
+  else if(k==="ArrowLeft"){c=(c+N-1)%N;e.preventDefault();}
+  else if(k==="ArrowRight"){c=(c+1)%N;e.preventDefault();}
+  else if(k==="Enter"||k===" "){e.preventDefault();doPress(cur);return;}
+  else return;
+  setCur(r*N+c);
+});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){
+  if(state==="menu")return;
+  newGame();setMsg("已重开一局");
+});
+build();
+board=[];for(var z=0;z<CNT;z++)board.push(1);
+var ps0=pickCells(6),z2;
+for(z2=0;z2<ps0.length;z2++)press((ps0[z2]/N)|0,ps0[z2]%N,true);
+paintAll();updateHud();
+})();
+</script>
+</body>
+</html>

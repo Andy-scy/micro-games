@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黑红赌盘 五门开牌</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f1220;color:#e8eaf2;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:21px;color:#ffd166;margin-bottom:6px}
+#how{font-size:13px;color:#9aa3c0;text-align:center;max-width:700px;margin-bottom:10px}
+#bar{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:14px;margin-bottom:10px}
+#bar b{color:#4cc9f0}
+button{background:#2a3050;color:#e8eaf2;border:1px solid #3d4570;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer;font-family:inherit}
+button.acc{background:#ffd166;color:#1a1d2e;border-color:#ffd166;font-weight:700}
+button:disabled{opacity:.35;cursor:default}
+button:active{transform:scale(.96)}
+button.on{border-color:#4cc9f0;box-shadow:0 0 0 2px rgba(76,201,240,.4)}
+#table{background:radial-gradient(ellipse at 50% 25%,#17553a,#0d3524 70%,#0a2a1c);border-radius:16px;padding:18px;width:100%;max-width:680px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#spots{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.spot{min-width:74px;padding:10px 8px;border-radius:12px;background:#1a1f35;border:2px solid #3d4570;cursor:pointer;text-align:center;user-select:none}
+.spot .t{font-size:18px;font-weight:800}
+.spot .m{font-size:12px;color:#9aa3c0}
+.spot:hover{border-color:#4cc9f0}
+.spot.on{border-color:#ffd166;box-shadow:0 0 0 2px rgba(255,209,102,.35)}
+#stage{min-height:126px;display:flex;align-items:center;justify-content:center;gap:12px}
+.card{width:80px;height:114px;border-radius:10px;background:#fdfdfa;color:#1c2030;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);user-select:none;animation:pop .25s ease}
+@keyframes pop{from{transform:scale(.5) rotate(10deg)}to{transform:scale(1) rotate(0)}}
+.card.red{color:#d62839}
+.card .r{font-size:28px;font-weight:800}
+.card .s{font-size:42px;line-height:1}
+.card.none{background:linear-gradient(135deg,#2c4a8a,#1a2f63)}
+.card.none span{visibility:hidden}
+#res{min-height:22px;font-size:15px;color:#ffd166;text-align:center;font-weight:700}
+#stakes{display:flex;gap:8px;justify-content:center}
+#hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;min-height:28px}
+.hc{padding:2px 8px;border-radius:12px;font-size:12px;font-weight:700;color:#fff}
+.hc.r{background:#d62839}.hc.b{background:#1c2030;border:1px solid #556}.hc.g{background:#1f7a4d}
+.over{position:fixed;inset:0;background:rgba(8,10,20,.85);display:flex;align-items:center;justify-content:center;z-index:9}
+.hide{display:none}
+.panel{background:#1a1f35;border:1px solid #3d4570;border-radius:16px;padding:26px 36px;text-align:center;max-width:86vw}
+.panel h2{color:#ffd166;font-size:24px;margin-bottom:8px}
+.panel p{margin-bottom:16px;color:#c7cde4}
+</style>
+</head>
+<body>
+<h1>黑红赌盘 · 五门开牌</h1>
+<p id="how">选一个门注押筹码再开牌：红/黑 赔 2 倍，大(9~A)/小(2~6) 赔 3 倍，独门「七」赔 8 倍。筹码到 250 赢下赌场，不足 5 出局。</p>
+<div id="bar"><span>筹码 <b id="ch">100</b></span><span>连胜 <b id="wk">0</b></span><span>目标 250</span></div>
+<div id="table">
+  <div id="spots">
+    <div class="spot" data-k="red"><div class="t" style="color:#ff6b6b">红</div><div class="m">赔 2 倍</div></div>
+    <div class="spot" data-k="blk"><div class="t">黑</div><div class="m">赔 2 倍</div></div>
+    <div class="spot" data-k="big"><div class="t">大 9-A</div><div class="m">赔 3 倍</div></div>
+    <div class="spot" data-k="sm"><div class="t">小 2-6</div><div class="m">赔 3 倍</div></div>
+    <div class="spot" data-k="sev"><div class="t">七</div><div class="m">赔 8 倍</div></div>
+  </div>
+  <div id="stage"></div>
+  <div id="res">选好门注与筹码，点「开牌」</div>
+  <div id="stakes">
+    <button data-v="5" class="on">押 5</button><button data-v="10">押 10</button><button data-v="25">押 25</button>
+    <button id="go" class="acc">开牌</button>
+  </div>
+  <div id="hist"></div>
+</div>
+<div class="over hide" id="over"><div class="panel"><h2 id="ovt"></h2><p id="ovi"></p><button id="again" class="acc">再来一局</button></div></div>
+<script>
+(function(){
+var SUITS=['♠','♥','♦','♣'],RANKS=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+var chips=100,stake=5,spot='red',winStreak=0,phase='bet',hist=[];
+function $(id){return document.getElementById(id);}
+function vi(r){return RANKS.indexOf(r)+1;}
+function isRed(c){return c.s==='♥'||c.s==='♦';}
+function cardHTML(c){
+  if(!c)return '<div class="card none"><span>·</span></div>';
+  var red=isRed(c)?' red':'';
+  return '<div class="card'+red+'"><span class="r">'+c.r+'</span><span class="s">'+c.s+'</span></div>';
+}
+function render(){
+  $('ch').textContent=chips;$('wk').textContent=winStreak;
+  var sp=document.querySelectorAll('.spot');
+  for(var i=0;i<sp.length;i++)sp[i].className='spot'+(sp[i].getAttribute('data-k')===spot?' on':'');
+  var st=document.querySelectorAll('#stakes button[data-v]');
+  for(var j=0;j<st.length;j++)st[j].className=parseInt(st[j].getAttribute('data-v'),10)===stake?'on':'';
+  $('go').disabled=(phase!=='bet'||stake>chips);
+  var hh='';
+  for(var k=0;k<hist.length;k++){
+    var it=hist[k];
+    var cls=it.win?'hc g':(isRed(it.c)?'hc r':'hc b');
+    hh+='<div class="'+cls+'">'+it.c.r+it.c.s+(it.win?' 赢':' 输')+'</div>';
+  }
+  $('hist').innerHTML=hh;
+}
+function msg(s){$('res').textContent=s;}
+function hitCard(){
+  if(phase!=='bet'||stake>chips)return;
+  var d=[];
+  for(var i=0;i<SUITS.length;i++)for(var j=0;j<RANKS.length;j++)d.push({s:SUITS[i],r:RANKS[j]});
+  var c=d[Math.floor(Math.random()*52)];
+  chips-=stake;
+  var v=vi(c.r),mult=0;
+  if(spot==='red'&&isRed(c))mult=2;
+  if(spot==='blk'&&!isRed(c))mult=2;
+  if(spot==='big'&&v>=9)mult=3;
+  if(spot==='sm'&&v>=2&&v<=6)mult=3;
+  if(spot==='sev'&&v===7)mult=8;
+  $('stage').innerHTML=cardHTML(c);
+  if(mult>0){
+    var profit=stake*(mult-1);
+    chips+=stake*mult;winStreak++;
+    msg('开 '+c.r+c.s+'，押中！盈利 +'+profit);
+  }else{
+    winStreak=0;
+    msg('开 '+c.r+c.s+'，未中，失去 '+stake);
+  }
+  hist.unshift({c:c,win:mult>0});if(hist.length>10)hist.pop();
+  if(chips>=250){phase='done';render();end(true,'筹码滚到 '+chips+'，你赢了整间赌场！');return;}
+  if(chips<5){phase='done';render();end(false,'筹码不足 5，被请出赌场');return;}
+  phase='bet';render();
+}
+function end(win,info){
+  phase='done';
+  $('ovt').textContent=win?'胜利':'失败';
+  $('ovi').textContent=info+' 最终筹码：'+chips;
+  $('over').classList.remove('hide');
+}
+$('spots').addEventListener('click',function(e){
+  var t=e.target;
+  while(t&&!t.classList.contains('spot'))t=t.parentElement;
+  if(!t)return;
+  spot=t.getAttribute('data-k');render();
+});
+$('stakes').addEventListener('click',function(e){
+  var t=e.target;
+  if(!t.getAttribute)return;
+  var v=t.getAttribute('data-v');
+  if(v){stake=parseInt(v,10);render();}
+});
+$('go').onclick=hitCard;
+$('again').onclick=function(){
+  chips=100;stake=5;spot='red';winStreak=0;phase='bet';hist=[];
+  $('stage').innerHTML=cardHTML(null);
+  $('over').classList.add('hide');msg('选好门注与筹码，点「开牌」');render();
+};
+$('stage').innerHTML=cardHTML(null);
+render();
+})();
+</script>
+</body>
+</html>

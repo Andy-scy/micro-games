@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天命序列</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px 14px 16px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#9bf6ff;text-align:center;letter-spacing:3px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:12px;margin-bottom:8px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#9bf6ff;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#9bf6ff}
+.overlay p{color:#aab0d0;font-size:13px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:19px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:4px;background:#9bf6ff;color:#053540;border:none;border-radius:10px;padding:10px 32px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+.pads{display:flex;gap:7px;margin-top:10px}
+.pads button{flex:1;background:#232849;color:#c7cbe8;border:1px solid #343b6e;border-radius:10px;padding:13px 0;font-size:16px;cursor:pointer;font-family:inherit;user-select:none;-webkit-user-select:none}
+.pads button:active{background:#343b6e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>天命序列</h1>
+  <p class="hint">今日序列天定:26 块,顺序人人均同 · ◀ ▶ 选列投放<br>落点吸收左右与下方同数,看牌打牌,冲击三星!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>剩余 <b id="left">26</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="316" height="380"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">天命序列</h2>
+      <p id="ovP">掉落顺序完全固定且全部可见\n同样的 26 块,你和高手只差一个规划!</p>
+      <div class="big" id="ovS"></div>
+      <button id="btn">开 始</button>
+    </div>
+  </div>
+  <div class="pads">
+    <button id="pL">◀</button>
+    <button id="pD">投 放</button>
+    <button id="pR">▶</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $(id){return document.getElementById(id);}
+var COLS=6,ROWS=7,CELL=46,BX=20,BY=50;
+var CCOL=['','#6b7bb8','#5aa9e6','#4dd0c4','#7ed957','#f9d71c','#ff8c42','#ff5d5d','#ffd166'];
+var SEED=20260927,TOTAL=26;
+var grid=[],seq=[],idx=0,col=2,score=0,best=0,state='ready',flashes=[];
+function val(e){return Math.pow(2,e);}
+function newGrid(){var g=[],r,c;for(r=0;r<ROWS;r++){g.push([]);for(c=0;c<COLS;c++)g[r].push(0);}return g;}
+function addScore(n){score+=n;if(score>best)best=score;$('score').textContent=score;$('best').textContent=best;}
+function flash(r,c,e){flashes.push({r:r,c:c,t:0,e:e});}
+function buildSeq(){
+  var s=SEED,i,out=[];
+  for(i=0;i<TOTAL;i++){
+    s=(s*48271)%2147483647;
+    out.push((s%10)<7?1:2);
+  }
+  return out;
+}
+function lowest(c){var r;for(r=ROWS-1;r>=0;r--)if(grid[r][c]===0)return r;return -1;}
+function resolve(r,c){
+  var g=grid,guard=0,changed=true;
+  while(changed&&guard<30){
+    guard++;changed=false;
+    var e=g[r][c],mates=[],i;
+    var cand=[[r,c+1],[r,c-1],[r+1,c]];
+    for(i=0;i<3;i++){
+      var rr=cand[i][0],cc=cand[i][1];
+      if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS&&g[rr][cc]===e)mates.push([rr,cc]);
+    }
+    if(mates.length>0){
+      for(i=0;i<mates.length;i++){g[mates[i][0]][mates[i][1]]=0;flash(mates[i][0],mates[i][1],e);}
+      g[r][c]=e+1;flash(r,c,e+1);
+      addScore(val(e+1)*5);
+      changed=true;
+    }
+  }
+}
+function maxOn(){var m=0,r,c;for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++)if(grid[r][c]>m)m=grid[r][c];return m;}
+function stars(){
+  var m=maxOn();
+  if(m>=6)return 3;
+  if(m>=4)return 2;
+  return 1;
+}
+function doDrop(){
+  if(state!=='play')return;
+  if(idx>=TOTAL){return;}
+  var r=lowest(col);
+  if(r<0){finish('堆到塔顶,序列戛然而止');return;}
+  grid[r][col]=seq[idx];
+  flash(r,col,seq[idx]);
+  idx++;
+  resolve(r,col);
+  $('left').textContent=String(TOTAL-idx);
+  if(idx>=TOTAL)settle();
+}
+function settle(){
+  state='over';
+  var st=stars(),bonus=st===3?800:(st===2?400:0);
+  if(bonus>0)addScore(bonus);
+  $('ovT').textContent='序列终焉 · '+'★'.repeat(st)+'☆'.repeat(3-st);
+  $('ovP').textContent='最高合成 '+val(maxOn())+(bonus>0?' · 星级奖励 +'+bonus:' · 再冲一次更高的星!');
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function finish(msg){
+  state='over';
+  var st=stars();
+  $('ovT').textContent='天命未竟 · '+'★'.repeat(st)+'☆'.repeat(3-st);
+  $('ovP').textContent=msg;
+  $('ovS').textContent='得分 '+score;
+  $('btn').textContent='再来一局';
+  $('ov').classList.remove('hide');
+}
+function start(){
+  grid=newGrid();seq=buildSeq();idx=0;col=2;score=0;flashes=[];
+  $('score').textContent='0';$('left').textContent='26';$('best').textContent=String(best);
+  $('ov').classList.add('hide');state='play';
+}
+$('btn').addEventListener('click',start);
+function clickAt(x){
+  if(state!=='play')return;
+  var c=Math.floor((x-BX)/CELL);
+  if(c<0||c>=COLS)return;
+  if(c===col)doDrop();
+  else col=c;
+}
+cv.addEventListener('mousedown',function(e){
+  var rc=cv.getBoundingClientRect();
+  clickAt((e.clientX-rc.left)*316/rc.width);
+});
+cv.addEventListener('touchstart',function(e){
+  var t=e.touches[0],rc=cv.getBoundingClientRect();
+  clickAt((t.clientX-rc.left)*316/rc.width);
+  e.preventDefault();
+},{passive:false});
+window.addEventListener('keydown',function(e){
+  if(state!=='play')return;
+  if(e.keyCode===37){col=(col+COLS-1)%COLS;e.preventDefault();}
+  else if(e.keyCode===39){col=(col+1)%COLS;e.preventDefault();}
+  else if(e.keyCode===32||e.keyCode===40){doDrop();e.preventDefault();}
+});
+$('pL').addEventListener('click',function(){if(state==='play')col=(col+COLS-1)%COLS;});
+$('pR').addEventListener('click',function(){if(state==='play')col=(col+1)%COLS;});
+$('pD').addEventListener('click',doDrop);
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function mini(x,y,e,big){
+  ctx.fillStyle=CCOL[Math.min(e,8)];
+  roundRect(x+2,y+2,(big?38:30)-4,(big?38:30)-4,6);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  ctx.font='700 '+(big?15:12)+'px system-ui';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(String(val(e)),x+(big?19:15),y+(big?20:16));
+}
+function draw(){
+  ctx.clearRect(0,0,316,380);
+  ctx.fillStyle='#0b0e1a';ctx.fillRect(0,0,316,380);
+  var r,c,i;
+  if(state==='play'){
+    for(i=0;i<6&&idx+i<TOTAL;i++)mini(BX+i*40+5,8,seq[idx+i],i===0);
+    ctx.fillStyle='rgba(155,246,255,.6)';
+    ctx.font='11px system-ui';ctx.textAlign='right';
+    ctx.fillText('天命队列',BX+COLS*CELL,16);
+  }
+  ctx.strokeStyle='rgba(255,255,255,.06)';
+  for(i=0;i<=COLS;i++){ctx.beginPath();ctx.moveTo(BX+i*CELL,BY);ctx.lineTo(BX+i*CELL,BY+ROWS*CELL);ctx.stroke();}
+  for(i=0;i<=ROWS;i++){ctx.beginPath();ctx.moveTo(BX,BY+i*CELL);ctx.lineTo(BX+COLS*CELL,BY+i*CELL);ctx.stroke();}
+  if(state==='play'){
+    ctx.fillStyle='rgba(155,246,255,.14)';
+    ctx.fillRect(BX+col*CELL+2,BY,CELL-4,ROWS*CELL);
+  }
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    var e=grid.length?grid[r][c]:0;
+    if(e>0){
+      ctx.fillStyle=CCOL[Math.min(e,8)];
+      roundRect(BX+c*CELL+3,BY+r*CELL+3,CELL-6,CELL-6,8);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      ctx.font='700 '+Math.min(19,10+e*2)+'px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(String(val(e)),BX+c*CELL+CELL/2,BY+r*CELL+CELL/2+1);
+    }
+  }
+  for(i=0;i<flashes.length;i++){
+    var f=flashes[i],pr=f.t/0.35;
+    ctx.save();ctx.globalAlpha=1-pr;
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;
+    roundRect(BX+f.c*CELL+2-pr*5,BY+f.r*CELL+2-pr*5,CELL-4+pr*10,CELL-4+pr*10,8);ctx.stroke();
+    ctx.restore();
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min((t-last)/1000,0.05);last=t;
+  var i,k=[];
+  for(i=0;i<flashes.length;i++)flashes[i].t+=dt;
+  for(i=0;i<flashes.length;i++)if(flashes[i].t<0.35)k.push(flashes[i]);
+  flashes=k;
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

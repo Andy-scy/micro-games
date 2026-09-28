@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹墙烟囱</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#fda4af;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#fda4af;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#fda4af}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#fda4af;color:#3d0a14;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>弹墙烟囱</h1>
+  <p class="hint">狂奔途中遇到高墙烟囱,跳不上去!贴左墙按跳蹬向右,贴右墙按跳蹬向左,左右借力爬到墙顶 · 底部毒雾在追命,别磨蹭</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>状态 <b id="st">奔跑</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">弹墙烟囱</h2>
+      <p id="ovDesc">旧城街区里立着高高的烟囱闸口:普通跳根本翻不过去,只有左右踩墙借力才能登上墙顶!烟囱下的毒雾不断上涨,动作要快。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elSt=$("st"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s435");
+var state="menu",mode,dist,score,shaftBonus,speed,crates,gates,px,py,vy,vx,grounded,coyote,nextCrate,nextGate,shaftL,shaftR,curGate,fogY,phase,dusts;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  mode="run";dist=0;score=0;shaftBonus=0;speed=300;crates=[];gates=[];
+  px=110;py=GY-42;vy=0;vx=0;grounded=true;coyote=0;
+  nextCrate=460;nextGate=1500;curGate=null;fogY=0;phase=0;dusts=[];
+  elBest.textContent=best;
+}
+function updateHud(){
+  elScore.textContent=score;
+  elSt.textContent=mode==="climb"?"攀爬":"奔跑";
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s435",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function doJump(){
+  if(state!=="playing")return;
+  var i;
+  if(mode==="run"){
+    if(grounded||coyote>0){vy=-520;grounded=false;coyote=0;}
+  }else{
+    if(grounded){vy=-470;vx=0;grounded=false;}
+    else if(px<=shaftL+2){vx=195;vy=-400;}
+    else if(px+26>=shaftR-2){vx=-195;vy=-400;}
+  }
+}
+function supportY(){
+  var i;
+  for(i=0;i<gates.length;i++){
+    var g=gates[i],lx=g.x-dist;
+    if(px+13>lx&&px+13<lx+148)return GY-g.h;
+  }
+  return GY;
+}
+function update(dt){
+  var s=dt/1000,i,g;
+  phase+=s*(grounded?speed*0.05:4);
+  if(mode==="run"){
+    speed=Math.min(430,300+dist*0.01);
+    dist+=speed*s;
+    score=Math.floor(dist/10)+shaftBonus;
+    px+=(110-px)*Math.min(1,5*s);
+    var gY=supportY();
+    if(grounded){
+      if(Math.abs(py+42-gY)<1)py=gY-42;
+      else{grounded=false;vy=0;coyote=0.08;}
+    }else{
+      if(coyote>0)coyote-=s;
+      var prev=py;
+      vy+=2200*s;py+=vy*s;
+      if(py>=gY-42&&prev<=gY-2&&vy>0){py=gY-42;vy=0;grounded=true;}
+    }
+    while(nextGate<dist+W+240){
+      gates.push({x:nextGate,h:150+Math.min(70,gates.length*12),passed:false});
+      nextGate+=1500+Math.random()*700;
+    }
+    nextCrate-=speed*s;
+    if(nextCrate<=0){
+      var ok=true;
+      for(i=0;i<gates.length;i++){
+        g=gates[i];
+        if(W+40>g.x-dist-330&&W+40<g.x-dist+240){ok=false;break;}
+      }
+      if(ok){
+        crates.push({x:W+40,w:24,h:30+Math.random()*8});
+        nextCrate=230+Math.random()*260+speed*0.3;
+      }else nextCrate=60;
+    }
+    for(i=crates.length-1;i>=0;i--){
+      var c=crates[i];c.x-=speed*s;
+      if(c.x<-70){crates.splice(i,1);continue;}
+      if(px+24>c.x+3&&px+4<c.x+c.w-3&&py+40>GY-c.h+3){gameOver("撞上了废料箱!");return;}
+    }
+    for(i=0;i<gates.length;i++){
+      g=gates[i];
+      if(g.passed)continue;
+      var lx=g.x-dist;
+      if(px+26>=lx+30&&px<=lx+118&&py+42>GY-g.h-4){
+        mode="climb";curGate=g;
+        shaftL=lx+30;shaftR=lx+118;
+        if(px<shaftL)px=shaftL;
+        fogY=GY+70;
+        break;
+      }
+    }
+  }else{
+    vy+=1250*s;
+    if(vy>620)vy=620;
+    py+=vy*s;px+=vx*s;
+    vx*=(1-2.2*s);
+    if(px<shaftL){px=shaftL;vx=0;}
+    if(px+26>shaftR){px=shaftR-26;vx=0;}
+    if(py+42>=GY){py=GY-42;vy=0;grounded=true;}
+    else grounded=false;
+    fogY-=34*s;
+    if(fogY<=py+42){gameOver("毒雾吞没了你——爬烟囱要更快!");return;}
+    if(py+42<=GY-curGate.h-2){
+      curGate.passed=true;
+      py=GY-curGate.h-42;
+      vy=0;vx=0;grounded=true;
+      mode="run";shaftBonus+=80;curGate=null;
+    }
+  }
+  for(i=dusts.length-1;i>=0;i--){
+    dusts[i].life-=s;dusts[i].x+=dusts[i].vx*s;dusts[i].y+=dusts[i].vy*s;
+    if(dusts[i].life<=0)dusts.splice(i,1);
+  }
+  updateHud();
+}
+function drawGate(g){
+  var lx=g.x-dist;
+  if(lx>W+40||lx+148<-40)return;
+  var top=GY-g.h,i;
+  for(i=0;i<2;i++){
+    var bx=i===0?lx-30:lx+118;
+    ctx.fillStyle="#4a3540";
+    ctx.fillRect(bx,top,30,GY-top);
+    ctx.fillStyle="#5d4450";
+    for(var by=top+8;by<GY-8;by+=22)ctx.fillRect(bx+3,by,24,3);
+    ctx.fillStyle="#fda4af";
+    ctx.fillRect(bx,top,30,5);
+  }
+  ctx.fillStyle="rgba(20,14,24,.75)";
+  ctx.fillRect(lx,top,88,GY-top);
+  if(mode==="run"&&!g.passed&&lx<W&&lx>0){
+    ctx.fillStyle="#fbbf24";
+    ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText("▲",lx+74,top-14);
+    ctx.textAlign="left";ctx.font="14px system-ui";
+  }
+}
+function draw(){
+  var i,grd,d;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#1b1220");grd.addColorStop(1,"#2a1520");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(253,164,175,.05)";
+  for(i=0;i<10;i++)ctx.fillRect((i*157+dist*0.06%W+W)%W,(i*89)%160,26,26);
+  ctx.fillStyle="#332030";ctx.fillRect(0,GY,W,H-GY);
+  ctx.fillStyle="#fda4af";ctx.globalAlpha=0.4;ctx.fillRect(0,GY,W,2);ctx.globalAlpha=1;
+  var dsh=dist%80;
+  ctx.fillStyle="rgba(255,255,255,.07)";
+  for(i=0;i<10;i++)ctx.fillRect(i*80-dsh,GY+14,34,3);
+  for(i=0;i<gates.length;i++)drawGate(gates[i]);
+  for(i=0;i<crates.length;i++){
+    var c=crates[i];
+    ctx.fillStyle="#6b4a56";
+    rr(c.x,GY-c.h,c.w,c.h,4);ctx.fill();
+    ctx.fillStyle="#51323c";
+    ctx.fillRect(c.x+3,GY-c.h+4,c.w-6,3);
+  }
+  if(mode==="climb"&&curGate){
+    grd=ctx.createLinearGradient(0,fogY,0,H);
+    grd.addColorStop(0,"rgba(74,222,128,.55)");grd.addColorStop(1,"rgba(20,83,45,.85)");
+    ctx.fillStyle=grd;
+    ctx.beginPath();ctx.moveTo(0,fogY+6);
+    for(i=0;i<=8;i++)ctx.lineTo(i*80,fogY+6+Math.sin(i*1.9+dist*0.01)*5);
+    ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
+    ctx.fillStyle="rgba(74,222,128,.8)";
+    ctx.fillRect(shaftL,fogY+20,88,4);
+  }
+  for(i=0;i<dusts.length;i++){
+    d=dusts[i];
+    ctx.fillStyle="rgba(255,255,255,"+(d.life*2)+")";
+    ctx.beginPath();ctx.arc(d.x,d.y,2.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#fda4af";
+  rr(px,py+10,26,32,7);ctx.fill();
+  rr(px+6,py,19,15,5);ctx.fill();
+  ctx.fillStyle="#3d0a14";
+  ctx.fillRect(px+16,py+4,3,4);
+  if(mode==="climb"){
+    ctx.fillStyle="#fbbf24";
+    if(px<=shaftL+3){ctx.beginPath();ctx.moveTo(px+2,py+16);ctx.lineTo(px-8,py+20);ctx.lineTo(px+2,py+24);ctx.fill();}
+    if(px+26>=shaftR-3){ctx.beginPath();ctx.moveTo(px+24,py+16);ctx.lineTo(px+34,py+20);ctx.lineTo(px+24,py+24);ctx.fill();}
+  }
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if((k===" "||k==="ArrowUp"||k==="w"||k==="W")&&!e.repeat)doJump();
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();doJump();},{passive:false});
+cv.addEventListener("mousedown",function(){doJump();});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>猜词对决</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,460px)}
+#boards{display:flex;gap:10px;margin-bottom:10px}
+#mine,#theirs{flex:1;background:#151a30;border-radius:12px;padding:12px;text-align:center}
+#mine h3,#theirs h3{margin:0 0 8px;font-size:13px;color:#9aa3c7;font-weight:normal}
+#pslots{font-size:22px;letter-spacing:4px;font-weight:bold;font-family:Consolas,monospace;color:#fff;min-height:30px}
+#aslots{font-size:22px;letter-spacing:4px;font-weight:bold;font-family:Consolas,monospace;color:#8a92bd;min-height:30px}
+#turn{font-size:15px;text-align:center;margin-bottom:10px;font-weight:bold;color:#8ecae6}
+#turn.ai{color:#ff9f43}
+#keys{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;background:#151a30;border-radius:14px;padding:10px}
+#keys button{padding:12px 0;font-size:15px;border:none;border-radius:8px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit;font-weight:bold}
+#keys button.hit{background:#2ec27e;color:#08131c}
+#keys button.miss{background:#181d3a;color:#5a6189;cursor:default}
+#keys button:disabled{cursor:default}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>猜词对决</h1>
+<p id="tip">你和 AI 各有一个隐藏单词 轮流猜字母 · 猜中自己单词里的字母可连猜 并照亮对应格子 · 先拼出完整单词赢一局,三局两胜</p>
+<div id="wrap">
+<div id="boards">
+<div id="mine"><h3>你的单词</h3><div id="pslots"></div></div>
+<div id="theirs"><h3>AI 进度</h3><div id="aslots"></div></div>
+</div>
+<div id="turn"></div>
+<div id="keys"></div>
+<div id="ov"><h2 id="ovT">猜词对决</h2><p id="ovP">轮到你时点击字母猜自己的词
+猜中可连猜 猜错轮到 AI
+先照亮全部字母的一方获胜</p><button id="ovB">开始对决</button></div>
+</div>
+<script>
+"use strict";
+var WORDS = ["apple","bread","chair","cloud","dance","dream","eagle","field","grape","heart","juice","light","money","night","ocean","party","piano","queen","river","snake","sugar","table","voice","whale","zebra","beach","clock","lemon","mouse","plant","storm","tiger","water","smile","house","brick","flame","stone","watch","candy"];
+var FREQ = "etaoinshrdlcumwfgypbvkjxqz";
+var keysEl = document.getElementById("keys");
+var pslotsEl = document.getElementById("pslots");
+var aslotsEl = document.getElementById("aslots");
+var turnEl = document.getElementById("turn");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var pw = "", aw = "", pRev = [], aRev = [], guessed = [];
+var turn = "p", winsP = 0, winsA = 0, round = 1;
+var playing = false, aiTimer = null;
+
+function pickWord(not) {
+  var w = WORDS[Math.floor(Math.random() * WORDS.length)];
+  while (w === not) w = WORDS[Math.floor(Math.random() * WORDS.length)];
+  return w;
+}
+
+function render() {
+  var s = "";
+  for (var i = 0; i < pw.length; i++) s += (pRev[i] ? pw[i].toUpperCase() : "_");
+  pslotsEl.textContent = s.split("").join(" ");
+  var a = 0;
+  for (var j = 0; j < aw.length; j++) if (aRev[j]) a++;
+  var t = "";
+  for (var k = 0; k < aw.length; k++) t += (aRev[k] ? aw[k].toUpperCase() : "·");
+  aslotsEl.textContent = t;
+  var btns = keysEl.getElementsByTagName("button");
+  for (var b = 0; b < btns.length; b++) {
+    var l = btns[b].getAttribute("data-l");
+    if (guessed.indexOf(l) < 0) {
+      btns[b].className = "";
+      btns[b].disabled = (turn !== "p");
+    }
+  }
+  turnEl.className = turn === "p" ? "" : "ai";
+  turnEl.textContent = "第 " + round + " 局 · 你 " + winsP + " : " + winsA + " AI · " +
+    (turn === "p" ? "轮到你 点一个字母" : "AI 思考中…");
+}
+
+function markKey(l, cls) {
+  var btn = null;
+  var btns = keysEl.getElementsByTagName("button");
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i].getAttribute("data-l") === l) btn = btns[i];
+  }
+  if (btn) { btn.className = cls; btn.disabled = true; }
+}
+
+function allRev(arr) {
+  for (var i = 0; i < arr.length; i++) if (!arr[i]) return false;
+  return true;
+}
+
+function playerGuess(l) {
+  if (!playing || turn !== "p" || guessed.indexOf(l) >= 0) return;
+  guessed.push(l);
+  var hit = false;
+  for (var i = 0; i < pw.length; i++) {
+    if (pw[i] === l) { pRev[i] = true; hit = true; }
+  }
+  markKey(l, hit ? "hit" : "miss");
+  if (allRev(pRev)) { roundEnd("p"); return; }
+  if (hit) {
+    render();
+  } else {
+    turn = "a";
+    render();
+    aiTimer = setTimeout(aiStep, 700);
+  }
+}
+
+function aiStep() {
+  if (!playing || turn !== "a") return;
+  var l = null;
+  for (var i = 0; i < FREQ.length; i++) {
+    if (guessed.indexOf(FREQ[i]) < 0) { l = FREQ[i]; break; }
+  }
+  if (!l) l = "abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 26)];
+  guessed.push(l);
+  var hit = false;
+  for (var j = 0; j < aw.length; j++) {
+    if (aw[j] === l) { aRev[j] = true; hit = true; }
+  }
+  markKey(l, hit ? "hit" : "miss");
+  if (allRev(aRev)) { roundEnd("a"); return; }
+  if (hit) {
+    aiTimer = setTimeout(aiStep, 700);
+  } else {
+    turn = "p";
+    render();
+  }
+}
+
+function roundEnd(winner) {
+  playing = false;
+  if (winner === "p") winsP++; else winsA++;
+  var btns = keysEl.getElementsByTagName("button");
+  for (var b = 0; b < btns.length; b++) btns[b].disabled = true;
+  turnEl.className = "";
+  turnEl.textContent = winner === "p" ? "你拼出了 " + pw.toUpperCase() + " !拿下这局" : "AI 拼出了它的词 这局归 AI";
+  if (winsP >= 2 || winsA >= 2) {
+    setTimeout(function () {
+      ovT.textContent = winsP >= 2 ? "对决胜利!" : "对决失败";
+      ovP.textContent = "局分 " + winsP + " : " + winsA;
+      ovB.textContent = "再来一局";
+      ov.classList.remove("hide");
+    }, 1400);
+  } else {
+    setTimeout(function () {
+      round++;
+      newRound();
+    }, 1600);
+  }
+}
+
+function newRound() {
+  if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+  pw = pickWord(null);
+  aw = pickWord(pw);
+  pRev = [];
+  aRev = [];
+  for (var i = 0; i < pw.length; i++) pRev.push(false);
+  for (var j = 0; j < aw.length; j++) aRev.push(false);
+  guessed = [];
+  turn = "p";
+  playing = true;
+  var btns = keysEl.getElementsByTagName("button");
+  for (var b = 0; b < btns.length; b++) { btns[b].className = ""; btns[b].disabled = false; }
+  render();
+}
+
+(function buildKeys() {
+  for (var i = 0; i < 26; i++) {
+    var l = String.fromCharCode(97 + i);
+    var btn = document.createElement("button");
+    btn.textContent = l.toUpperCase();
+    btn.setAttribute("data-l", l);
+    btn.onclick = function (ch) {
+      return function () { playerGuess(ch); };
+    }(l);
+    keysEl.appendChild(btn);
+  }
+})();
+
+ovB.onclick = function () {
+  winsP = 0; winsA = 0; round = 1;
+  ov.classList.add("hide");
+  newRound();
+};
+</script>
+</body>
+</html>

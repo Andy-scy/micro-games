@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>密译行动</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;align-items:center}
+h1{font-size:22px;margin:14px 0 2px;color:#ffd166}
+#tip{margin:0 0 10px;font-size:13px;color:#9aa3c7;text-align:center;padding:0 12px}
+#wrap{position:relative;width:min(96vw,470px)}
+#hud{display:flex;justify-content:space-between;font-size:14px;color:#9aa3c7;margin-bottom:8px}
+#hud b{color:#ffd166}
+.card{background:#151a30;border-radius:14px;padding:14px;text-align:center;margin-bottom:10px}
+#zh{font-size:15px;color:#8ecae6;margin-bottom:10px}
+#cword{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:12px}
+.ltr{width:36px;height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+.ltr.cip{background:#232a4d;color:#9aa3c7}
+.ltr.sol{background:#2ec27e;color:#08131c;cursor:pointer}
+.ltr.sel{outline:2px solid #ffd166}
+.gap{width:16px}
+#mapbox{font-size:13px;color:#9aa3c7;min-height:22px;margin-bottom:8px;line-height:1.8}
+#mapbox b{color:#7ee2a8;font-family:Consolas,monospace}
+#panel{min-height:56px}
+#panel .row{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:6px}
+#panel button{width:32px;height:38px;border:none;border-radius:6px;background:#232a4d;color:#e8eaf6;font-size:15px;font-weight:bold;font-family:Consolas,monospace;cursor:pointer}
+#panel button:disabled{opacity:.25;cursor:default}
+#panel button.now{background:#ffd166;color:#1a1d33}
+#panel .tools{display:flex;gap:8px;justify-content:center}
+#panel .tools button{width:auto;padding:6px 14px;font-size:12px;font-family:system-ui;background:#2a3160}
+#msg{font-size:13px;color:#ff9f43;min-height:18px;text-align:center}
+#ov{position:absolute;inset:0;background:rgba(8,10,24,.93);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:8px;z-index:5}
+#ov.hide{display:none}
+#ov h2{margin:0;font-size:26px;color:#ffd166}
+#ov p{margin:0;font-size:14px;color:#c3c9e8;line-height:1.8;white-space:pre-line}
+#ov button{margin-top:8px;padding:10px 36px;font-size:16px;border:none;border-radius:999px;background:#ffd166;color:#1a1d33;font-weight:bold;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+<h1>密译行动</h1>
+<p id="tip">一段英文短语被替换密码加密 · 依据中文翻译与字母线索 点击密文字母为其指定明文 · 提示会消耗分数 全部破译即过关</p>
+<div id="wrap">
+<div id="hud"><span>第 <b id="lvlN">1</b>/3 段</span><span>得分 <b id="score">100</b></span></div>
+<div class="card">
+<div id="zh"></div>
+<div id="cword"></div>
+<div id="mapbox"></div>
+<div id="panel"></div>
+</div>
+<div id="msg"></div>
+<div style="text-align:center;margin-top:6px"><button id="hintB" style="padding:9px 24px;font-size:14px;border:none;border-radius:999px;background:#232a4d;color:#e8eaf6;cursor:pointer;font-family:inherit">揭示一条映射 -20</button></div>
+<div id="ov"><h2 id="ovT">密译行动</h2><p id="ovP">字母替换密码:每个密文字母
+都对应一个固定明文字母
+根据中文意思推断并指定映射</p><button id="ovB">开始破译</button></div>
+</div>
+<script>
+"use strict";
+var LEVELS = [
+  { pt: "A GOOD START", zh: "中文意思:好的开始" },
+  { pt: "TIME IS GOLD", zh: "中文意思:时间就是黄金" },
+  { pt: "NEVER GIVE UP", zh: "中文意思:永不放弃" }
+];
+var lvlNEl = document.getElementById("lvlN");
+var scoreEl = document.getElementById("score");
+var zhEl = document.getElementById("zh");
+var cwordEl = document.getElementById("cword");
+var mapboxEl = document.getElementById("mapbox");
+var panelEl = document.getElementById("panel");
+var msgEl = document.getElementById("msg");
+var ov = document.getElementById("ov");
+var ovT = document.getElementById("ovT");
+var ovP = document.getElementById("ovP");
+var ovB = document.getElementById("ovB");
+var lv = 0, score = 100, enc = {}, map = {}, cipher = "", uniq = [];
+var selC = "", playing = false;
+
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function loadLevel() {
+  var pt = LEVELS[lv].pt;
+  uniq = [];
+  for (var i = 0; i < pt.length; i++) {
+    var ch = pt[i].toLowerCase();
+    if (ch !== " " && uniq.indexOf(ch) < 0) uniq.push(ch);
+  }
+  var bag = "abcdefghijklmnopqrstuvwxyz".split("");
+  shuffle(bag);
+  enc = {};
+  var ai = 0;
+  for (var u = 0; u < uniq.length; u++) {
+    while (bag[ai] === uniq[u]) ai++;
+    enc[uniq[u]] = bag[ai];
+    ai++;
+  }
+  cipher = "";
+  for (var k = 0; k < pt.length; k++) {
+    var c = pt[k].toLowerCase();
+    cipher += (c === " " ? " " : enc[c]);
+  }
+  map = {};
+  var byFreq = uniq.slice().sort(function (a, b) {
+    return countIn(pt, b) - countIn(pt, a);
+  });
+  var reveal = byFreq.slice(0, 2);
+  for (var r = 0; r < reveal.length; r++) map[enc[reveal[r]]] = reveal[r];
+  selC = "";
+  lvlNEl.textContent = lv + 1;
+  zhEl.textContent = LEVELS[lv].zh;
+  render();
+  checkDone();
+}
+
+function countIn(s, ch) {
+  var n = 0;
+  for (var i = 0; i < s.length; i++) if (s[i].toLowerCase() === ch) n++;
+  return n;
+}
+
+function render() {
+  cwordEl.innerHTML = "";
+  for (var i = 0; i < cipher.length; i++) {
+    var c = cipher[i];
+    if (c === " ") {
+      var g = document.createElement("div");
+      g.className = "gap";
+      cwordEl.appendChild(g);
+      continue;
+    }
+    (function (cc) {
+      var d = document.createElement("div");
+      var solved = map[cc] !== undefined;
+      d.className = "ltr " + (solved ? "sol" : "cip");
+      if (selC === cc) d.classList.add("sel");
+      d.textContent = solved ? map[cc].toUpperCase() : cc.toUpperCase();
+      d.onclick = function () { pickCipher(cc); };
+      cwordEl.appendChild(d);
+    })(c);
+  }
+  var keys = [];
+  for (var mk in map) if (map.hasOwnProperty(mk)) keys.push(mk);
+  keys.sort();
+  var s = "已知映射:";
+  if (keys.length === 0) s += "暂无";
+  for (var k = 0; k < keys.length; k++) {
+    s += " <b>" + keys[k].toUpperCase() + "→" + map[keys[k]].toUpperCase() + "</b>";
+  }
+  mapboxEl.innerHTML = s;
+  renderPanel();
+}
+
+function renderPanel() {
+  panelEl.innerHTML = "";
+  if (!selC) {
+    var t = document.createElement("div");
+    t.style.color = "#5a6189";
+    t.style.fontSize = "13px";
+    t.textContent = "点击上方密文字母来指定它的明文";
+    panelEl.appendChild(t);
+    return;
+  }
+  var lab = document.createElement("div");
+  lab.style.fontSize = "13px";
+  lab.style.color = "#8ecae6";
+  lab.style.marginBottom = "6px";
+  lab.textContent = "密文 " + selC.toUpperCase() + " 的明文是:";
+  panelEl.appendChild(lab);
+  var row = document.createElement("div");
+  row.className = "row";
+  for (var i = 0; i < 26; i++) {
+    (function (ch) {
+      var b = document.createElement("button");
+      b.textContent = ch.toUpperCase();
+      var owner = null;
+      for (var mk in map) if (map.hasOwnProperty(mk) && map[mk] === ch && mk !== selC) owner = mk;
+      if (owner) b.disabled = true;
+      if (map[selC] === ch) b.className = "now";
+      b.onclick = function () {
+        if (!playing) return;
+        map[selC] = ch;
+        selC = "";
+        render();
+        checkDone();
+      };
+      row.appendChild(b);
+    })(String.fromCharCode(97 + i));
+  }
+  panelEl.appendChild(row);
+  var tools = document.createElement("div");
+  tools.className = "tools";
+  var clr = document.createElement("button");
+  clr.textContent = "清除该映射";
+  clr.onclick = function () {
+    if (!playing) return;
+    delete map[selC];
+    selC = "";
+    render();
+  };
+  var cancel = document.createElement("button");
+  cancel.textContent = "取消";
+  cancel.onclick = function () { selC = ""; render(); };
+  tools.appendChild(clr);
+  tools.appendChild(cancel);
+  panelEl.appendChild(tools);
+}
+
+function pickCipher(cc) {
+  if (!playing) return;
+  selC = (selC === cc ? "" : cc);
+  render();
+}
+
+function checkDone() {
+  var all = true;
+  for (var i = 0; i < uniq.length; i++) {
+    if (map[enc[uniq[i]]] === undefined) all = false;
+  }
+  if (!all) return;
+  var dec = "";
+  for (var k = 0; k < cipher.length; k++) {
+    dec += (cipher[k] === " " ? " " : map[cipher[k]]);
+  }
+  if (dec === LEVELS[lv].pt.toLowerCase()) {
+    playing = false;
+    if (lv >= LEVELS.length - 1) {
+      ovT.textContent = "全部破译!";
+      ovP.textContent = "三段密文全部还原\n最终得分 " + score;
+      ovB.textContent = "再来一局";
+      ovB.onclick = start;
+    } else {
+      ovT.textContent = "第 " + (lv + 1) + " 段破译成功!";
+      ovP.textContent = LEVELS[lv].pt;
+      ovB.textContent = "下一段";
+      ovB.onclick = nextLevel;
+    }
+    ov.classList.remove("hide");
+  } else {
+    msgEl.textContent = "全部映射完成,但结果不对——点击绿色字母可重新指定";
+    setTimeout(function () { msgEl.textContent = ""; }, 2200);
+  }
+}
+
+document.getElementById("hintB").onclick = function () {
+  if (!playing) return;
+  var hidden = [];
+  for (var i = 0; i < uniq.length; i++) {
+    if (map[enc[uniq[i]]] === undefined) hidden.push(uniq[i]);
+  }
+  if (!hidden.length) return;
+  var pick = hidden[Math.floor(Math.random() * hidden.length)];
+  map[enc[pick]] = pick;
+  score = Math.max(0, score - 20);
+  scoreEl.textContent = score;
+  msgEl.textContent = "揭示:" + enc[pick].toUpperCase() + " → " + pick.toUpperCase();
+  setTimeout(function () { msgEl.textContent = ""; }, 1200);
+  render();
+  checkDone();
+};
+
+function nextLevel() {
+  lv++;
+  playing = true;
+  loadLevel();
+  ov.classList.add("hide");
+}
+
+function start() {
+  lv = 0;
+  score = 100;
+  scoreEl.textContent = score;
+  playing = true;
+  loadLevel();
+  ov.classList.add("hide");
+}
+ovB.onclick = start;
+</script>
+</body>
+</html>

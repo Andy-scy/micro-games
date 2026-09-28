@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>百科快答</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:520px}
+h1{font-size:24px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:13px}
+.big{font-size:18px;font-weight:800;color:#ffd166}
+.tbarWrap{height:10px;background:#232a48;border-radius:6px;overflow:hidden;margin-bottom:10px}
+#tbar{height:100%;width:100%;background:#51d88a;border-radius:6px}
+#q{font-size:17px;line-height:1.6;margin-bottom:12px;min-height:52px}
+.opt{display:block;width:100%;border:2px solid #2c3357;background:#232a48;color:#e8eaf6;border-radius:10px;padding:11px 13px;font-size:15px;margin-bottom:8px;cursor:pointer;text-align:left;font-family:inherit}
+.opt:hover{border-color:#4cc9f0}
+.opt.ok{border-color:#51d88a;background:#173327}
+.opt.bad{border-color:#ff5c5c;background:#3a1a20}
+.opt.dim{opacity:.45}
+#msg{text-align:center;font-size:14px;color:#cdd6f4;min-height:20px;margin-top:6px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.88);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8;font-size:14px;text-align:left}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>百科快答</h1>
+  <p class="tips">限时四选一常识问答:每题 15 秒,可用数字键 1~4 或点击作答。答对得 100 分,答得越快奖励越高(最多 +50);答错或超时扣一条命,共 3 条命,答完 10 题结算。</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">进度</div><div class="big" id="pg">0/10</div></div>
+    <div class="stat"><div class="mut">得分</div><div class="big" id="sc">0</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">♥♥♥</div></div>
+  </div></div>
+  <div class="card">
+    <div class="tbarWrap"><div id="tbar"></div></div>
+    <div id="q">……</div>
+    <div id="opts"></div>
+    <div id="msg"></div>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">百科快答</h2><p id="ovp">· 每轮从题库随机抽 10 道常识题<br>· 每题限时 15 秒,四选一<br>· 得分 = 100 + 剩余时间奖励(最多 50)<br>· 答错或超时 -1 条命,3 命用完结束<br>· 键盘数字键 1~4 可快速作答</p><button class="btn" id="obtn">开始挑战</button></div></div>
+<script>
+'use strict';
+var BANK=[
+{q:'一年之中,有 31 天的"大月"共有几个?',o:['7 个','6 个','5 个','8 个']},
+{q:'雨后天空中的彩虹一般有几种颜色?',o:['7 种','5 种','6 种','8 种']},
+{q:'人体面积最大的器官是什么?',o:['皮肤','肝脏','肺','大脑']},
+{q:'《静夜思》"床前明月光"的作者是谁?',o:['李白','杜甫','白居易','王维']},
+{q:'地球大气中含量最多的气体是?',o:['氮气','氧气','二氧化碳','氢气']},
+{q:'在标准大气压下,水的沸点是多少摄氏度?',o:['100','90','110','80']},
+{q:'被称为中国"国宝"的动物是?',o:['大熊猫','金丝猴','丹顶鹤','东北虎']},
+{q:'水结冰以后,体积会怎样变化?',o:['变大','变小','不变','先变小再变大']},
+{q:'人的正常体温大约是多少摄氏度?',o:['37','35','39','33']},
+{q:'十二生肖中,排在"龙"后面的是哪个属相?',o:['蛇','马','羊','猴']},
+{q:'光在真空中的传播速度大约是每秒多少公里?',o:['30 万','3 万','300 万','3000']},
+{q:'《西游记》里孙悟空使用的兵器是?',o:['金箍棒','九齿钉耙','月牙铲','青龙偃月刀']},
+{q:'植物进行光合作用时,主要吸收的气体是?',o:['二氧化碳','氧气','氮气','水蒸气']},
+{q:'一年中北半球白天最长的那天叫什么?',o:['夏至','冬至','春分','秋分']},
+{q:'声音在下列哪种介质中传播得最快?',o:['固体','液体','气体','真空']},
+{q:'下面哪一项不属于中国古代"四大发明"?',o:['地动仪','造纸术','指南针','火药']},
+{q:'月亮绕地球公转一圈大约需要多少天?',o:['27','7','88','365']},
+{q:'下列哪种动物是哺乳动物?',o:['蝙蝠','鳄鱼','企鹅','鲨鱼']},
+{q:'中国的教师节是每年的哪一天?',o:['9 月 10 日','6 月 1 日','10 月 1 日','5 月 4 日']},
+{q:'《红楼梦》的作者是谁?',o:['曹雪芹','罗贯中','吴承恩','施耐庵']},
+{q:'能支持燃烧的气体主要是?',o:['氧气','氮气','二氧化碳','氦气']},
+{q:'成年人的一口恒牙通常有多少颗?',o:['32','28','30','36']},
+{q:'青蛙的幼体叫什么?',o:['蝌蚪','毛毛虫','孑孓','蚕蛹']},
+{q:'"五岳之首"指的是哪座山?',o:['泰山','华山','嵩山','恒山']},
+{q:'蜂蜜主要是蜜蜂采集什么酿成的?',o:['花蜜','花粉','露水','树脂']},
+{q:'中国第一位进入太空的航天员是谁?',o:['杨利伟','翟志刚','聂海胜','刘伯明']},
+{q:'"一打"铅笔一共有多少支?',o:['12','10','20','24']},
+{q:'2008 年夏季奥运会的举办城市是?',o:['北京','上海','广州','南京']},
+{q:'铅笔笔芯的主要成分是?',o:['石墨','铅','炭黑','粉笔灰']},
+{q:'下列哪个是中国的传统节日?',o:['春节','情人节','愚人节','圣诞节']}
+];
+var N=10,QLEN=15;
+var quiz=[],idx=0,score=0,lives=3,playing=false,over=false,locked=false,qLeft=QLEN,S=0;
+function $(id){return document.getElementById(id)}
+function shuffle(a){var i,j,t;for(i=a.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function schedule(fn,ms){var tk=S;setTimeout(function(){if(tk===S)fn();},ms);}
+function startGame(){
+  S++;idx=0;score=0;lives=3;over=false;playing=true;locked=false;
+  quiz=shuffle(BANK.slice()).slice(0,N);
+  $('sc').textContent='0';$('hp').textContent='♥♥♥';
+  $('overlay').classList.add('hide');
+  showQ();
+}
+function showQ(){
+  if(idx>=N){finish(true);return;}
+  var it=quiz[idx];
+  locked=false;qLeft=QLEN;
+  $('pg').textContent=(idx+1)+'/'+N;
+  $('q').textContent=it.q;
+  var box=$('opts');box.innerHTML='';
+  var arr=[];
+  for(var i=0;i<it.o.length;i++)arr.push({t:it.o[i],ok:i===0});
+  shuffle(arr);
+  for(var k=0;k<arr.length;k++){
+    var b=document.createElement('button');
+    b.className='opt';
+    b.textContent=String.fromCharCode(65+k)+'、'+arr[k].t;
+    b.dataset.ok=arr[k].ok?'1':'0';
+    (function(btn){btn.addEventListener('click',function(){pick(btn)});})(b);
+    box.appendChild(b);
+  }
+  $('msg').textContent='';
+}
+function pick(btn){
+  if(!playing||over||locked)return;
+  if(btn.dataset.ok==='1'){resolve(true,btn);}else{resolve(false,btn);}
+}
+function resolve(good,btn){
+  locked=true;
+  var btns=$('opts').children,i;
+  if(good){
+    score+=100+Math.round(qLeft/QLEN*50);
+    btn.classList.add('ok');
+    $('msg').textContent='答对了!+'+(100+Math.round(qLeft/QLEN*50))+' 分';
+  }else{
+    lives--;$('hp').textContent=lives>0?new Array(lives+1).join('♥'):'—';
+    btn.classList.add('bad');
+    for(i=0;i<btns.length;i++)if(btns[i].dataset.ok==='1')btns[i].classList.add('ok');
+    $('msg').textContent=qLeft<=0?'超时了!正确答案已标出':'答错了,正确答案已标出';
+  }
+  $('sc').textContent=score;
+  idx++;
+  schedule(function(){
+    if(!playing||over)return;
+    if(lives<=0)finish(false);
+    else showQ();
+  },1200);
+}
+function finish(win){
+  playing=false;over=true;
+  var rank=score>=1200?'博学多才!':(score>=900?'才思敏捷!':(score>=500?'小有所成!':'再接再厉!'));
+  $('ovt').textContent=win?'答题完成 · '+rank:'生命耗尽…';
+  $('ovp').innerHTML='本轮共答题 '+Math.min(idx,N)+' 道<br>最终得分 <b>'+score+'</b> 分<br>'+rank+' 保持节奏,再来一局冲击高分!';
+  $('obtn').textContent='再来一局';
+  $('overlay').classList.remove('hide');
+}
+$('obtn').addEventListener('click',startGame);
+document.addEventListener('keydown',function(e){
+  if(!playing||over||locked)return;
+  var n=parseInt(e.key,10);
+  if(n>=1&&n<=4){
+    var btns=$('opts').children;
+    if(btns[n-1])pick(btns[n-1]);
+  }
+});
+var last=performance.now();
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(playing&&!over&&!locked){
+    qLeft-=dt;
+    if(qLeft<0)qLeft=0;
+    $('tbar').style.width=(qLeft/QLEN*100)+'%';
+    if(qLeft<=0)resolve(false,null);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

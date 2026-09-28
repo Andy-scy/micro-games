@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>翻转引力跑者</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:700px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#22d3ee;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#22d3ee;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.9);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#22d3ee}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#fbbf24;font-weight:700}
+.overlay button{margin-top:6px;background:#22d3ee;color:#042830;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>翻转引力跑者</h1>
+  <p class="hint">空格 / ↑ / 点按 翻转重力,在天花板与地板间切换 · 地刺在天上还是地下?看准了再翻!</p>
+  <div class="hud">
+    <span>得分 <b id="score">0</b></span>
+    <span>重力 <b id="gr">向下</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="640" height="300"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">翻转引力跑者</h2>
+      <p id="ovDesc">在颠倒实验室里奔跑:重力随时可以翻转!地板长刺就翻上天花板,天花板长刺再翻回来,中央的浮块是空中翻转的禁区。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+var cv=$("cv"),ctx=cv.getContext("2d"),W=640,H=300,GY=252,CT=52;
+var ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elScore=$("score"),elGr=$("gr"),elBest=$("best");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s429");
+var state="menu",dist,score,speed,obs,px,py,vy,dir,grounded,flipCd,nextX,nextSide,pulse;
+function rr(x,y,w,h,r){
+  if(w<2*r)r=w/2;if(h<2*r)r=h/2;
+  ctx.beginPath();ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function reset(){
+  dist=0;score=0;speed=320;obs=[];px=90;py=GY-42;vy=0;dir=1;grounded=true;
+  flipCd=0;nextX=460;nextSide=1;pulse=0;
+  elBest.textContent=best;
+}
+function updateHud(){elScore.textContent=score;elGr.textContent=dir===1?"向下":"向上";}
+function flip(){
+  if(state!=="playing")return;
+  if(flipCd>0)return;
+  dir*=-1;flipCd=0.24;grounded=false;
+  vy=dir===1?-90:90;
+  pulse=1;
+}
+function gameOver(msg){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s429",best);elBest.textContent=best;}
+  ovTitle.textContent="游戏结束";
+  ovDesc.textContent=msg;
+  ovScore.style.display="block";
+  ovScore.textContent="得分 "+score+" · 最佳 "+best;
+  btnGo.textContent="再来一局";
+  ov.classList.remove("hide");
+}
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+function update(dt){
+  var s=dt/1000,i,o;
+  speed=Math.min(620,320+dist*0.02);
+  dist+=speed*s;score=Math.floor(dist/10);
+  pulse=Math.max(0,pulse-4*s);
+  if(flipCd>0)flipCd-=s;
+  if(dir===1){
+    vy+=2100*s;py+=vy*s;
+    if(py>=GY-42){py=GY-42;vy=0;grounded=true;}
+  }else{
+    vy-=2100*s;py+=vy*s;
+    if(py<=CT){py=CT;vy=0;grounded=true;}
+  }
+  if(nextX-dist<W+80){
+    var zw=60+Math.random()*95;
+    obs.push({x:nextX,w:zw,side:nextSide,type:"spike"});
+    if(Math.random()<0.3){
+      obs.push({x:nextX+zw+120,w:34,type:"block",y:126,h:46});
+    }
+    var gapw=210+Math.random()*180+speed*0.25;
+    nextX+=zw+gapw;
+    if(Math.random()<0.72)nextSide*=-1;
+  }
+  var bx={x:px+4,y:py+4,w:18,h:34};
+  for(i=obs.length-1;i>=0;i--){
+    o=obs[i];o.x-=speed*s;
+    if(o.x<-180){obs.splice(i,1);continue;}
+    var oy,oh;
+    if(o.type==="spike"){oy=o.side===1?GY-26:CT;oh=26;}
+    else{oy=o.y;oh=o.h;}
+    if(bx.x+bx.w>o.x+4&&bx.x<o.x+o.w-4&&bx.y+bx.h>oy+3&&bx.y<oy+oh-3){
+      gameOver(o.type==="block"?"撞上了中央浮块——空中翻转要走位!":"被引力尖刺扎中了!");
+      return;
+    }
+  }
+  updateHud();
+}
+function drawSpike(o){
+  var i,n=Math.round(o.w/18),sw=o.w/n;
+  ctx.fillStyle="#e879a8";
+  for(i=0;i<n;i++){
+    ctx.beginPath();
+    if(o.side===1){
+      ctx.moveTo(o.x+i*sw,GY);ctx.lineTo(o.x+i*sw+sw/2,GY-26);ctx.lineTo(o.x+(i+1)*sw,GY);
+    }else{
+      ctx.moveTo(o.x+i*sw,CT);ctx.lineTo(o.x+i*sw+sw/2,CT+26);ctx.lineTo(o.x+(i+1)*sw,CT);
+    }
+    ctx.fill();
+  }
+  ctx.fillStyle="rgba(232,121,168,.35)";
+  if(o.side===1)ctx.fillRect(o.x,GY-3,o.w,3);
+  else ctx.fillRect(o.x,CT,o.w,3);
+}
+function draw(){
+  var i,o,grd;
+  grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,"#0c1a24");grd.addColorStop(1,"#122433");
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="rgba(34,211,238,.07)";ctx.lineWidth=1;
+  for(i=1;i<8;i++){ctx.beginPath();ctx.moveTo(0,i*38);ctx.lineTo(W,i*38);ctx.stroke();}
+  ctx.fillStyle="#1b2f3d";ctx.fillRect(0,CT-8,W,8);ctx.fillRect(0,GY,W,8);
+  ctx.fillStyle="#22d3ee";ctx.globalAlpha=0.4;
+  ctx.fillRect(0,CT-2,W,2);ctx.fillRect(0,GY,W,2);
+  ctx.globalAlpha=1;
+  var dsh=dist%80;
+  ctx.fillStyle="rgba(255,255,255,.07)";
+  for(i=0;i<10;i++){ctx.fillRect(i*80-dsh,CT-6,30,2);ctx.fillRect(i*80-dsh+40,GY+2,30,2);}
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    if(o.type==="block"){
+      ctx.fillStyle="#7c6bb0";
+      rr(o.x,o.y,o.w,o.h,5);ctx.fill();
+      ctx.fillStyle="#5a4a8c";
+      ctx.fillRect(o.x+4,o.y+4,o.w-8,4);ctx.fillRect(o.x+4,o.y+o.h-8,o.w-8,4);
+    }else drawSpike(o);
+  }
+  if(pulse>0){
+    ctx.strokeStyle="rgba(34,211,238,"+pulse+")";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(px+13,py+21,26+(1-pulse)*24,0,Math.PI*2);ctx.stroke();ctx.lineWidth=1;
+  }
+  ctx.fillStyle="#22d3ee";
+  rr(px,py,26,42,7);ctx.fill();
+  ctx.fillStyle="#0a3a44";
+  ctx.fillRect(px+13,py+8,9,5);
+  ctx.fillStyle="#082b33";
+  ctx.fillRect(px+4,py+36,8,6);ctx.fillRect(px+15,py+36,8,6);
+  ctx.fillStyle="rgba(255,255,255,.35)";
+  ctx.fillRect(px+4,py+2,18,3);
+}
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(50,t-lastT);lastT=t;
+  if(state==="playing")update(dt);
+  draw();
+}
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k===" "||k==="ArrowUp")e.preventDefault();
+  if(state!=="playing"){if(k===" "||k==="Enter")startGame();return;}
+  if((k===" "||k==="ArrowUp"||k==="w"||k==="W")&&!e.repeat)flip();
+});
+cv.addEventListener("touchstart",function(e){e.preventDefault();flip();},{passive:false});
+cv.addEventListener("mousedown",function(){flip();});
+btnGo.addEventListener("click",startGame);
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

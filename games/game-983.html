@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灵泉粒子园</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#7dd3fc;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.ctl{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-bottom:8px}
+.ctl label{color:#8b90b0;font-size:12px}
+.ctl input[type=range]{width:92px;vertical-align:middle;accent-color:#7dd3fc}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#7dd3fc}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#7dd3fc;color:#082f49;border:none;border-radius:10px;padding:11px 30px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>灵泉粒子园</h1>
+  <p class="hint">调节喷力、喷角、侧风三钮 · 让水珠穿进悬浮玉环 · 观赏度满 300 圆满</p>
+  <div class="hud">
+    <span>观赏度 <b id="hScore">0</b>/300</span>
+    <span>收环 <b id="hRing">0</b></span>
+  </div>
+  <div class="ctl">
+    <label>喷力 <input type="range" id="sPow" min="150" max="330" value="245"></label>
+    <label>喷角 <input type="range" id="sAng" min="55" max="125" value="90"></label>
+    <label>侧风 <input type="range" id="sWind" min="-70" max="70" value="0"></label>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="310"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">灵泉粒子园</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">开园引泉</button>
+      <button id="btnMore" style="display:none">继续赏玩</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hScore=$("hScore"),hRing=$("hRing");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=310,TAU=Math.PI*2;
+var sPow=$("sPow"),sAng=$("sAng"),sWind=$("sWind");
+var pow=245,ang=90,wind=0;
+sPow.addEventListener("input",function(){pow=parseInt(sPow.value,10);});
+sAng.addEventListener("input",function(){ang=parseInt(sAng.value,10);});
+sWind.addEventListener("input",function(){wind=parseInt(sWind.value,10);});
+var parts=[],rings=[],splashes=[],fx=[];
+var score=0,ringN=0,state="menu",em=0,goalDone=false;
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function spawnRing(){
+  var tries=0,x,y,ok;
+  do{x=55+Math.random()*360;y=55+Math.random()*125;ok=true;
+    for(var i=0;i<rings.length;i++){var dx=rings[i].x-x,dy=rings[i].y-y;
+      if(dx*dx+dy*dy<75*75)ok=false;}
+    tries++;
+  }while(!ok&&tries<24);
+  rings.push({x:x,y:y,r:26,fill:0});
+}
+function step(dt){
+  var i,j;
+  em+=dt*110;
+  while(em>1){em-=1;
+    var tilt=((ang-90)+(Math.random()-0.5)*26)*Math.PI/180;
+    var v=pow*(0.82+Math.random()*0.36);
+    parts.push({x:235+(Math.random()-0.5)*10,y:266,
+      vx:Math.sin(tilt)*v+wind*0.4,vy:-Math.cos(tilt)*v});
+  }
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];
+    p.vy+=340*dt;p.vx+=wind*1.8*dt;
+    p.x+=p.vx*dt;p.y+=p.vy*dt;
+    var dead=false;
+    for(j=0;j<rings.length;j++){var rg=rings[j];
+      var dx=p.x-rg.x,dy=p.y-rg.y;
+      if(dx*dx+dy*dy<rg.r*rg.r&&rg.fill<100)rg.fill+=8*dt;}
+    if(p.y>272){dead=true;
+      if(splashes.length<40)splashes.push({x:p.x,y:276,t:1});}
+    if(p.x<-12||p.x>W+12||p.y<-14)dead=true;
+    if(dead)parts.splice(i,1);
+  }
+  if(parts.length>420)parts.splice(0,parts.length-420);
+  for(i=splashes.length-1;i>=0;i--){splashes[i].t-=dt*3;
+    if(splashes[i].t<=0)splashes.splice(i,1);}
+  for(i=rings.length-1;i>=0;i--){var rg2=rings[i];
+    if(rg2.fill>=100){
+      score+=40;ringN++;hScore.textContent=score;hRing.textContent=ringN;
+      addFx(rg2.x,rg2.y,"妙!+40","#7dd3fc");
+      rings.splice(i,1);spawnRing();
+    }}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+  if(!goalDone&&score>=300){
+    goalDone=true;state="zen";
+    ovT.textContent="泉园圆满";
+    ovD.textContent="观赏度已达 300,水珠穿环如奏乐。\n园中灵泉不歇,可继续调弄风与力。";
+    btnMore.style.display="inline-block";
+    ov.classList.remove("hide");
+  }
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  ctx.fillStyle="#101728";ctx.fillRect(0,278,W,H-278);
+  ctx.fillStyle="#1c2f4a";ctx.fillRect(0,274,W,4);
+  for(i=0;i<5;i++){ctx.strokeStyle="rgba(56,86,130,.5)";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(30+i*100,274);
+    ctx.quadraticCurveTo(36+i*100,262,44+i*100,274);ctx.stroke();}
+  ctx.fillStyle="#26314f";
+  ctx.beginPath();ctx.ellipse(235,272,26,9,0,0,TAU);ctx.fill();
+  ctx.fillStyle="#38466b";ctx.fillRect(229,250,12,22);
+  for(i=0;i<rings.length;i++){var rg=rings[i];
+    ctx.strokeStyle="rgba(125,211,252,.35)";ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(rg.x,rg.y,rg.r,0,TAU);ctx.stroke();
+    if(rg.fill>0){
+      ctx.strokeStyle="#fbbf24";ctx.lineWidth=3.5;
+      ctx.beginPath();ctx.arc(rg.x,rg.y,rg.r,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,rg.fill/100));ctx.stroke();
+      ctx.fillStyle="rgba(251,191,36,"+(rg.fill/100*0.16).toFixed(3)+")";
+      ctx.beginPath();ctx.arc(rg.x,rg.y,rg.r-2,0,TAU);ctx.fill();}
+  }
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    var a=Math.max(0,Math.min(1,(278-p.y)/50));
+    ctx.globalAlpha=a;
+    ctx.fillStyle=p.vy<-40?"#e0f7ff":"#7dd3fc";
+    ctx.beginPath();ctx.arc(p.x,p.y,2.2,0,TAU);ctx.fill();}
+  ctx.globalAlpha=1;
+  for(i=0;i<splashes.length;i++){var s=splashes[i];
+    ctx.strokeStyle="rgba(125,211,252,"+(s.t*0.7).toFixed(3)+")";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(s.x,s.y,(1-s.t)*10+2,Math.PI,TAU);ctx.stroke();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*28);ctx.globalAlpha=1;}
+}
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="灵泉粒子园";
+  ovD.textContent="园中一眼灵泉,水珠受喷力、喷角与侧风支配。\n空中有三枚玉环,水珠穿过得填环,环满即收入观赏度并换新位。\n调好三钮,让泉与环相会,观赏度满 300 即圆满。";
+  btnGo.textContent="开园引泉";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){
+  spawnRing();spawnRing();spawnRing();
+  state="play";ov.classList.add("hide");
+});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

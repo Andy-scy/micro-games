@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一命速通</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+#app{width:100%;max-width:520px}
+h1{font-size:22px;text-align:center;color:#ffd166;margin-bottom:6px}
+.tips{font-size:12px;color:#9aa3c0;text-align:center;line-height:1.6;margin-bottom:8px}
+.card{background:#1a1f36;border-radius:14px;padding:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px}
+.stat{flex:1;text-align:center}
+.mut{color:#9aa3c0;font-size:11px}
+.big{font-size:16px;font-weight:800;color:#ffd166}
+canvas{display:block;width:100%;height:auto;border-radius:10px;background:#10142a;touch-action:none}
+.tb{flex:1;padding:12px 0;font-size:16px;background:#232a4a;color:#e8eaf6;border:0;border-radius:10px;touch-action:none;user-select:none;font-weight:700}
+.btn{border:0;border-radius:10px;padding:11px 26px;font-size:15px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.9);display:flex;align-items:center;justify-content:center;z-index:9}
+#overlay.hide{display:none}
+.ov{background:#1a1f36;border-radius:16px;padding:24px 28px;text-align:center;max-width:86vw}
+.ov h2{color:#ffd166;margin-bottom:10px;font-size:22px}
+.ov p{color:#cdd6f4;margin-bottom:14px;line-height:1.8;font-size:13px;text-align:left}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>一命速通</h1>
+  <p class="tips">←→ 移动,空格跳跃。四段迷你关一口气连打,只有一条命,计时不停!任何失误都前功尽弃,冲击最快通关纪录!</p>
+  <div class="card"><div class="row">
+    <div class="stat"><div class="mut">用时</div><div class="big" id="tm">0.0s</div></div>
+    <div class="stat"><div class="mut">阶段</div><div class="big" id="st">1/4</div></div>
+    <div class="stat"><div class="mut">最佳</div><div class="big" id="bs">--</div></div>
+    <div class="stat"><div class="mut">生命</div><div class="big" id="hp">×1</div></div>
+  </div></div>
+  <div class="card"><canvas id="cv" width="480" height="360"></canvas></div>
+  <div class="card row">
+    <button class="tb" id="bL">◀</button><button class="tb" id="bR">▶</button><button class="tb" id="bJ">跳</button>
+  </div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt">一命速通</h2><p id="ovp">玩法说明:<br>· ←→ / A D 移动,空格 / ↑ 跳跃<br>· 四段迷你关连续挑战,中途不停表<br>· 只有一条命:碰尖刺或坠崖 = 挑战失败<br>· 每关抵达小门立即进入下一关<br>· 通关后记录最快用时,不断刷新纪录!<br>· 深呼吸,稳住手,一气呵成!</p><button class="btn" id="obtn">开始速通</button></div></div>
+<script>
+'use strict';
+var W=480,H=360;
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+function $i(id){return document.getElementById(id)}
+var STAGES=[
+{name:'热身跳跃',px:16,py:294,
+ solids:[[0,320,130,40],[210,320,120,40],[410,320,70,40]],
+ spikes:[],door:[415,268]},
+{name:'云端攀爬',px:16,py:294,
+ solids:[[0,320,110,40],[170,260,80,14],[300,200,80,14],[160,140,80,14],[320,110,100,14]],
+ spikes:[[110,304,50,16]],door:[350,58]},
+{name:'深渊三连',px:16,py:294,
+ solids:[[0,320,80,40],[180,320,70,40],[360,320,120,40]],
+ spikes:[],door:[410,268]},
+{name:'刺廊冲刺',px:16,py:294,
+ solids:[[0,320,480,40],[0,0,480,110]],
+ spikes:[[90,304,60,16],[210,304,60,16],[330,304,60,16]],door:[430,268]}
+];
+var st=0,solids=[],spikes=[];
+var door={x:0,y:0,w:34,h:52};
+var px=16,py=294,vx=0,vy=0,pw=22,ph=26,onG=false,face=1;
+var runT=0,best=null;
+var running=false,lastT=0,bannerT=0,parts=[];
+var keys={L:false,R:false,J:false},jHeld=false;
+function loadBest(){
+  try{
+    var b=localStorage.getItem('mg720best');
+    if(b!==null&&b!==''&&!isNaN(parseFloat(b)))best=parseFloat(b);
+  }catch(e){}
+}
+function saveBest(){
+  try{localStorage.setItem('mg720best',''+best)}catch(e){}
+}
+function loadStage(n){
+  var S=STAGES[n],i;
+  solids=[];
+  for(i=0;i<S.solids.length;i++)solids.push({x:S.solids[i][0],y:S.solids[i][1],w:S.solids[i][2],h:S.solids[i][3]});
+  spikes=[];
+  for(i=0;i<S.spikes.length;i++)spikes.push({x:S.spikes[i][0],y:S.spikes[i][1],w:S.spikes[i][2],h:S.spikes[i][3]});
+  door.x=S.door[0];door.y=S.door[1];
+  px=S.px;py=S.py;vx=0;vy=0;face=1;
+}
+function reset(){
+  runT=0;st=0;parts=[];bannerT=1.2;
+  loadStage(0);hud();
+}
+function hud(){
+  $i('tm').textContent=runT.toFixed(1)+'s';
+  $i('st').textContent=(st+1)+'/4';
+  $i('bs').textContent=best===null?'--':best.toFixed(1)+'s';
+  $i('hp').textContent='×1';
+}
+function burst(x,y,c,n){
+  for(var k=0;k<n;k++){var a=Math.random()*6.28,s=40+Math.random()*120;
+    parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*2.5,c:c,life:0.3+Math.random()*0.3});}
+}
+function hitRect(s){return px<s.x+s.w&&px+pw>s.x&&py<s.y+s.h&&py+ph>s.y}
+function hitSpikes(){
+  for(var i=0;i<spikes.length;i++){var s=spikes[i];
+    if(px<s.x+s.w-5&&px+pw>s.x+5&&py<s.y+s.h-6&&py+ph>s.y+6)return true}
+  return false;
+}
+function physics(dt){
+  var i,s;
+  var acc=1500,mx=215;
+  if(keys.L){vx-=acc*dt;face=-1}
+  if(keys.R){vx+=acc*dt;face=1}
+  if(!keys.L&&!keys.R)vx-=vx*Math.min(1,(onG?12:2)*dt);
+  if(vx>mx)vx=mx;if(vx<-mx)vx=-mx;
+  vy+=1500*dt;if(vy>900)vy=900;
+  px+=vx*dt;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(vx>0)px=s.x-pw;else if(vx<0)px=s.x+s.w;
+      vx=0;
+    }}
+  if(px<0)px=0;if(px+pw>W)px=W-pw;
+  py+=vy*dt;onG=false;
+  for(i=0;i<solids.length;i++){s=solids[i];
+    if(hitRect(s)){
+      if(vy>0){py=s.y-ph;vy=0;onG=true}
+      else if(vy<0){py=s.y+s.h;vy=0}
+    }}
+  if(keys.J&&!jHeld&&onG){vy=-560;onG=false}
+}
+function endGame(win){
+  running=false;
+  var line='用时:<b>'+runT.toFixed(1)+' 秒</b>';
+  if(win){
+    var isRec=best===null||runT<best;
+    if(isRec){best=runT;saveBest();hud()}
+    $i('ovt').textContent=isRec?'新纪录!全程速通!':'速通成功!';
+    $i('ovp').innerHTML='四段关卡一命连破!<br>'+line+(isRec?'<br><b>刷新最快纪录!</b>':'<br>最快纪录:'+best.toFixed(1)+' 秒');
+  }else{
+    $i('ovt').textContent='一命用尽…';
+    $i('ovp').innerHTML='止步于第 '+(st+1)+' 关「'+STAGES[st].name+'」<br>'+line+'<br>最快纪录:'+(best===null?'--':best.toFixed(1)+' 秒')+'<br>再来!这次一定!';
+  }
+  $i('obtn').textContent='再来一局';
+  $i('overlay').classList.remove('hide');
+}
+function update(dt){
+  var i;
+  for(i=parts.length-1;i>=0;i--){var p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=600*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1)}
+  if(bannerT>0)bannerT-=dt;
+  if(!running)return;
+  runT+=dt;
+  physics(dt);
+  if(hitSpikes()||py>H+80){endGame(false);return}
+  if(px+pw>door.x&&px<door.x+door.w&&py+ph>door.y&&py<door.y+door.h){
+    burst(door.x+door.w/2,door.y+door.h/2,'#4cc9f0',14);
+    st++;
+    if(st>=STAGES.length){endGame(true);return}
+    loadStage(st);bannerT=0.9;
+  }
+  hud();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+}
+function draw(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#301424');g.addColorStop(1,'#0c1026');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  var i;
+  for(i=0;i<solids.length;i++){var s=solids[i];
+    ctx.fillStyle='#2b3358';rr(s.x,s.y,s.w,s.h,4);ctx.fill();
+    ctx.fillStyle='#4a5688';ctx.fillRect(s.x+2,s.y,s.w-4,3);
+  }
+  ctx.fillStyle='#aab4d4';
+  for(i=0;i<spikes.length;i++){var sp=spikes[i];
+    var n=Math.max(1,Math.round(sp.w/14));
+    for(var k2=0;k2<n;k2++){
+      var x0=sp.x+k2*(sp.w/n),x1=x0+sp.w/n;
+      ctx.beginPath();ctx.moveTo(x0,sp.y+sp.h);ctx.lineTo((x0+x1)/2,sp.y);ctx.lineTo(x1,sp.y+sp.h);ctx.closePath();ctx.fill();
+    }
+  }
+  ctx.fillStyle='#4cc9f0';
+  ctx.globalAlpha=0.25+0.15*Math.sin(Date.now()*0.006);
+  ctx.beginPath();ctx.arc(door.x+door.w/2,door.y+door.h/2,36,0,6.28);ctx.fill();
+  ctx.globalAlpha=1;
+  rr(door.x,door.y,door.w,door.h,6);ctx.fill();
+  ctx.fillStyle='#1a1f36';
+  ctx.beginPath();ctx.arc(door.x+door.w/2,door.y+door.h/2,7,0,6.28);ctx.fill();
+  ctx.fillStyle='#ff8fa3';
+  rr(px,py,pw,ph,6);ctx.fill();
+  ctx.fillStyle='#081226';
+  ctx.fillRect(px+pw*0.28,py+7,4,5);
+  ctx.fillRect(px+pw*0.62,py+7,4,5);
+  for(i=0;i<parts.length;i++){var p=parts[i];
+    ctx.globalAlpha=Math.max(0,p.life*2.4);
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.28);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#9aa3c0';ctx.font='12px system-ui';ctx.textAlign='left';
+  ctx.fillText('「'+STAGES[st].name+'」',12,H-10);
+  if(bannerT>0){
+    ctx.globalAlpha=Math.min(1,bannerT);
+    ctx.fillStyle='rgba(15,18,32,.55)';ctx.fillRect(0,H/2-34,W,68);
+    ctx.fillStyle='#ffd166';ctx.font='bold 26px system-ui';ctx.textAlign='center';
+    ctx.fillText('第 '+(st+1)+' 关 · '+STAGES[st].name,W/2,H/2+9);
+    ctx.globalAlpha=1;
+  }
+}
+function bindBtn(id,prop){
+  var b=$i(id);
+  b.addEventListener('pointerdown',function(e){e.preventDefault();keys[prop]=true});
+  b.addEventListener('pointerup',function(e){e.preventDefault();keys[prop]=false});
+  b.addEventListener('pointercancel',function(){keys[prop]=false});
+  b.addEventListener('pointerleave',function(){keys[prop]=false});
+}
+bindBtn('bL','L');bindBtn('bR','R');bindBtn('bJ','J');
+window.addEventListener('keydown',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=true;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=true;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=true;
+  if(e.code==='Space'||e.code==='ArrowUp')e.preventDefault();
+});
+window.addEventListener('keyup',function(e){
+  if(e.code==='ArrowLeft'||e.code==='KeyA')keys.L=false;
+  if(e.code==='ArrowRight'||e.code==='KeyD')keys.R=false;
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')keys.J=false;
+});
+$i('obtn').addEventListener('click',function(){
+  $i('overlay').classList.add('hide');
+  reset();running=true;
+});
+loadBest();
+reset();
+function loop(t){
+  var dt=(t-lastT)/1000;lastT=t;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  jHeld=keys.J;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

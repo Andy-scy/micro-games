@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>押大小七点局</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:14px}
+#app{width:100%;max-width:540px}
+h1{font-size:25px;text-align:center;color:#f4a261;margin-bottom:6px}
+.tips{font-size:13px;color:#9aa3c0;text-align:center;line-height:1.7;margin-bottom:12px}
+.card{background:#1a1f36;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:11px 16px;font-size:14px;background:#4cc9f0;color:#081226;font-weight:700;cursor:pointer}
+.btn.sec{background:#2a3154;color:#cdd6f4}
+.btn:disabled{opacity:.35;cursor:default}
+.die{position:relative;width:52px;height:52px;background:linear-gradient(145deg,#ffffff,#dfe3f2);border-radius:9px;box-shadow:0 4px 10px rgba(0,0,0,.45)}
+.pip{position:absolute;width:20%;height:20%;border-radius:50%;background:#22243c;transform:translate(-50%,-50%)}
+.big{font-size:22px;font-weight:800;color:#f4a261}
+.mut{color:#9aa3c0;font-size:13px}
+.bet{width:46%;min-width:180px;margin:4px;padding:10px 12px;border-radius:10px;border:1px solid #333c63;background:#232a48;color:#e8eaf6;font-size:14px;cursor:pointer;text-align:left}
+.bet b{color:#ffd166}
+.bet:hover{border-color:#f4a261}
+.log{font-size:13px;color:#9aa3c0;line-height:1.7;text-align:center;min-height:44px}
+#overlay{position:fixed;inset:0;background:rgba(5,8,18,.85);display:none;align-items:center;justify-content:center;z-index:9}
+#overlay.show{display:flex}
+.ov{background:#1a1f36;border-radius:16px;padding:26px 30px;text-align:center;max-width:88vw}
+.ov h2{color:#f4a261;margin-bottom:10px;font-size:24px}
+.ov p{color:#cdd6f4;margin-bottom:16px;line-height:1.8}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>押大小七点局</h1>
+  <p class="tips">七回合定输赢:每回合固定押 10 筹码,庄家掷三颗骰子。<b>押大</b>(11-17,1:1)、<b>押小</b>(4-10,1:1)、<b>押七点</b>(恰好 7,1:4)、<b>押围骰</b>(三同,1:30)。注意:开出围骰时大小通杀!开局 100 筹码,七回合后 ≥150 即胜。</p>
+  <div class="row">
+    <div class="card" style="flex:1;text-align:center"><div class="mut">筹码</div><div class="big" id="chips">100</div></div>
+    <div class="card" style="flex:1;text-align:center"><div class="mut">回合</div><div class="big" id="rnd">1/7</div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="row"><div class="die" id="d1"></div><div class="die" id="d2"></div><div class="die" id="d3"></div></div>
+    <div class="big" id="sum" style="margin-top:8px">—</div>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <button class="bet" data-k="big">押大 11-17 · 赔 <b>1:1</b></button>
+      <button class="bet" data-k="small">押小 4-10 · 赔 <b>1:1</b></button>
+      <button class="bet" data-k="seven">押七点 · 赔 <b>1:4</b></button>
+      <button class="bet" data-k="triple">押围骰三同 · 赔 <b>1:30</b></button>
+    </div>
+  </div>
+  <div class="card log" id="log">点一个押注格,掷骰开始!</div>
+</div>
+<div id="overlay"><div class="ov"><h2 id="ovt"></h2><p id="ovp"></p><button class="btn" id="again">再来一局</button></div></div>
+<script>
+'use strict';
+var chips=100,rd=1,over=false;
+function $(id){return document.getElementById(id)}
+function rnd(){return 1+Math.floor(Math.random()*6)}
+function setDie(el,v){
+  el.innerHTML='';
+  var P={1:[[50,50]],2:[[27,27],[73,73]],3:[[27,27],[50,50],[73,73]],
+    4:[[27,27],[73,27],[27,73],[73,73]],5:[[27,27],[73,27],[50,50],[27,73],[73,73]],
+    6:[[27,26],[27,50],[27,74],[73,26],[73,50],[73,74]]};
+  var arr=P[v]||[];
+  for(var i=0;i<arr.length;i++){
+    var s=document.createElement('span');s.className='pip';
+    s.style.left=arr[i][0]+'%';s.style.top=arr[i][1]+'%';el.appendChild(s);
+  }
+}
+function draw(){
+  $('chips').textContent=chips;
+  $('rnd').textContent=Math.min(rd,7)+'/7';
+}
+function say(m){$('log').textContent=m}
+function setBets(on){
+  var bs=document.querySelectorAll('.bet');
+  for(var i=0;i<bs.length;i++)bs[i].disabled=!on;
+}
+function roll3(cb){
+  setBets(false);
+  var t0=performance.now(),last=0;
+  function step(t){
+    if(t-t0<700){
+      if(t-last>80){last=t;setDie($('d1'),rnd());setDie($('d2'),rnd());setDie($('d3'),rnd())}
+      requestAnimationFrame(step);
+    }else{
+      var a=rnd(),b=rnd(),c=rnd();
+      setDie($('d1'),a);setDie($('d2'),b);setDie($('d3'),c);
+      cb(a,b,c);
+    }
+  }
+  requestAnimationFrame(step);
+}
+function settle(k,a,b,c){
+  var triple=(a===b&&b===c),sum=a+b+c;
+  var winAmt=0,line='';
+  if(triple){
+    line='围骰 '+a+'!大小通杀!';
+    if(k==='triple')winAmt=10*30;
+  }else{
+    line='开出 '+sum+' 点('+(sum>=11?'大':'小')+')';
+    if(k==='big'&&sum>=11)winAmt=10*1;
+    if(k==='small'&&sum<=10)winAmt=10*1;
+    if(k==='seven'&&sum===7)winAmt=10*4;
+  }
+  if(winAmt>0){
+    chips+=winAmt;
+    say(line+' 你押中 '+winAmt+' 筹码!当前 '+chips+'。');
+  }else{
+    chips-=10;
+    say(line+' 押注落空 -10,当前 '+chips+'。');
+  }
+  draw();
+  if(chips<10){finish(false,'筹码不足 10,无法继续下注,黯然离场。');return}
+  rd++;
+  if(rd>7){
+    if(chips>=150)finish(true,'七局终了,你以 '+chips+' 筹码傲视赌桌!');
+    else finish(false,'七局终了,你手握 '+chips+' 筹码,距 150 的胜利线还差一步。');
+    return;
+  }
+  draw();
+  setBets(true);
+}
+function finish(good,extra){
+  over=true;setBets(false);
+  $('ovt').textContent=good?'凯旋而归!':'赌运不济';
+  $('ovp').innerHTML='最终筹码 <b>'+chips+'</b><br>'+extra;
+  $('overlay').classList.add('show');
+}
+(function(){
+  var bs=document.querySelectorAll('.bet');
+  function bind(b){
+    b.onclick=function(){
+      if(over)return;
+      var k=b.getAttribute('data-k');
+      var names={big:'押大',small:'押小',seven:'押七点',triple:'押围骰'};
+      say(names[k]+',10 筹码,骰盅已摇响……');
+      roll3(function(a,b2,c){settle(k,a,b2,c)});
+    };
+  }
+  for(var i=0;i<bs.length;i++)bind(bs[i]);
+})();
+$('again').onclick=function(){
+  chips=100;rd=1;over=false;
+  $('overlay').classList.remove('show');
+  draw();setBets(true);
+  say('新的一局,点一个押注格开始!');
+};
+setDie($('d1'),1);setDie($('d2'),2);setDie($('d3'),3);
+draw();
+</script>
+</body>
+</html>

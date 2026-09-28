@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>听音辨序</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:480px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#bef264;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#bef264;font-size:16px}
+.gbtn{background:#2c3a0f;color:#bef264;border:1px solid #bef264;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.aidlab{font-size:13px;color:#8b90b0;display:flex;align-items:center;gap:5px;cursor:pointer}
+.msg{color:#bef264;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.stage{height:110px;border-radius:14px;background:#0b0e1c;border:1px solid #2a3258;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;margin-bottom:12px}
+.orb{width:46px;height:46px;border-radius:50%;background:#1b2140;border:2px solid #3a4470}
+.orb.pulse{animation:pb .38s ease-out}
+@keyframes pb{0%{transform:scale(.6);background:#bef264;box-shadow:0 0 34px rgba(190,242,100,.9)}100%{transform:scale(1);background:#1b2140;box-shadow:none}}
+.cnt{font-size:13px;color:#8b90b0;letter-spacing:2px}
+.note{font-size:26px;font-weight:800;color:#bef264;min-height:32px}
+.bars{display:flex;align-items:flex-end;justify-content:center;gap:10px;height:170px;max-width:400px;margin:0 auto;touch-action:manipulation}
+.bar{width:15%;border-radius:10px 10px 4px 4px;background:#1b2140;border:2px solid #2a3258;cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:#8b90b0;font-size:13px;transition:box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none}
+.bar.lit{background:#bef264;border-color:#ecfccb;color:#2c3a0f;box-shadow:0 0 22px rgba(190,242,100,.85)}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#bef264;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#bef264;color:#2c3a0f;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>听音辨序</h1>
+  <p class="hint">纯听觉记忆:演示时舞台只有一团光晕随音符脉动,不提示是哪个键!五个音键对应 哆来咪发嗦 五个音高,凭耳朵听出旋律再复述。听不清可勾选「辅助显示」降低难度。支持键盘 1-5。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>旋律长 <b id="len">0</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <label class="aidlab"><input type="checkbox" id="aid">辅助显示</label>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="stage">
+    <div class="orb" id="orb"></div>
+    <div class="note" id="note"></div>
+    <div class="cnt" id="cnt">—</div>
+  </div>
+  <div class="bars" id="bars">
+    <div class="bar" data-i="0" style="height:45%">哆</div>
+    <div class="bar" data-i="1" style="height:58%">来</div>
+    <div class="bar" data-i="2" style="height:71%">咪</div>
+    <div class="bar" data-i="3" style="height:84%">发</div>
+    <div class="bar" data-i="4" style="height:97%">嗦</div>
+  </div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">听音辨序</h2>
+    <p id="ovDesc">把眼睛蒙上的记忆序列:演示阶段画面完全保密,只有声音一下下响起。你听到的是一串音高,复述时按音阶台阶点回来。绝对音感？现在就能测。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始听音</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg348_best",FREQ=[261.63,293.66,329.63,349.23,392.00],GAP=700,FLASH=420;
+var NAMES=["哆","来","咪","发","嗦"];
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var bars=[],ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+var orb=$("orb"),noteEl=$("note"),cntEl=$("cnt"),aid=$("aid");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.34;v=v==null?0.22:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var box=$("bars"),list=box.querySelectorAll(".bar");for(var i=0;i<list.length;i++)bars.push(list[i]);})();
+function pulse(){orb.classList.remove("pulse");void orb.offsetWidth;orb.classList.add("pulse");}
+function flash(i,ms,show){pulse();tone(FREQ[i]);
+if(show||aid.checked){bars[i].classList.add("lit");noteEl.textContent=NAMES[i];
+timers.push(setTimeout(function(){bars[i].classList.remove("lit");noteEl.textContent="";},ms||FLASH));}}
+function clearLit(){for(var i=0;i<5;i++)bars[i].classList.remove("lit");noteEl.textContent="";}
+function rnd(){var n;do{n=(Math.random()*5)|0;}while(seq.length&&n===seq[seq.length-1]);return n;}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";cntEl.textContent="竖起耳朵…";var i=0;(function step(){
+if(i>=seq.length){cntEl.textContent="共 "+seq.length+" 音";state="input";pos=0;setMsg("凭听觉,按音阶复述旋律!");return;}
+cntEl.textContent="第 "+(i+1)+" / "+seq.length+" 音";flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){seq.push(rnd());updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();seq=[];pos=0;level=0;state="wait";setMsg("");updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;state="wait";setMsg("旋律正确!加一个音…");updateHud();timers.push(setTimeout(nextRound,850));}
+function fail(){clearTimers();clearLit();state="over";tone(87,0.6,0.22,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="旋律中断";
+ovDesc.textContent="这段 "+seq.length+" 音的旋律没能完整复述。小技巧:把音高想象成上下台阶的走向,「高低高低」比具体音名更好记。";
+ovScore.style.display="block";ovScore.textContent="听音复述成功 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;flash(i,200,true);
+if(seq[pos]===i){pos++;if(pos>=seq.length)winStep();}else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+$("bars").addEventListener("click",function(e){var t=e.target;if(t&&t.dataset&&t.dataset.i!=null)press(parseInt(t.dataset.i,10));});
+document.addEventListener("keydown",function(e){
+if(state==="menu"||state==="over"){if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}return;}
+var k=e.key;if(k==="1")press(0);else if(k==="2")press(1);else if(k==="3")press(2);else if(k==="4")press(3);else if(k==="5")press(4);});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

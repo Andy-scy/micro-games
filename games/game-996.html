@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>叠石入溪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:10px}
+.card{background:#181c30;border-radius:16px;padding:14px;width:100%;max-width:500px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:20px;color:#e2e8f0;text-align:center;letter-spacing:2px}
+.hint{text-align:center;color:#8b90b0;font-size:12.5px;margin:4px 0 8px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:#c7cbe8;margin-bottom:8px}
+.hud b{color:#fbbf24;font-size:15px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.92);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:18px}
+.overlay.hide{display:none}
+.overlay h2{font-size:24px;color:#e2e8f0}
+.overlay p{color:#aab0d0;font-size:13.5px;line-height:1.8;white-space:pre-line}
+.overlay button{margin-top:4px;background:#e2e8f0;color:#1e293b;border:none;border-radius:10px;padding:11px 26px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-left:8px}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>叠石入溪</h1>
+  <p class="hint">石在头顶摆荡,点按或按空格松手放下 · 叠歪了便落溪 · 叠满 15 层圆满</p>
+  <div class="hud">
+    <span>层数 <b id="hLay">0</b>/15</span>
+    <span>最高 <b id="hBest">0</b></span>
+    <span>溪底石 <b id="hBed">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="470" height="330"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovT">叠石入溪</h2>
+      <p id="ovD"></p>
+      <button id="btnGo">溪畔叠石</button>
+      <button id="btnMore" style="display:none">就地继续</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function $(i){return document.getElementById(i);}
+var hLay=$("hLay"),hBest=$("hBest"),hBed=$("hBed");
+var ov=$("ov"),ovT=$("ovT"),ovD=$("ovD"),btnGo=$("btnGo"),btnMore=$("btnMore");
+var W=470,H=330,TAU=Math.PI*2;
+var stones=[],tumblers=[],splashes=[],fx=[];
+var cur=null,swT=0,best=0,bed=0,state="menu",goalDone=false,time=0;
+function addFx(x,y,txt,col){fx.push({x:x,y:y,txt:txt,col:col||"#fbbf24",t:1});}
+function layers(){return stones.length-1;}
+function topY(){return 296-layers()*12;}
+function spawnCur(){
+  cur={x:235,w:42+Math.random()*18,fall:false,vy:0,relX:235};
+  swT=Math.random()*TAU;
+}
+function reset(){
+  stones=[{x:235,w:66}];
+  tumblers=[];splashes=[];fx=[];
+  best=0;bed=0;goalDone=false;
+  hBest.textContent="0";hBed.textContent="0";hLay.textContent="0";
+  spawnCur();
+}
+function dropStone(){
+  if(state!=="play"||cur.fall)return;
+  cur.fall=true;cur.relX=cur.x;cur.vy=0;
+}
+function newCur(){
+  spawnCur();
+}
+function step(dt){
+  var i;
+  var ly=layers();
+  if(!cur.fall){
+    var amp=Math.min(64+ly*3.4,118);
+    var sp=1.5+Math.min(ly*0.07,1.1);
+    swT+=dt*sp;
+    cur.x=235+Math.sin(swT)*amp;
+  }else{
+    cur.vy+=780*dt;
+    cur.y=(cur.y||80)+cur.vy*dt;
+    var ty=topY();
+    if(cur.y+6>=ty){
+      var off=cur.relX-stones[stones.length-1].x;
+      if(Math.abs(off)<=stones[stones.length-1].w/2+8){
+        stones.push({x:cur.relX,w:cur.w});
+        hLay.textContent=layers();
+        addFx(cur.relX,ty-14,"+1 层","#e2e8f0");
+        if(layers()===5)addFx(235,110,"五层 · 渐入佳境","#fbbf24");
+        if(layers()===10)addFx(235,90,"十层 · 心如止水","#fbbf24");
+        if(layers()>best){best=layers();hBest.textContent=best;}
+        if(layers()>=15&&!goalDone){
+          goalDone=true;state="zen";
+          ovT.textContent="石塔圆满";
+          ovD.textContent="十五层叠石,纹丝不动。\n每一块都落在了该落的地方。\n可就地继续加高,或再叠一座。";
+          btnMore.style.display="inline-block";
+          ov.classList.remove("hide");
+        }
+      }else{
+        tumblers.push({x:cur.relX,y:ty-8,w:cur.w,
+          vx:(off>=0?1:-1)*(70+Math.random()*60),vy:-120,rot:0});
+        bed++;hBed.textContent=bed;
+        addFx(cur.relX,ty-10,"落水 · 溪收一石","#94a3b8");
+      }
+      cur.y=null;
+      newCur();
+    }
+  }
+  for(i=tumblers.length-1;i>=0;i--){var tb=tumblers[i];
+    tb.vy+=780*dt;tb.x+=tb.vx*dt;tb.y+=tb.vy*dt;tb.rot+=7*dt;
+    if(tb.y>314){
+      splashes.push({x:tb.x,y:308,t:1});
+      tumblers.splice(i,1);
+    }}
+  for(i=splashes.length-1;i>=0;i--){splashes[i].t-=dt*2;
+    if(splashes[i].t<=0)splashes.splice(i,1);}
+  for(i=fx.length-1;i>=0;i--){fx[i].t-=0.012;
+    if(fx[i].t<=0)fx.splice(i,1);}
+}
+function drawStone(x,y,w,rot,col){
+  ctx.save();ctx.translate(x,y);
+  if(rot)ctx.rotate(rot);
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  ctx.moveTo(-w/2+4,-7);
+  ctx.lineTo(w/2-4,-7);
+  ctx.arcTo(w/2,-7,w/2,0,4);
+  ctx.lineTo(w/2-3,7);
+  ctx.arcTo(w/2,7,w/2-6,7,4);
+  ctx.lineTo(-w/2+6,7);
+  ctx.arcTo(-w/2,7,-w/2,0,4);
+  ctx.lineTo(-w/2,-3);
+  ctx.arcTo(-w/2,-7,-w/2+4,-7,4);
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.14)";
+  ctx.fillRect(-w/2+5,-5,w-10,2.5);
+  ctx.restore();
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var i;
+  var sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#131a30");sky.addColorStop(1,"#1c2540");
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#242e4e";
+  ctx.beginPath();ctx.moveTo(0,282);
+  ctx.quadraticCurveTo(120,250,235,268);
+  ctx.quadraticCurveTo(340,284,470,258);
+  ctx.lineTo(W,300);ctx.lineTo(0,300);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#16324a";ctx.fillRect(0,302,W,H-302);
+  for(i=0;i<3;i++){
+    var wy=308+i*8,wo=Math.sin(time*1.8+i*2)*14;
+    ctx.strokeStyle="rgba(125,180,220,"+(0.22-i*0.05).toFixed(2)+")";
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    for(var xx=0;xx<=W;xx+=24)
+      ctx.lineTo(xx,wy+Math.sin(xx*0.04+time*2+i)*2+wo*0.2);
+    ctx.stroke();
+  }
+  for(i=0;i<stones.length;i++){
+    var st=stones[i];
+    drawStone(st.x,296-i*12+7,st.w,0,i%2?"#8a93a6":"#6b7280");
+  }
+  for(i=0;i<tumblers.length;i++){var tb=tumblers[i];
+    drawStone(tb.x,tb.y,tb.w,tb.rot,"#5b6478");}
+  var ty2=topY();
+  if(!cur.fall){
+    ctx.strokeStyle="rgba(226,232,240,.25)";ctx.lineWidth=1;
+    ctx.setLineDash([4,5]);
+    ctx.beginPath();ctx.moveTo(cur.x,96);ctx.lineTo(cur.x,ty2-6);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  var cx=cur.fall?cur.relX:cur.x;
+  var cy=cur.fall?cur.y:84;
+  drawStone(cx,cy,cur.w,0,"#d6b98c");
+  if(!cur.fall){
+    ctx.fillStyle="rgba(226,232,240,.4)";
+    ctx.beginPath();ctx.arc(cx,cy-16,1.8,0,TAU);ctx.fill();
+  }
+  for(i=0;i<splashes.length;i++){var sp=splashes[i];
+    ctx.strokeStyle="rgba(147,197,253,"+(sp.t*0.8).toFixed(2)+")";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(sp.x,sp.y,(1-sp.t)*16+3,Math.PI,TAU);ctx.stroke();}
+  for(i=fx.length-1;i>=0;i--){var f=fx[i];
+    ctx.globalAlpha=Math.min(1,f.t*2);ctx.fillStyle=f.col;
+    ctx.font="bold 13px system-ui";ctx.textAlign="center";
+    ctx.fillText(f.txt,f.x,f.y-(1-f.t)*26);ctx.globalAlpha=1;}
+}
+cv.addEventListener("click",function(){dropStone();});
+window.addEventListener("keydown",function(e){
+  if(e.code==="Space"){e.preventDefault();dropStone();}
+});
+var lastT=0;
+function loop(t){requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  time=t/1000;
+  if(state==="play")step(dt);
+  draw();
+}
+function showMenu(){
+  ovT.textContent="叠石入溪";
+  ovD.textContent="一块新石在塔顶摆荡,越叠越高,荡得越快。\n点按画面或按空格松手,石便落下:\n落得正,便添一层;落得歪,便滚入溪底。\n没有失败,只有溪水替你收藏。叠满 15 层即圆满。";
+  btnGo.textContent="溪畔叠石";btnMore.style.display="none";
+  ov.classList.remove("hide");
+}
+btnGo.addEventListener("click",function(){reset();state="play";ov.classList.add("hide");});
+btnMore.addEventListener("click",function(){state="play";ov.classList.add("hide");});
+showMenu();
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

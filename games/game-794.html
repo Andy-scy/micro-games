@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>夺饵之争</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0f1220;color:#e8ecf4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;user-select:none}
+h1{font-size:21px;color:#7fd4ff;margin:2px 0}
+.tip{font-size:13px;color:#9aa3b5;text-align:center;max-width:520px;line-height:1.6;margin-bottom:6px}
+#hud{display:flex;gap:16px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;justify-content:center}
+#hud b{color:#ffd75e}
+canvas{border-radius:14px;max-width:96vw;touch-action:none;display:block}
+#ov{position:fixed;inset:0;background:rgba(6,8,18,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;z-index:9}
+#ov h2{font-size:26px;color:#ffd75e}
+#ov p{color:#c8cfdd;font-size:15px;max-width:380px;line-height:1.8}
+#ov button{background:linear-gradient(180deg,#5db8ff,#2f8fe0);color:#04101f;border:0;border-radius:12px;padding:12px 34px;font-size:17px;font-weight:bold;cursor:pointer;font-family:inherit}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>夺饵之争</h1>
+<p class="tip">一团饵引来多条鱼抢食:大鱼靠近,小鱼掉头就跑!提竿命中离饵最近的鱼。抢小笼换稳分,还是等巨物博 150?10 团饵,500 分!</p>
+<div id="hud"><span>得分 <b id="s1">0</b></span><span>团饵 <b id="s2">10</b></span><span>时间 <b id="s3">85</b> 秒</span></div>
+<canvas id="cv" width="480" height="560"></canvas>
+<div id="ov"><h2 id="ot">夺饵之争</h2><p id="op">水下一场抢食大战:<br>小鱼 40 分 / 中鱼 80 分 / 巨物 150 分,<br>巨物会先停顿观察,再猛冲叼饵——<br>它张口的 1.2 秒就是你的机会!</p><button id="ob">撒下第一团</button></div>
+<script>
+(function(){
+var cv=document.getElementById('cv'),X=cv.getContext('2d');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op'),ob=document.getElementById('ob');
+var eS=document.getElementById('s1'),eB=document.getElementById('s2'),eT=document.getElementById('s3');
+var W=cv.width,H=cv.height,BX=240,BY=420;
+var state='ready',tl=85,score=0,baits=10,msg='';
+var fishes=[],roundState='wait',wt=1,baitEat=0;
+var kinds={s:{r:13,v:40,sp:150,c:'#9fb4c9'},m:{r:19,v:80,sp:100,c:'#7fb2a0'},b:{r:28,v:150,sp:60,c:'#c98a8a'}};
+function rnd(a,b){return a+Math.random()*(b-a)}
+function newRound(){
+  fishes=[];
+  var n=2+Math.floor(Math.random()*3),i;
+  for(i=0;i<n;i++){
+    var r=Math.random(),k;
+    if(r<0.22)k='b';else if(r<0.62)k='s';else k='m';
+    var side=Math.random()<0.5?-1:1;
+    fishes.push({kind:k,x:side<0?-40:W+40,y:BY+rnd(-80,40),eat:0,pause:0,flee:false,ph:rnd(0,6)});
+  }
+  baitEat=0;roundState='live';msg='鱼群闻着味来了…';
+}
+function consumed(t){
+  msg=t;fishes=[];
+  baits--;
+  if(baits<=0){finish(score>=500);return}
+  roundState='wait';wt=1.1;
+}
+function hookIt(){
+  if(state!=='play'||roundState!=='live')return;
+  var best=-1,bd=44,i;
+  for(i=0;i<fishes.length;i++){
+    var d=Math.sqrt((fishes[i].x-BX)*(fishes[i].x-BX)+(fishes[i].y-BY)*(fishes[i].y-BY));
+    if(d<bd){bd=d;best=i}
+  }
+  if(best>=0){
+    var kk=kinds[fishes[best].kind];
+    score+=kk.v;
+    if(fishes[best].kind==='b')msg='巨物上岸!!+'+kk.v+' 分';
+    else msg='稳稳一尾!+'+kk.v+' 分';
+    consumed(msg);
+  }else{
+    msg='扑空了!饵还在,再等时机';
+  }
+}
+function finish(win){
+  state='over';ob.textContent='再战十团';
+  ot.textContent=win?'饵尽鱼篓满!':'饵喂光了…';
+  op.innerHTML='本次得分 <b style="color:#ffd75e">'+score+'</b> / 目标 500 分<br>'+(win?'你是读懂水下战争的钓者!':'大鱼未必要抢,有时让它先吃一口再提竿。');
+  ov.classList.remove('hide');
+}
+function start(){
+  tl=85;score=0;baits=10;msg='';fishes=[];roundState='wait';wt=1;baitEat=0;
+  state='play';ov.classList.add('hide');
+}
+function update(dt){
+  if(state!=='play')return;
+  tl-=dt;
+  if(tl<=0){tl=0;finish(score>=500);return}
+  if(roundState==='wait'){
+    wt-=dt;
+    if(wt<=0)newRound();
+    return;
+  }
+  var i,j;
+  for(i=0;i<fishes.length;i++){
+    var f=fishes[i],k=kinds[f.kind];
+    var dx=BX-f.x,dy=BY-f.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+    if(f.flee){
+      f.x-=dx/d*k.sp*1.5*dt;
+      f.y-=dy/d*k.sp*1.5*dt;
+      if(f.x<-60||f.x>W+60||f.y<-60||f.y>H+60){fishes.splice(i,1);i--}
+      continue;
+    }
+    if(f.kind!=='b'){
+      for(j=0;j<fishes.length;j++){
+        if(fishes[j].kind!=='b')continue;
+        var bx=fishes[j].x-f.x,by=fishes[j].y-f.y;
+        if(bx*bx+by*by<130*130){f.flee=true;break}
+      }
+      if(f.flee)continue;
+    }
+    if(f.kind==='b'){
+      if(f.pause>0){
+        f.pause-=dt;
+        if(f.pause<=0)f.dash=true;
+      }else if(!f.dash&&d<80&&d>24){
+        f.pause=0.8;
+      }else{
+        var spd=f.dash?k.sp*2.4:k.sp;
+        if(d>24){f.x+=dx/d*spd*dt;f.y+=dy/d*spd*dt}
+        else{
+          f.eat+=dt;
+          if(f.eat>=1.2){consumed('巨物叼着饵跑了!');return}
+        }
+      }
+    }else{
+      if(d>24){f.x+=dx/d*k.sp*dt;f.y+=dy/d*k.sp*dt}
+      else{
+        f.eat+=dt;baitEat+=dt;
+        if(baitEat>=2){consumed('饵被小鱼啃光了!');return}
+      }
+    }
+  }
+}
+function draw(){
+  var g=X.createLinearGradient(0,0,0,70);g.addColorStop(0,'#151c36');g.addColorStop(1,'#232a4d');
+  X.fillStyle=g;X.fillRect(0,0,W,70);
+  var g2=X.createLinearGradient(0,70,0,H);g2.addColorStop(0,'#14365e');g2.addColorStop(1,'#081426');
+  X.fillStyle=g2;X.fillRect(0,70,W,H-70);
+  var t=Date.now()*0.001,i;
+  X.strokeStyle='rgba(230,238,246,.7)';X.lineWidth=1.6;
+  X.beginPath();X.moveTo(BX,70);X.lineTo(BX,BY-10);X.stroke();
+  X.fillStyle='#ffd75e';
+  X.beginPath();X.arc(BX,BY,7+Math.sin(t*5)*1.5,0,7);X.fill();
+  X.strokeStyle='rgba(255,215,94,.35)';X.lineWidth=1.5;
+  X.beginPath();X.arc(BX,BY,16+Math.sin(t*3)*3,0,7);X.stroke();
+  for(i=0;i<fishes.length;i++){
+    var f=fishes[i],k=kinds[f.kind];
+    var wob=Math.sin(t*6+f.ph)*5;
+    var ang=Math.atan2(BY-f.y,BX-f.x);
+    X.save();
+    X.translate(f.x,f.y+wob*0.3);X.rotate(ang);
+    X.fillStyle=k.c;
+    X.beginPath();X.ellipse(0,0,k.r,k.r*0.5,0,0,7);X.fill();
+    X.beginPath();X.moveTo(-k.r*0.8,0);X.lineTo(-k.r*1.4,-k.r*0.42);X.lineTo(-k.r*1.4,k.r*0.42);X.closePath();X.fill();
+    X.fillStyle='#0f1220';X.beginPath();X.arc(k.r*0.45,-k.r*0.12,2,0,7);X.fill();
+    X.restore();
+    if(f.kind==='b'&&f.pause>0){
+      X.fillStyle='#ffd75e';X.font='bold 18px system-ui';X.textAlign='center';
+      X.fillText('…观察中',f.x,f.y-k.r-14);
+    }
+    if(f.kind==='b'&&f.dash){
+      X.fillStyle='#ff8a5f';X.font='bold 16px system-ui';X.textAlign='center';
+      X.fillText('猛冲!',f.x,f.y-k.r-14);
+    }
+  }
+  X.fillStyle='#ffe9a3';X.font='bold 16px system-ui';X.textAlign='center';X.fillText(msg,W/2,40);
+  X.fillStyle='rgba(154,163,181,.85)';X.font='13px system-ui';
+  X.fillText('点击 / 空格 提竿,命中离饵最近的鱼',W/2,H-14);
+}
+cv.addEventListener('pointerdown',hookIt);
+document.addEventListener('keydown',function(e){
+  if(e.key===' '||e.code==='Space'){
+    e.preventDefault();
+    if(state!=='play')start();else hookIt();
+  }
+});
+ob.addEventListener('click',start);
+var last=0;
+function loop(ts){
+  var dt=(ts-last)/1000;last=ts;
+  if(!(dt>0)||dt>0.05)dt=0.016;
+  update(dt);draw();
+  eS.textContent=score;eB.textContent=baits;eT.textContent=Math.ceil(tl);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

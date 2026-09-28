@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>左右开弓</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 20px;width:100%;max-width:520px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:22px;color:#a7f3d0;text-align:center;letter-spacing:4px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px;line-height:1.7}
+.hud{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#a7f3d0;font-size:16px}
+.gbtn{background:#134e3a;color:#a7f3d0;border:1px solid #a7f3d0;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.gbtn:active{transform:scale(.95)}
+.msg{color:#a7f3d0;font-size:14px;min-height:20px;text-align:center;margin-bottom:8px}
+.row{display:flex;justify-content:center;align-items:center;gap:18px;max-width:460px;margin:0 auto}
+.hand{flex:1;border-radius:14px;padding:12px;border:2px solid #253055;background:#141a30;transition:border-color .2s,box-shadow .2s}
+.hand.active{border-color:#a7f3d0;box-shadow:0 0 16px rgba(167,243,208,.3)}
+.hand h3{text-align:center;font-size:13px;color:#8b90b0;margin-bottom:8px;letter-spacing:2px}
+.zp{display:flex;flex-direction:column;gap:8px}
+.pad{height:48px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:rgba(255,255,255,.35);transition:transform .06s,box-shadow .12s,background .12s;user-select:none;-webkit-user-select:none}
+.pad:active{transform:scale(.96)}
+.lp{background:#0b2e33;border:2px solid #0e7490}.lp.lit{background:#14b8a6;color:#042f2e;box-shadow:0 0 20px rgba(20,184,166,.85)}
+.rp{background:#3a1d08;border:2px solid #c2410c}.rp.lit{background:#f97316;color:#431407;box-shadow:0 0 20px rgba(249,115,22,.85)}
+.mid{width:64px;text-align:center;font-size:12px;color:#38507a;line-height:1.8}
+.overlay{position:fixed;inset:0;background:rgba(8,10,22,.9);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.hide{display:none}
+.panel{background:#181c30;border:1px solid #2a3258;border-radius:16px;padding:26px 24px;max-width:400px;width:100%;text-align:center}
+.panel h2{font-size:24px;color:#a7f3d0;margin-bottom:10px}
+.panel p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line;margin-bottom:8px}
+.panel .big{font-size:17px;color:#fbbf24;font-weight:700}
+.panel button{margin-top:10px;background:#a7f3d0;color:#134e3a;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.panel button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>左右开弓</h1>
+  <p class="hint">双手协调版记忆序列:序列严格左右交替——第 1 步必是左手键,第 2 步必是右手键,以此类推。用错手直接失败!键盘:左手 A/S/D,右手 J/K/L,也可点击。</p>
+  <div class="hud">
+    <span>轮数 <b id="lv">0</b></span>
+    <span>序列长 <b id="len">0</b></span>
+    <span>最高纪录 <b id="best">0</b></span>
+    <button class="gbtn" id="btnNew">重开一局</button>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="row">
+    <div class="hand" id="handL">
+      <h3>左手 · 先</h3>
+      <div class="zp">
+        <div class="pad lp" data-i="0">A</div>
+        <div class="pad lp" data-i="1">S</div>
+        <div class="pad lp" data-i="2">D</div>
+      </div>
+    </div>
+    <div class="mid">左→右→<br>左→右</div>
+    <div class="hand" id="handR">
+      <h3>右手 · 后</h3>
+      <div class="zp">
+        <div class="pad rp" data-i="3">J</div>
+        <div class="pad rp" data-i="4">K</div>
+        <div class="pad rp" data-i="5">L</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="ov">
+  <div class="panel">
+    <h2 id="ovTitle">左右开弓</h2>
+    <p id="ovDesc">序列像打鼓一样左一下右一下,你的手也必须严格轮换:该左手时按右手,哪怕键位对也算输。记忆 + 换手的双重节奏,练出双手分立。</p>
+    <p class="big" id="ovScore" style="display:none"></p>
+    <button id="btnGo">开始挑战</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+function $(id){return document.getElementById(id);}
+function loadNum(k){try{var v=parseInt(localStorage.getItem(k)||"",10);return isNaN(v)?0:v;}catch(e){return 0;}}
+function saveNum(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var KEY="mg353_best",FREQ=[293.66,349.23,392.00,440.00,523.25,587.33],GAP=640,FLASH=380;
+var seq=[],pos=0,level=0,state="menu",timers=[],best=loadNum(KEY),audio=null;
+var pads=[],handL=$("handL"),handR=$("handR"),ov=$("ov"),ovTitle=$("ovTitle"),ovDesc=$("ovDesc"),ovScore=$("ovScore"),btnGo=$("btnGo");
+var elLv=$("lv"),elLen=$("len"),elBest=$("best"),elMsg=$("msg"),btnNew=$("btnNew");
+function initAudio(){if(audio)return;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)audio=new AC();}catch(e){}}
+function tone(f,d,v,type){if(!audio)return;try{var o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;d=d||0.26;v=v==null?0.14:v;o.type=type||"sine";o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+0.03);}catch(e){}}
+function clearTimers(){for(var i=0;i<timers.length;i++)clearTimeout(timers[i]);timers=[];}
+(function build(){var all=document.querySelectorAll(".pad");for(var i=0;i<all.length;i++)pads.push(all[i]);})();
+function flash(i,ms){var el=pads[i];el.classList.add("lit");tone(FREQ[i]);timers.push(setTimeout(function(){el.classList.remove("lit");},ms||FLASH));}
+function clearLit(){for(var i=0;i<6;i++)pads[i].classList.remove("lit");}
+function setHandActive(side){handL.classList.toggle("active",side==="L");handR.classList.toggle("active",side==="R");}
+function rndStep(k){var base=k%2===0?0:3,n;
+do{n=base+((Math.random()*3)|0);}while(seq.length&&seq[seq.length-1]===n);
+return n;}
+function updateHud(){elLv.textContent=level;elLen.textContent=seq.length;elBest.textContent=best;}
+function setMsg(s){elMsg.textContent=s;}
+function playSeq(){state="show";setMsg("左…右…左…右…看节奏!");var i=0;(function step(){
+if(i>=seq.length){state="input";pos=0;setHandActive("L");setMsg("第 1 下:左手!");return;}
+flash(seq[i]);i++;timers.push(setTimeout(step,GAP));})();}
+function nextRound(){seq.push(rndStep(seq.length));updateHud();playSeq();}
+function newGame(){clearTimers();clearLit();setHandActive("");seq=[];pos=0;level=0;state="wait";setMsg("");updateHud();timers.push(setTimeout(nextRound,650));}
+function winStep(){level++;state="wait";setHandActive("");setMsg("双手齐飞!序列加长…");updateHud();timers.push(setTimeout(nextRound,850));}
+function fail(txt){clearTimers();clearLit();setHandActive("");state="over";tone(92,0.55,0.2,"sawtooth");if(level>best){best=level;saveNum(KEY,best);}
+ovTitle.textContent="手忙脚乱";
+ovDesc.textContent=txt||("序列在第 "+seq.length+" 步乱了套。口诀「左右左右」跟着念,手就不容易串。");
+ovScore.style.display="block";ovScore.textContent="成功复述 "+level+" 轮";btnGo.textContent="再来一局";ov.classList.remove("hide");updateHud();}
+function press(i){if(state!=="input")return;
+var side=i<3?"L":"R",need=pos%2===0?"L":"R";
+if(side!==need){fail(need==="L"?"该出左手,你却用了右手!":"该出右手,你却用了左手!");return;}
+flash(i,200);
+if(seq[pos]===i){pos++;
+if(pos>=seq.length)winStep();
+else{var nx=pos%2===0?"L":"R";setHandActive(nx);setMsg("第 "+(pos+1)+" 下:"+(nx==="L"?"左手!":"右手!"));}}
+else fail();}
+function start(){initAudio();newGame();ov.classList.add("hide");}
+(function bind(){for(var i=0;i<pads.length;i++){(function(el,idx){el.addEventListener("click",function(){press(idx);});})(pads[i],i);}})();
+document.addEventListener("keydown",function(e){
+if(state==="menu"||state==="over"){if(e.key==="Enter"||e.key===" "){e.preventDefault();start();}return;}
+var k=e.key.toLowerCase();
+if(k==="a")press(0);else if(k==="s")press(1);else if(k==="d")press(2);
+else if(k==="j")press(3);else if(k==="k")press(4);else if(k==="l")press(5);});
+btnGo.addEventListener("click",start);
+btnNew.addEventListener("click",function(){if(state==="menu")return;newGame();setMsg("已重开一局");});
+updateHud();
+})();
+</script>
+</body>
+</html>

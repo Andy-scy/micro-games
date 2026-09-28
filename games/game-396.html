@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰面急停</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.card{background:#181c30;border-radius:16px;padding:16px 16px 18px;width:100%;max-width:540px;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+h1{font-size:21px;color:#7dd3fc;text-align:center;letter-spacing:2px;margin-bottom:4px}
+.hint{text-align:center;color:#8b90b0;font-size:13px;margin-bottom:10px}
+.hud{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:#c7cbe8;margin-bottom:10px}
+.hud b{color:#7dd3fc;font-size:16px}
+.stage{position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b0e1a;border-radius:10px;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(8,10,22,.88);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px}
+.overlay.hide{display:none}
+.overlay h2{font-size:26px;color:#7dd3fc}
+.overlay p{color:#aab0d0;font-size:14px;line-height:1.8;white-space:pre-line}
+.overlay .big{font-size:20px;color:#4ade80;font-weight:700}
+.overlay button{margin-top:6px;background:#7dd3fc;color:#082b3d;border:none;border-radius:10px;padding:11px 34px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.overlay button:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>冰面急停</h1>
+  <p class="hint">左右键 / 按住屏幕左右半侧 轻推 · 冰面几乎没有摩擦 · 完全停进绿色停车区</p>
+  <div class="hud">
+    <span>关卡 <b id="lv">1</b></span>
+    <span>生命 <b id="lives">3</b></span>
+    <span>速度 <b id="spd">0</b></span>
+    <span>得分 <b id="score">0</b></span>
+    <span>最佳 <b id="best">0</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="cv" width="480" height="520"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">冰面急停</h2>
+      <p id="ovDesc">冰面上摩擦力微乎其微,一旦滑起来就很难停下!左右方向键(或按住屏幕左/右半侧)给小球施加轻微推力,利用惯性滑行并越过冰缝,让它完全停在绿色停车区内。掉进冰缝或停在区外都会损失生命。</p>
+      <p class="big" id="ovScore" style="display:none"></p>
+      <button id="btnGo">开始游戏</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var W=480,H=520,BR=9,GRAV=0.0011,FRIC=0.0003,ACC=0.0006;
+function $(id){return document.getElementById(id);}
+var elLv=$("lv"),elLives=$("lives"),elSpd=$("spd"),elSc=$("score"),elBest=$("best");
+var ov=$("ov"),ovT=$("ovTitle"),ovD=$("ovDesc"),ovS=$("ovScore"),btn=$("btnGo");
+function loadBest(k){try{return parseInt(localStorage.getItem(k)||"0",10)||0;}catch(e){return 0;}}
+function saveBest(k,v){try{localStorage.setItem(k,String(v));}catch(e){}}
+var best=loadBest("mg_s396");
+var LEVELS=[
+ {start:60,floors:[{x:0,y:440,w:200},{x:240,y:452,w:240}],zone:{x0:280,x1:360}},
+ {start:50,floors:[{x:0,y:440,w:120},{x:150,y:452,w:60},{x:260,y:462,w:220}],zone:{x0:300,x1:380}},
+ {start:40,floors:[{x:0,y:436,w:100},{x:140,y:448,w:50},{x:240,y:444,w:40},{x:330,y:460,w:150}],zone:{x0:350,x1:430}}
+];
+var state,lv,lives,score,ball,data,stopT,keyL,keyR,touchDir,msg,msgT;
+function reset(){lv=0;lives=3;score=0;loadLevel();updateHud();}
+function loadLevel(){
+  data=LEVELS[lv];
+  ball={x:data.start,y:418,vx:0,vy:0,onG:false};
+  stopT=0;keyL=false;keyR=false;touchDir=0;
+  elLv.textContent=lv+1;updateHud();
+}
+function updateHud(){
+  elLives.textContent=lives;elSc.textContent=score;elBest.textContent=best;
+  elSpd.textContent=(Math.abs(ball.vx)*100).toFixed(0);
+}
+function floorAt(x){
+  var i;
+  for(i=0;i<data.floors.length;i++){
+    var f=data.floors[i];
+    if(x>=f.x&&x<=f.x+f.w)return f;
+  }
+  return null;
+}
+function fail(reason){
+  lives--;updateHud();
+  if(lives<=0){finish(false,"生命耗尽,冰面太难了…");return;}
+  msg=reason+"剩余生命 "+lives;msgT=1500;
+  loadLevel();
+}
+function clearLevel(){
+  var cx=(data.zone.x0+data.zone.x1)/2;
+  var prec=Math.max(0,50-Math.round(Math.abs(ball.x-cx)/1.4));
+  score+=100+prec;updateHud();
+  if(lv<LEVELS.length-1){
+    msg="稳稳停住!+"+(100+prec)+" · 下一关更多冰缝";msgT=1600;
+    lv++;state="transition";
+    window.setTimeout(function(){if(state==="transition"){loadLevel();state="playing";}},1100);
+  }else finish(true,"三段冰面全部精准急停,漂移大师!");
+}
+function finish(win,reason){
+  state="over";
+  if(score>best){best=score;saveBest("mg_s396",best);}
+  ovT.textContent=win?"通关!":"游戏结束";
+  ovD.textContent=reason;
+  ovS.style.display="block";ovS.textContent="得分 "+score+" · 最佳 "+best;
+  btn.textContent="再来一局";updateHud();
+  ov.classList.remove("hide");
+}
+document.addEventListener("keydown",function(e){
+  if(e.key.indexOf("Arrow")===0)e.preventDefault();
+  if((e.key===" "||e.key==="Enter")&&(state==="menu"||state==="over")){startGame();return;}
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=true;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=true;
+});
+document.addEventListener("keyup",function(e){
+  if(e.key==="ArrowLeft"||e.key==="a"||e.key==="A")keyL=false;
+  if(e.key==="ArrowRight"||e.key==="d"||e.key==="D")keyR=false;
+});
+cv.addEventListener("touchstart",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchDir=(t.clientX-r.left)*W/r.width<W/2?-1:1;
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchmove",function(e){
+  if(state!=="playing")return;
+  var r=cv.getBoundingClientRect(),t=e.touches[0];
+  touchDir=(t.clientX-r.left)*W/r.width<W/2?-1:1;
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener("touchend",function(){touchDir=0;});
+function startGame(){reset();state="playing";ov.classList.add("hide");}
+btn.addEventListener("click",startGame);
+var lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=t;
+  var dt=Math.min(40,t-lastT);lastT=t;
+  if(msgT>0)msgT-=dt;
+  if(state==="playing"){
+    var dir=(keyL?-1:0)+(keyR?1:0)+touchDir;
+    if(dir>1)dir=1;if(dir<-1)dir=-1;
+    ball.vx+=dir*ACC*dt;
+    if(ball.vx>0.35)ball.vx=0.35;
+    if(ball.vx<-0.35)ball.vx=-0.35;
+    var f=floorAt(ball.x);
+    if(ball.onG){
+      if(!f){ball.onG=false;ball.vy=0;}
+      else{
+        ball.vx*=1-FRIC*dt;
+        ball.x+=ball.vx*dt;
+        var f2=floorAt(ball.x);
+        if(f2)ball.y=f2.y-BR;
+        else ball.onG=false;
+      }
+    }
+    if(!ball.onG){
+      ball.vy+=GRAV*dt;
+      ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
+      var f3=floorAt(ball.x);
+      if(ball.vy>0&&f3&&ball.y+BR>=f3.y&&ball.y+BR<=f3.y+16){
+        ball.y=f3.y-BR;ball.vy=0;ball.onG=true;
+      }
+    }
+    if(ball.x<BR){ball.x=BR;ball.vx=Math.abs(ball.vx)*0.5;}
+    if(ball.x>W-BR){ball.x=W-BR;ball.vx=-Math.abs(ball.vx)*0.5;}
+    if(ball.y>H+30)fail("滑进了冰缝!");
+    else if(ball.onG&&Math.abs(ball.vx)<0.015){
+      stopT+=dt;
+      if(stopT>400){
+        if(ball.x>=data.zone.x0&&ball.x<=data.zone.x1)clearLevel();
+        else fail("停在了停车区外!");
+      }
+    }else stopT=0;
+    updateHud();
+  }
+  draw();
+}
+function draw(){
+  var i;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#0d1428";ctx.fillRect(0,0,W,H);
+  for(i=0;i<30;i++){
+    ctx.fillStyle="rgba(125,211,252,0.04)";
+    ctx.fillRect((i*167)%W,(i*97)%H,2,2);
+  }
+  for(i=0;i<data.floors.length;i++){
+    var f=data.floors[i];
+    ctx.fillStyle="#16405c";
+    ctx.fillRect(f.x,f.y,f.w,H-f.y);
+    ctx.fillStyle="#7dd3fc";
+    ctx.fillRect(f.x,f.y,f.w,5);
+    ctx.fillStyle="rgba(255,255,255,0.25)";
+    var j;
+    for(j=0;j<f.w;j+=34)ctx.fillRect(f.x+j+6,f.y+9,16,2);
+  }
+  var z=data.zone,zf=floorAt((z.x0+z.x1)/2);
+  ctx.fillStyle="rgba(74,222,128,0.28)";
+  ctx.fillRect(z.x0,zf.y-14,z.x1-z.x0,14);
+  ctx.strokeStyle="#4ade80";ctx.lineWidth=2;
+  ctx.strokeRect(z.x0,zf.y-14,z.x1-z.x0,14);
+  ctx.fillStyle="#4ade80";ctx.font="bold 11px system-ui";ctx.textAlign="center";
+  ctx.fillText("停车区",(z.x0+z.x1)/2,zf.y-20);
+  ctx.textAlign="left";
+  ctx.fillStyle="#7dd3fc";
+  ctx.shadowColor="#7dd3fc";ctx.shadowBlur=10;
+  ctx.beginPath();ctx.arc(ball.x,ball.y,BR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(255,255,255,0.6)";
+  ctx.beginPath();ctx.arc(ball.x-3,ball.y-3,2.5,0,Math.PI*2);ctx.fill();
+  if(msgT>0){
+    ctx.globalAlpha=Math.min(1,msgT/500);
+    ctx.fillStyle="#fbbf24";ctx.font="bold 20px system-ui";ctx.textAlign="center";
+    ctx.fillText(msg,W/2,180);ctx.globalAlpha=1;ctx.textAlign="left";
+  }
+}
+reset();
+state="menu";
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

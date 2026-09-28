@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>铁路惊魂</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f1220;color:#e8eaf6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;padding:10px}
+.wrap{width:100%;max-width:460px}
+h1{text-align:center;font-size:21px;margin:4px 0}
+.tip{text-align:center;color:#8f97c0;font-size:12.5px;line-height:1.6;margin-bottom:8px}
+.hud{display:flex;justify-content:center;gap:14px;color:#aab2dd;font-size:13px;margin-bottom:8px}
+.hud b{color:#fbbf24}
+canvas{display:block;width:100%;max-width:420px;margin:0 auto;background:#181d33;border:1px solid #262d52;border-radius:12px}
+.pad{display:flex;justify-content:center;gap:8px;margin:10px 0 2px}
+.pbtn{width:60px;height:42px;border:none;border-radius:10px;background:#2a3157;color:#e8eaf6;font-size:18px;font-family:inherit;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+.pbtn:active{background:#4f6ef7}
+.btnrow{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.btn{background:#4f6ef7;color:#fff;border:none;border-radius:10px;padding:9px 20px;font-size:14px;cursor:pointer;font-family:inherit}
+.btn:active{transform:scale(.95)}
+.overlay{position:fixed;inset:0;background:rgba(7,9,22,.85);display:flex;align-items:center;justify-content:center;z-index:30}
+.overlay.hide{display:none}
+.ocard{background:#1c2240;border:1px solid #303a6e;border-radius:16px;padding:24px 30px;text-align:center;max-width:88vw}
+.ocard h2{font-size:22px;margin-bottom:8px}
+.ocard p{color:#aab2dd;font-size:14px;margin-bottom:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>铁路惊魂</h1>
+<p class="tip">方向键 / WASD 或下方按钮跳跃。火车一击致命且整条铁轨无空可钻!留意轨道旁的信号灯:绿灯可通行,红灯闪烁代表列车即将呼啸而过,等它走远再冲。</p>
+<div class="hud"><span>得分 <b id="sS">0</b></span><span>生命 <b id="sL">3</b></span><span>轮次 <b id="sR">1</b></span></div>
+<canvas id="cv" width="420" height="560"></canvas>
+<div class="pad">
+<button class="pbtn" data-k="left">←</button><button class="pbtn" data-k="up">↑</button><button class="pbtn" data-k="down">↓</button><button class="pbtn" data-k="right">→</button>
+</div>
+<div class="btnrow"><button class="btn" id="bR">重新开始</button></div>
+</div>
+<div class="overlay hide" id="ov"><div class="ocard"><h2 id="ovT"></h2><p id="ovP"></p><button class="btn" id="ovB">开始游戏</button></div></div>
+<script>
+"use strict";
+var cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+var CELL=40,COLS=10,ROWS=14;
+var sS=document.getElementById("sS"),sL=document.getElementById("sL"),sR=document.getElementById("sR");
+var ov=document.getElementById("ov"),ovT=document.getElementById("ovT"),ovP=document.getElementById("ovP"),ovB=document.getElementById("ovB");
+var TRACK_ROWS=[1,2,3,4,6,7,8,9];
+var tracks,frog,score,lives,round,islandGot,deadT,state,gt=0;
+var moving=false,mx0=0,my0=0,tx0=0,ty0=0,mt=0;
+function rnd(a,b){return a+Math.random()*(b-a);}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function makeTrack(r){
+  return{r:r,state:"idle",timer:rnd(2.2,6.5),dir:Math.random()<0.5?1:-1,x:-520,speed:760};
+}
+function buildTracks(){
+  tracks=[];var i;
+  for(i=0;i<TRACK_ROWS.length;i++)tracks.push(makeTrack(TRACK_ROWS[i]));
+}
+function resetFrog(){frog={c:5,r:13,x:5.5*CELL,y:13*CELL};moving=false;}
+function updHud(){sS.textContent=score;sL.textContent=lives;sR.textContent=round;}
+function reset(){score=0;lives=3;round=1;islandGot=false;deadT=0;buildTracks();resetFrog();updHud();}
+function show(t,p,btn){ovT.textContent=t;ovP.textContent=p;ovB.textContent=btn||"再来一局";ov.classList.remove("hide");}
+function start(){reset();state="play";ov.classList.add("hide");}
+function die(msg){
+  deadT=0.8;moving=false;lives--;updHud();
+  if(lives<=0){state="over";show("游戏结束",""+msg+" 最终得分 "+score+",坚持到第 "+round+" 轮。");}
+}
+function arrive(){
+  if(frog.r===5&&!islandGot){islandGot=true;score+=40;updHud();}
+  if(frog.r===0){
+    score+=200+round*30;round++;islandGot=false;
+    buildTracks();resetFrog();updHud();
+  }
+}
+function hop(d){
+  if(state!=="play"||moving||deadT>0)return;
+  var c=frog.c,r=frog.r;
+  if(d==="left")c--;else if(d==="right")c++;else if(d==="up")r--;else r++;
+  c=Math.max(0,Math.min(COLS-1,c));r=Math.max(0,Math.min(ROWS-1,r));
+  if(c===frog.c&&r===frog.r)return;
+  frog.c=c;frog.r=r;
+  mx0=frog.x;my0=frog.y;tx0=(c+0.5)*CELL;ty0=r*CELL;mt=0;moving=true;
+}
+function update(dt){
+  var i,t;
+  if(state!=="play")return;
+  if(deadT>0){deadT-=dt;if(deadT<=0){islandGot=false;resetFrog();}return;}
+  var warnT=Math.max(0.9,1.5-round*0.06);
+  for(i=0;i<tracks.length;i++){
+    t=tracks[i];
+    if(t.state==="idle"){
+      t.timer-=dt;
+      if(t.timer<=warnT)t.state="warn";
+    }else if(t.state==="warn"){
+      t.timer-=dt;
+      if(t.timer<=0){
+        t.state="train";t.dir=Math.random()<0.5?1:-1;
+        t.x=t.dir>0?-520:420+40;t.speed=760+round*55;
+      }
+    }else{
+      t.x+=t.dir*t.speed*dt;
+      if(t.dir>0&&t.x>460){t.state="idle";t.timer=rnd(Math.max(1.7,3.4-round*0.18),Math.max(3.2,7-round*0.35));}
+      if(t.dir<0&&t.x<-560){t.state="idle";t.timer=rnd(Math.max(1.7,3.4-round*0.18),Math.max(3.2,7-round*0.35));}
+      if(frog.r===t.r&&deadT<=0){
+        if(frog.x>t.x+6&&frog.x<t.x+474)die("被列车撞飞了!");
+      }
+    }
+  }
+  if(moving){
+    mt+=dt/0.13;
+    if(mt>=1){mt=1;moving=false;}
+    frog.x=mx0+(tx0-mx0)*mt;frog.y=my0+(ty0-my0)*mt;
+    if(!moving)arrive();
+  }
+}
+function draw(){
+  var i,j,r,t,sx;
+  for(r=0;r<ROWS;r++){
+    if(r===0)ctx.fillStyle="#2a4a6b";
+    else if(r===5)ctx.fillStyle="#3a4152";
+    else if(r>=10)ctx.fillStyle="#1e3b26";
+    else ctx.fillStyle="#26202b";
+    ctx.fillRect(0,r*CELL,420,CELL);
+  }
+  ctx.fillStyle="#e8eaf6";ctx.font="11px system-ui";ctx.textAlign="center";
+  ctx.fillText("站台 · 抵达上车",210,24);
+  ctx.fillStyle="#3a4152";ctx.font="10px system-ui";
+  ctx.fillText("安 全 岛",210,5*CELL+24);
+  for(i=0;i<tracks.length;i++){
+    t=tracks[i];
+    var ty=t.r*CELL;
+    ctx.fillStyle="#191522";ctx.fillRect(0,ty+26,420,10);
+    ctx.fillStyle="#4a4456";
+    for(j=0;j<10;j++)ctx.fillRect(j*CELL+8,ty+27,24,8);
+    ctx.fillStyle="#5a6280";
+    ctx.fillRect(0,ty+29,420,2);ctx.fillRect(0,ty+33,420,2);
+    var sx=404;
+    ctx.fillStyle="#2c2c3a";ctx.fillRect(sx+6,ty+4,6,32);
+    var on=Math.floor(gt*6)%2===0;
+    if(t.state==="idle"){
+      ctx.fillStyle="#37d67a";ctx.beginPath();ctx.arc(sx+9,ty+10,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#552";ctx.beginPath();ctx.arc(sx+9,ty+20,4,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.fillStyle=on?"#ff5252":"#552";ctx.beginPath();ctx.arc(sx+9,ty+10,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=on?"#ff5252":"#552";ctx.beginPath();ctx.arc(sx+9,ty+20,4,0,Math.PI*2);ctx.fill();
+    }
+    if(t.state==="warn"&&on){
+      ctx.fillStyle="rgba(255,82,82,.10)";ctx.fillRect(0,ty,420,CELL);
+    }
+    if(t.state==="train"){
+      ctx.fillStyle="#20242e";rr(t.x,ty+3,480,34,6);ctx.fill();
+      ctx.fillStyle="#37414f";rr(t.x+6,ty+6,468,10,3);ctx.fill();
+      for(j=0;j<8;j++){
+        ctx.fillStyle="#151a22";rr(t.x+22+j*58,ty+18,44,15,3);ctx.fill();
+      }
+      var hx=t.dir>0?t.x+490-30:t.x+30;
+      ctx.fillStyle="#f6c945";ctx.beginPath();ctx.arc(hx,ty+10,4,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="rgba(246,201,69,.25)";
+      ctx.beginPath();ctx.arc(hx,ty+12,16,0,Math.PI*2);ctx.fill();
+    }
+  }
+  if(deadT<=0||Math.floor(gt*12)%2===0){
+    ctx.fillStyle="#5ad469";
+    ctx.beginPath();ctx.ellipse(frog.x,frog.y+22,12,14,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#2f7d3f";
+    ctx.beginPath();ctx.arc(frog.x-6,frog.y+11,5,0,Math.PI*2);ctx.arc(frog.x+6,frog.y+11,5,0,Math.PI*2);ctx.fill();
+  }
+  if(state==="ready"){
+    ctx.fillStyle="rgba(7,9,22,.6)";ctx.fillRect(0,200,420,120);
+    ctx.fillStyle="#e8eaf6";ctx.font="bold 21px system-ui";ctx.textAlign="center";
+    ctx.fillText("点击「开始游戏」出发",210,250);
+    ctx.font="13px system-ui";ctx.fillStyle="#aab2dd";
+    ctx.fillText("盯紧信号灯:红灯闪 = 列车将至",210,280);
+  }
+}
+var last=0;
+function loop(t){
+  var dt=Math.min(0.05,(t-last)/1000);last=t;
+  if(!(dt>0))dt=0.016;
+  gt+=dt;update(dt);draw();
+  requestAnimationFrame(loop);
+}
+var KM={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+window.addEventListener("keydown",function(e){var k=KM[e.key];if(k){e.preventDefault();hop(k);}});
+var btns=document.querySelectorAll(".pbtn"),bi;
+for(bi=0;bi<btns.length;bi++){
+  (function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();hop(b.getAttribute("data-k"));});})(btns[bi]);
+}
+document.getElementById("bR").addEventListener("click",start);
+ovB.addEventListener("click",start);
+reset();state="ready";
+show("铁路惊魂","八条铁轨横在回家路上,列车快到无法反应!轨道旁的信号灯就是你的生命线:绿灯才能踩上轨道,红灯闪烁时列车马上呼啸而过。穿过上方四轨、安全岛、下方四轨,到达站台进入下一轮。","开始游戏");
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
