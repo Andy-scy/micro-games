@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """把 1000 款游戏全部内嵌进一个独立 HTML:all-in-one.html
-目录点击卡片 -> 改写 location.hash -> 自动"跳转"进入游戏(内嵌 iframe 运行);
-支持浏览器前进/后退、Esc 返回、上一款/下一款、搜索过滤。"""
+街机厅(CRT)风格选择界面:系列侧栏过滤 + 密集列表行,点击行 -> location.hash 跳转进入游戏;
+支持浏览器前进/后退、Esc 返回(含游戏内焦点中继)、上一款/下一款、搜索与系列过滤。"""
 import io
 import json
 import os
@@ -43,7 +43,6 @@ for f in fams:
     })
 
 payload = json.dumps(data, ensure_ascii=False)
-# 内嵌进 <script> 原文元素:转义所有 '<' 防止 '</script>' 提前闭合
 payload = payload.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 TEMPLATE = u"""<!DOCTYPE html>
@@ -51,50 +50,107 @@ TEMPLATE = u"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>单文件合集 · 1000 IN 1</title>
+<title>游戏厅 · 1000 合 1</title>
 <style>
-:root{--bg:#0f1220;--panel:#171b2e;--line:#262c47;--txt:#e8ebf7;--dim:#9aa3c7;--acc:#7c5cff;--acc2:#38e1b0}
+:root{--bg:#07090d;--bg2:#0b0e14;--panel:#10141c;--line:#1d2330;--txt:#d7dde8;--dim:#6d7889;
+--amber:#ffb000;--red:#ff3355;--green:#3dff8f;
+--mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Courier New",monospace}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;display:flex;flex-direction:column}
-header{border-bottom:1px solid var(--line);padding:12px 18px;background:rgba(15,18,32,.96)}
-header h1{margin:0;font-size:19px}
-header h1 span{color:var(--acc2);font-size:12px;margin-left:8px;font-weight:400}
-.bar{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
-#q{flex:1;min-width:200px;background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:8px 12px;font-size:14px;outline:none}
-#q:focus{border-color:var(--acc)}
-#stat{color:var(--dim);font-size:12px;white-space:nowrap}
-button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:inherit}
-button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
-button.ghost:hover{color:var(--txt);border-color:var(--acc)}
-#menu{flex:1;overflow-y:auto;max-width:1200px;width:100%;margin:0 auto;padding:6px 18px 40px}
-section{margin:22px 0}
-section h2{font-size:16px;margin:0 0 4px}
-section small{color:var(--dim);font-weight:400;font-size:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-top:9px}
-.card{position:relative;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px 11px;color:var(--txt);cursor:pointer;transition:transform .12s,border-color .12s}
-.card:hover{border-color:var(--acc);transform:translateY(-2px)}
-.card b{color:var(--acc2);font-size:12px;display:block;letter-spacing:.5px}
-.card i{font-style:normal;font-size:13px;line-height:1.35;display:block;margin-top:2px}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--mono);display:flex;flex-direction:column;overflow:hidden}
+::selection{background:var(--amber);color:#000}
+/* CRT 扫描线 + 暗角(仅目录态;进入游戏自动关闭) */
+#crt{position:fixed;inset:0;pointer-events:none;z-index:50;
+background:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px),radial-gradient(ellipse at 50% 42%,transparent 58%,rgba(0,0,0,.42))}
+body.inplay #crt{display:none}
+/* ── 顶部招牌 ── */
+.mast{display:flex;align-items:center;gap:22px;padding:14px 20px 12px;border-bottom:2px solid var(--amber);background:var(--bg2);flex-wrap:wrap}
+.brand h1{margin:0;font-size:27px;line-height:1;color:var(--amber);letter-spacing:2px;text-shadow:3px 3px 0 #000,1px 0 0 var(--red),-1px 0 0 var(--green);white-space:nowrap}
+.brand .sub{margin-top:5px;font-size:10px;letter-spacing:4px;color:var(--dim)}
+.searchline{flex:1;min-width:220px;display:flex;align-items:center;gap:8px;background:#000;border:1px solid var(--line);padding:8px 12px}
+.searchline .gt{color:var(--amber);font-weight:700}
+.searchline input{flex:1;background:transparent;border:0;outline:0;color:var(--txt);font:13px/1.4 var(--mono)}
+.searchline input::placeholder{color:var(--dim)}
+.leds{display:flex;gap:8px}
+.led{background:#000;border:1px solid var(--line);border-radius:2px;padding:6px 10px;font-size:10px;color:var(--dim);letter-spacing:1px;box-shadow:inset 0 0 8px rgba(0,0,0,.8)}
+.led b{color:var(--amber);font-weight:400;margin-left:4px}
+/* ── 主体:侧栏 + 列表 ── */
+#wrap{flex:1;display:flex;min-height:0}
+#side{width:216px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--line);padding:8px 0}
+#side .cap{padding:8px 14px 4px;font-size:10px;letter-spacing:3px;color:var(--dim)}
+.side-item{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 11px;cursor:pointer;color:var(--dim);font-size:12px;border-left:3px solid transparent;white-space:nowrap}
+.side-item b{color:var(--amber);font-weight:400;min-width:20px}
+.side-item:hover{color:var(--txt);background:var(--panel)}
+.side-item.on{color:#000;background:var(--amber);border-left-color:#fff;font-weight:700}
+.side-item.on b{color:#000}
+#list{flex:1;overflow-y:auto;min-width:0}
+.sep{position:sticky;top:0;z-index:2;padding:12px 16px 7px;font-size:11px;letter-spacing:2px;color:var(--amber);background:var(--bg2);border-bottom:1px solid var(--line)}
+.sep small{color:var(--dim);letter-spacing:0;margin-left:10px}
+.row{display:flex;align-items:center;gap:12px;padding:6px 16px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.035);min-width:0}
+.row .no{color:var(--amber);width:36px;flex-shrink:0;font-size:12px}
+.row .nm{flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .tag{color:var(--dim);font-size:10px;flex-shrink:0}
+.row:hover{background:var(--amber);box-shadow:inset 3px 0 0 #fff}
+.row:hover .no,.row:hover .nm,.row:hover .tag{color:#000;font-weight:700}
+.row:hover .nm::before{content:"▶ "}
+.row.done .tag::after{content:" ✓";color:var(--green)}
+.row:hover.done .tag::after{color:#000}
+/* ── 游戏态 ── */
 #play{flex:1;display:flex;flex-direction:column;min-height:0}
 #play[hidden]{display:none}
-.pbar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
-#ptitle{flex:1;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--acc2)}
-.pgroup{display:flex;gap:8px}
-#gframe{flex:1;border:0;background:#0f1220;width:100%}
-#menu.hidden{display:none}
+body.inplay #wrap{display:none}
+.pbar{display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--amber);background:var(--bg2)}
+.key{background:transparent;border:1px solid var(--amber);color:var(--amber);border-radius:2px;padding:6px 12px;font:12px var(--mono);cursor:pointer;letter-spacing:1px}
+.key:hover{background:var(--amber);color:#000}
+.key.ghost{border-color:var(--line);color:var(--dim)}
+.key.ghost:hover{border-color:var(--amber);color:var(--amber);background:transparent}
+.np{font-size:9px;letter-spacing:3px;color:var(--red)}
+#ptitle{font-size:13px;color:var(--amber);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spacer{flex:1}
+#gframe{flex:1;border:0;background:#07090d;width:100%}
+/* ── 底部状态栏 ── */
+.statusbar{display:flex;align-items:center;gap:14px;padding:6px 16px;border-top:1px solid var(--line);font-size:10px;color:var(--dim);letter-spacing:1px;background:var(--bg2)}
+.statusbar .green{color:var(--green)}
+@keyframes blink{50%{opacity:0}}
+.blink{animation:blink 1.1s steps(1) infinite}
+@media (prefers-reduced-motion:reduce){.blink{animation:none}}
+@media (max-width:760px){
+#side{display:none}
+.leds{display:none}
+.mast{gap:12px}
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>🎮 单文件合集 <span>1000 IN 1 · 全部游戏已内嵌 · 点击卡片自动进入</span></h1>
-  <div class="bar"><input id="q" placeholder="搜索:游戏名 / 系列名 / 编号,如 2048、贪吃蛇、385"><span id="stat"></span></div>
+<div id="crt"></div>
+<header class="mast">
+  <div class="brand">
+    <h1>1000合1</h1>
+    <div class="sub">MICRO GAME ARCADE ▸ 游戏厅</div>
+  </div>
+  <div class="searchline"><span class="gt">&gt;_</span><input id="q" placeholder="搜索 游戏名 / 系列 / 编号…" autocomplete="off" spellcheck="false"></div>
+  <div class="leds">
+    <div class="led">ROMS<b>1000</b></div>
+    <div class="led">SERIES<b>50</b></div>
+    <div class="led">CREDIT<b>∞</b></div>
+  </div>
 </header>
-<main id="menu"></main>
+<div id="wrap">
+  <nav id="side"><div class="cap">SELECT SERIES</div></nav>
+  <main id="list"></main>
+</div>
 <section id="play" hidden>
-  <div class="pbar"><button id="back">⌂ 返回目录</button><span id="ptitle"></span><div class="pgroup"><button id="prev" class="ghost">← 上一款</button><button id="next" class="ghost">下一款 →</button></div></div>
+  <div class="pbar">
+    <button id="back" class="key">◄ ESC 返回</button>
+    <span class="np">NOW PLAYING</span>
+    <span id="ptitle"></span>
+    <span class="spacer"></span>
+    <button id="prev" class="key ghost">◀ 上一款</button>
+    <button id="next" class="key ghost">下一款 ▶</button>
+  </div>
   <iframe id="gframe" title="游戏窗口"></iframe>
 </section>
+<footer class="statusbar"><span id="stat">READY.</span><span class="green blink">▮</span><span class="spacer"></span><span>ESC 返回 · ◀ ▶ 切换 · 点击行投币开机</span></footer>
 <script id="GAMES-DATA" type="application/json">__PAYLOAD__</script>
 <script>
 var G = JSON.parse(document.getElementById('GAMES-DATA').textContent);
@@ -105,42 +161,70 @@ G.forEach(function (fam) {
     FLAT.push({ id: g[0], t: g[1], src: g[2], fam: fam.name, slug: fam.slug });
   });
 });
-function pad3(n){ return ('00' + n).slice(-3); }
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+var q = document.getElementById('q'), stat = document.getElementById('stat');
+var side = document.getElementById('side'), listEl = document.getElementById('list');
+var famSel = null;
 
-var menu = document.getElementById('menu');
+/* 侧栏:50 个系列,单选过滤 */
+var sbuf = '';
+G.forEach(function (fam) {
+  sbuf += '<div class="side-item" data-fam="' + fam.slug + '"><b>' + String(fam.start).padStart(3, '0') + '</b>' + esc(fam.name) + '</div>';
+});
+side.innerHTML += sbuf;
+
+/* 主列表:系列分隔条 + 密集行 */
 var buf = '';
 G.forEach(function (fam) {
-  buf += '<section id="fam-' + fam.slug + '"><h2>' + esc(fam.name) + ' <small>' + pad3(fam.start) + '\\u2013' + pad3(fam.end) + ' · ' + esc(fam.desc) + '</small></h2><div class="grid">';
+  buf += '<div class="sep" data-fam="' + fam.slug + '">' + String(fam.start).padStart(3, '0') + ' ▸ ' + esc(fam.name) + '<small>' + esc(fam.desc) + '</small></div>';
   fam.games.forEach(function (g) {
     var t = g[1] || '(未交付)';
     var key = (g[0] + ' ' + fam.name + ' ' + fam.slug + ' ' + (g[1] || '')).toLowerCase().replace(/"/g, '');
-    buf += '<button class="card" data-id="' + g[0] + '" data-key="' + esc(key) + '"><b>' + g[0] + '</b><i>' + esc(t) + '</i></button>';
+    buf += '<div class="row" data-id="' + g[0] + '" data-fam="' + fam.slug + '" data-key="' + esc(key) + '"><span class="no">' + g[0] + '</span><span class="nm">' + esc(t) + '</span><span class="tag">' + esc(fam.name) + '</span></div>';
   });
-  buf += '</div></section>';
 });
-menu.innerHTML = buf;
+listEl.innerHTML = buf;
 
-var q = document.getElementById('q'), stat = document.getElementById('stat');
-stat.textContent = '1000 款 · 50 个系列 · 点击卡片自动进入 · Esc 返回';
-q.addEventListener('input', function () {
-  var s = q.value.trim().toLowerCase(), shown = 0;
-  var secs = menu.querySelectorAll('section');
-  for (var i = 0; i < secs.length; i++) {
-    var sec = secs[i], vis = 0;
-    var cards = sec.querySelectorAll('.card');
-    for (var j = 0; j < cards.length; j++) {
-      var c = cards[j];
-      var show = !s || (c.getAttribute('data-key') || '').indexOf(s) !== -1;
-      c.style.display = show ? '' : 'none';
-      if (show) vis++;
-    }
-    sec.style.display = vis ? '' : 'none';
-    shown += vis;
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function famName(slug){ for (var i = 0; i < G.length; i++) if (G[i].slug === slug) return G[i].name; return ''; }
+
+function applyFilter() {
+  var s = q.value.trim().toLowerCase();
+  var shown = 0;
+  var nodes = listEl.children;
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i], isSep = el.classList.contains('sep');
+    var famOk = !famSel || el.getAttribute('data-fam') === famSel;
+    var keyOk = !s || (el.getAttribute('data-key') || el.textContent).toLowerCase().indexOf(s) !== -1;
+    var show = isSep ? (famOk && keyOk && !s) : (famOk && keyOk);
+    el.style.display = show ? '' : 'none';
+    if (show && !isSep) shown++;
   }
-  stat.textContent = '匹配 ' + shown + ' / 1000';
+  var label = 'SHOWING ' + shown + ' / 1000';
+  if (famSel) label += ' · ' + famName(famSel);
+  if (s) label += ' · 搜索“' + s + '”';
+  stat.textContent = label;
+  var sides = side.querySelectorAll('.side-item');
+  for (var j = 0; j < sides.length; j++) {
+    sides[j].classList.toggle('on', famSel && sides[j].getAttribute('data-fam') === famSel);
+  }
+}
+side.addEventListener('click', function (e) {
+  var it = e.target.closest ? e.target.closest('.side-item') : null;
+  if (!it) return;
+  var slug = it.getAttribute('data-fam');
+  famSel = (famSel === slug) ? null : slug;
+  if (famSel) { q.value = ''; }
+  applyFilter();
+  var first = listEl.querySelector('.row:not([style*="none"])');
+  if (first) listEl.scrollTop = first.offsetTop - 60;
 });
+q.addEventListener('input', function () {
+  if (q.value.trim()) famSel = null;
+  applyFilter();
+});
+applyFilter();
 
+/* 跳转与游戏态 */
 var play = document.getElementById('play'), gframe = document.getElementById('gframe'),
     ptitle = document.getElementById('ptitle'), cur = -1;
 var ESC_RELAY = '<script>window.addEventListener("keydown",function(e){if(e.key==="Escape"){try{window.parent.postMessage("mg-esc","*")}catch(err){}}});<\\/script>';
@@ -153,26 +237,25 @@ gframe.addEventListener('load', function () {
 function showPlay(i) {
   cur = i;
   var g = FLAT[i];
-  ptitle.textContent = g.id + ' · ' + g.t + '（' + g.fam + '）';
+  ptitle.textContent = g.id + ' ' + g.t + ' — ' + g.fam;
   gframe.srcdoc = withRelay(g.src);
   play.hidden = false;
-  menu.classList.add('hidden');
-  window.scrollTo(0, 0);
+  document.body.classList.add('inplay');
 }
 function showMenu() {
   cur = -1;
   play.hidden = true;
-  menu.classList.remove('hidden');
+  document.body.classList.remove('inplay');
   gframe.srcdoc = '';
 }
 function route() {
-  var m = /^#g-(\\d{3})$/.exec(location.hash || '');
+  var m = /^#g-(\d{3})$/.exec(location.hash || '');
   if (m && IDX[m[1]] != null) showPlay(IDX[m[1]]);
   else showMenu();
 }
 window.addEventListener('hashchange', route);
-menu.addEventListener('click', function (e) {
-  var c = e.target.closest ? e.target.closest('.card') : null;
+listEl.addEventListener('click', function (e) {
+  var c = e.target.closest ? e.target.closest('.row') : null;
   if (!c) return;
   location.hash = 'g-' + c.getAttribute('data-id');
 });
@@ -187,9 +270,9 @@ document.getElementById('next').addEventListener('click', function () {
   if (cur >= 0) location.hash = 'g-' + FLAT[(cur + 1) % FLAT.length].id;
 });
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape' && cur >= 0) {
-    if (location.hash) location.hash = '';
-  }
+  if (e.key === 'Escape' && cur >= 0 && location.hash) location.hash = '';
+  if (cur >= 0 && e.key === 'ArrowLeft') location.hash = 'g-' + FLAT[(cur - 1 + FLAT.length) % FLAT.length].id;
+  if (cur >= 0 && e.key === 'ArrowRight') location.hash = 'g-' + FLAT[(cur + 1) % FLAT.length].id;
 });
 window.addEventListener('message', function (e) {
   if (e.data === 'mg-esc' && cur >= 0 && location.hash) location.hash = '';
@@ -202,4 +285,4 @@ route();
 
 out = TEMPLATE.replace("__PAYLOAD__", payload)
 io.open(os.path.join(ROOT, "all-in-one.html"), "w", encoding="utf-8").write(out)
-print("all-in-one.html 生成完毕:内嵌 %d 款游戏,文件 %.1f MB" % (total, len(out.encode("utf-8")) / 1048576.0))
+print("all-in-one.html 生成完毕(街机厅 UI):内嵌 %d 款游戏,文件 %.1f MB" % (total, len(out.encode("utf-8")) / 1048576.0))

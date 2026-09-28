@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""扫描 games/,按 families.json 分组,生成自包含合集首页 index.html"""
+"""扫描 games/,按 families.json 分组,生成街机厅风格合集首页 index.html
+系列侧栏过滤 + 密集列表行;点击行弹窗即玩(iframe 加载 games/ 单文件);localStorage 记录试玩进度。"""
 import io
 import json
 import os
@@ -32,134 +33,234 @@ for f in fams:
                 title = clean(m.group(1))
         games.append([pad(n), title])
     data.append({
-        "n": f["n"], "name": f["name"], "slug": f["slug"], "desc": f["desc"],
+        "name": f["name"], "slug": f["slug"], "desc": f["desc"],
         "start": f["start"], "end": f["end"], "games": games,
     })
 
-total_done = sum(1 for fam in data for g in fam["games"] if g[1])
-payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
+total_named = sum(1 for fam in data for g in fam["games"] if g[1])
+payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 TEMPLATE = u"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>微游戏合集 · 1000 IN 1</title>
+<title>游戏厅 · 1000 合 1</title>
 <style>
-:root{--bg:#0f1220;--panel:#171b2e;--line:#262c47;--txt:#e8ebf7;--dim:#9aa3c7;--acc:#7c5cff;--acc2:#38e1b0}
+:root{--bg:#07090d;--bg2:#0b0e14;--panel:#10141c;--line:#1d2330;--txt:#d7dde8;--dim:#6d7889;
+--amber:#ffb000;--red:#ff3355;--green:#3dff8f;
+--mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Courier New",monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
-.top{position:sticky;top:0;z-index:5;background:rgba(15,18,32,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:14px 18px}
-.top h1{margin:0;font-size:20px}
-.top h1 span{color:var(--acc2);font-size:13px;margin-left:8px;font-weight:400}
-.bar{display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap}
-#q{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:9px 12px;font-size:14px;outline:none}
-#q:focus{border-color:var(--acc)}
-#stat{color:var(--dim);font-size:13px;white-space:nowrap}
-.progress{height:6px;background:var(--panel);border-radius:4px;margin-top:10px;overflow:hidden}
-#pbar{height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2))}
-#ptext{font-size:12px;color:var(--dim);margin-top:5px;display:block}
-main{max-width:1200px;margin:0 auto;padding:8px 18px 40px}
-section{margin:26px 0}
-section h2{font-size:17px;margin:0 0 4px}
-section small{color:var(--dim);font-weight:400;font-size:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px}
-.card{position:relative;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--txt);cursor:pointer;transition:transform .12s,border-color .12s;font-family:inherit}
-.card:hover{border-color:var(--acc);transform:translateY(-2px)}
-.card b{color:var(--acc2);font-size:12px;display:block;letter-spacing:.5px}
-.card i{font-style:normal;font-size:13px;line-height:1.35;display:block;margin-top:3px}
-.card.done::after{content:"✓";position:absolute;top:8px;right:10px;color:var(--acc2);font-weight:700}
-.card.empty{opacity:.4;cursor:default}
-#modal{position:fixed;inset:0;background:rgba(5,7,15,.82);display:flex;align-items:center;justify-content:center;z-index:9;padding:18px}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--mono);display:flex;flex-direction:column;overflow:hidden}
+::selection{background:var(--amber);color:#000}
+#crt{position:fixed;inset:0;pointer-events:none;z-index:40;
+background:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px),radial-gradient(ellipse at 50% 42%,transparent 58%,rgba(0,0,0,.42))}
+.mast{display:flex;align-items:center;gap:22px;padding:14px 20px 12px;border-bottom:2px solid var(--amber);background:var(--bg2);flex-wrap:wrap}
+.brand h1{margin:0;font-size:27px;line-height:1;color:var(--amber);letter-spacing:2px;text-shadow:3px 3px 0 #000,1px 0 0 var(--red),-1px 0 0 var(--green);white-space:nowrap}
+.brand .sub{margin-top:5px;font-size:10px;letter-spacing:4px;color:var(--dim)}
+.searchline{flex:1;min-width:220px;display:flex;align-items:center;gap:8px;background:#000;border:1px solid var(--line);padding:8px 12px}
+.searchline .gt{color:var(--amber);font-weight:700}
+.searchline input{flex:1;background:transparent;border:0;outline:0;color:var(--txt);font:13px/1.4 var(--mono)}
+.searchline input::placeholder{color:var(--dim)}
+.leds{display:flex;gap:8px}
+.led{background:#000;border:1px solid var(--line);border-radius:2px;padding:6px 10px;font-size:10px;color:var(--dim);letter-spacing:1px;box-shadow:inset 0 0 8px rgba(0,0,0,.8)}
+.led b{color:var(--amber);font-weight:400;margin-left:4px}
+#wrap{flex:1;display:flex;min-height:0}
+#side{width:216px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--line);padding:8px 0}
+#side .cap{padding:8px 14px 4px;font-size:10px;letter-spacing:3px;color:var(--dim)}
+.side-item{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 11px;cursor:pointer;color:var(--dim);font-size:12px;border-left:3px solid transparent;white-space:nowrap}
+.side-item b{color:var(--amber);font-weight:400;min-width:20px}
+.side-item:hover{color:var(--txt);background:var(--panel)}
+.side-item.on{color:#000;background:var(--amber);border-left-color:#fff;font-weight:700}
+.side-item.on b{color:#000}
+#list{flex:1;overflow-y:auto;min-width:0}
+.sep{position:sticky;top:0;z-index:2;padding:12px 16px 7px;font-size:11px;letter-spacing:2px;color:var(--amber);background:var(--bg2);border-bottom:1px solid var(--line)}
+.sep small{color:var(--dim);letter-spacing:0;margin-left:10px}
+.row{display:flex;align-items:center;gap:12px;padding:6px 16px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.035);min-width:0}
+.row .no{color:var(--amber);width:36px;flex-shrink:0;font-size:12px}
+.row .nm{flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .tag{color:var(--dim);font-size:10px;flex-shrink:0}
+.row:hover{background:var(--amber);box-shadow:inset 3px 0 0 #fff}
+.row:hover .no,.row:hover .nm,.row:hover .tag{color:#000;font-weight:700}
+.row:hover .nm::before{content:"▶ "}
+.row.done .tag::after{content:" ✓";color:var(--green)}
+.row:hover.done .tag::after{color:#000}
+.statusbar{display:flex;align-items:center;gap:14px;padding:6px 16px;border-top:1px solid var(--line);font-size:10px;color:var(--dim);letter-spacing:1px;background:var(--bg2)}
+.statusbar .green{color:var(--green)}
+@keyframes blink{50%{opacity:0}}
+.blink{animation:blink 1.1s steps(1) infinite}
+@media (prefers-reduced-motion:reduce){.blink{animation:none}}
+@media (max-width:760px){#side{display:none}.leds{display:none}.mast{gap:12px}}
+/* 弹窗即玩 */
+#modal{position:fixed;inset:0;background:rgba(3,4,7,.92);z-index:60;display:flex;align-items:stretch;justify-content:center;padding:16px}
 #modal[hidden]{display:none}
-.mbox{width:min(960px,100%);height:min(720px,92vh);background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
-.mhead{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);gap:10px}
-.mhead span{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mhead div{display:flex;gap:8px;flex-shrink:0}
-iframe{flex:1;border:0;background:#0f1220;width:100%}
-button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer}
-button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+.mbox{width:min(1020px,100%);display:flex;flex-direction:column;background:var(--bg2);border:1px solid var(--amber);box-shadow:8px 8px 0 #000}
+.mhead{display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.np{font-size:9px;letter-spacing:3px;color:var(--red)}
+#mtitle{font-size:13px;color:var(--amber);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.mclose{background:transparent;border:1px solid var(--red);color:var(--red);border-radius:2px;padding:6px 12px;font:12px var(--mono);cursor:pointer;letter-spacing:1px}
+.mclose:hover{background:var(--red);color:#000}
+.mnew{background:transparent;border:1px solid var(--line);color:var(--dim);border-radius:2px;padding:6px 12px;font:12px var(--mono);cursor:pointer;letter-spacing:1px}
+.mnew:hover{border-color:var(--amber);color:var(--amber)}
+.pn{display:flex;gap:8px}
+.key{background:transparent;border:1px solid var(--amber);color:var(--amber);border-radius:2px;padding:6px 12px;font:12px var(--mono);cursor:pointer;letter-spacing:1px}
+.key:hover{background:var(--amber);color:#000}
+#iframe{flex:1;border:0;background:#07090d;width:100%}
 </style>
 </head>
 <body>
-<header class="top">
-  <h1>🎮 微游戏合集 <span>1000 IN 1 · 每款一个独立 HTML 文件 · 离线可玩</span></h1>
-  <div class="bar"><input id="q" placeholder="搜索:游戏名 / 系列名 / 编号,如 2048、贪吃蛇、385"><span id="stat"></span></div>
-  <div class="progress"><div id="pbar"></div></div><span id="ptext"></span>
+<div id="crt"></div>
+<header class="mast">
+  <div class="brand">
+    <h1>1000合1</h1>
+    <div class="sub">MICRO GAME ARCADE ▸ 游戏厅</div>
+  </div>
+  <div class="searchline"><span class="gt">&gt;_</span><input id="q" placeholder="搜索 游戏名 / 系列 / 编号…" autocomplete="off" spellcheck="false"></div>
+  <div class="leds">
+    <div class="led">ROMS<b>1000</b></div>
+    <div class="led">SERIES<b>50</b></div>
+    <div class="led">CREDIT<b>∞</b></div>
+  </div>
 </header>
-<main id="root"></main>
+<div id="wrap">
+  <nav id="side"><div class="cap">SELECT SERIES</div></nav>
+  <main id="list"></main>
+</div>
+<footer class="statusbar"><span id="stat">READY.</span><span class="green blink">▮</span><span id="prog"></span><span class="spacer"></span><span>点击行投币开机 · ESC 关闭机台</span></footer>
 <div id="modal" hidden>
   <div class="mbox">
-    <div class="mhead"><span id="mtitle"></span><div><button id="mnew" class="ghost">新窗口打开</button><button id="mclose">关闭 ✕</button></div></div>
-    <iframe id="mframe" title="游戏窗口"></iframe>
+    <div class="mhead">
+      <span class="np">NOW PLAYING</span><span id="mtitle"></span>
+      <div class="pn"><button id="prev" class="key">◀</button><button id="next" class="key">▶</button><button id="mnew" class="mnew">新窗口</button><button id="mclose" class="mclose">ESC ✕</button></div>
+    </div>
+    <iframe id="iframe" title="游戏窗口"></iframe>
   </div>
 </div>
+<script id="GAMES-DATA" type="application/json">__PAYLOAD__</script>
 <script>
-var DATA = __PAYLOAD__;
+var G = JSON.parse(document.getElementById('GAMES-DATA').textContent);
+var FLAT = [], IDX = {};
+G.forEach(function (fam) {
+  fam.games.forEach(function (g) {
+    IDX[g[0]] = FLAT.length;
+    FLAT.push({ id: g[0], t: g[1], fam: fam.name, slug: fam.slug });
+  });
+});
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function famName(slug){ for (var i = 0; i < G.length; i++) if (G[i].slug === slug) return G[i].name; return ''; }
 var played = {};
 try { played = JSON.parse(localStorage.getItem('mg-played-v1') || '{}') || {}; } catch (e) { played = {}; }
-function pad3(n){ return ('00' + n).slice(-3); }
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-var root = document.getElementById('root');
+var q = document.getElementById('q'), stat = document.getElementById('stat'), prog = document.getElementById('prog');
+var side = document.getElementById('side'), listEl = document.getElementById('list');
+var famSel = null;
+
+var sbuf = '';
+G.forEach(function (fam) {
+  sbuf += '<div class="side-item" data-fam="' + fam.slug + '"><b>' + String(fam.start).padStart(3, '0') + '</b>' + esc(fam.name) + '</div>';
+});
+side.innerHTML += sbuf;
+
 var buf = '';
-DATA.forEach(function (f) {
-  buf += '<section id="fam-' + f.slug + '"><h2>' + f.n + ' · ' + esc(f.name) +
-         ' <small>' + pad3(f.start) + '\\u2013' + pad3(f.end) + ' · ' + esc(f.desc) + '</small></h2><div class="grid">';
-  f.games.forEach(function (g) {
-    var id = g[0], t = g[1] || '(未交付)';
-    var cls = 'card' + (g[1] ? '' : ' empty') + (played[id] ? ' done' : '');
-    var key = (id + ' ' + f.name + ' ' + f.slug + ' ' + (g[1] || '')).toLowerCase().replace(/"/g, '');
-    buf += '<button class="' + cls + '" data-id="' + id + '" data-title="' + esc(t) + '" data-key="' + esc(key) + '"><b>' + id + '</b><i>' + esc(t) + '</i></button>';
+G.forEach(function (fam) {
+  buf += '<div class="sep" data-fam="' + fam.slug + '">' + String(fam.start).padStart(3, '0') + ' ▸ ' + esc(fam.name) + '<small>' + esc(fam.desc) + '</small></div>';
+  fam.games.forEach(function (g) {
+    var t = g[1] || '(未交付)';
+    var key = (g[0] + ' ' + fam.name + ' ' + fam.slug + ' ' + (g[1] || '')).toLowerCase().replace(/"/g, '');
+    buf += '<div class="row' + (played[g[0]] ? ' done' : '') + '" data-id="' + g[0] + '" data-fam="' + fam.slug + '" data-key="' + esc(key) + '"><span class="no">' + g[0] + '</span><span class="nm">' + esc(t) + '</span><span class="tag">' + esc(fam.name) + '</span></div>';
   });
-  buf += '</div></section>';
 });
-root.innerHTML = buf;
+listEl.innerHTML = buf;
 
-var q = document.getElementById('q'), stat = document.getElementById('stat');
-stat.textContent = '1000 款 · 50 个系列 · 点击卡片即玩';
-q.addEventListener('input', function () {
-  var s = q.value.trim().toLowerCase(), shown = 0;
-  var secs = document.querySelectorAll('section');
-  for (var i = 0; i < secs.length; i++) {
-    var sec = secs[i], vis = 0;
-    var cards = sec.querySelectorAll('.card');
-    for (var j = 0; j < cards.length; j++) {
-      var c = cards[j];
-      var show = !s || (c.getAttribute('data-key') || '').indexOf(s) !== -1;
-      c.style.display = show ? '' : 'none';
-      if (show) vis++;
-    }
-    sec.style.display = vis ? '' : 'none';
-    shown += vis;
-  }
-  stat.textContent = '匹配 ' + shown + ' / 1000';
-});
-
-var modal = document.getElementById('modal'), mframe = document.getElementById('mframe'),
-    mtitle = document.getElementById('mtitle'), currentFile = '';
-function save(){ try { localStorage.setItem('mg-played-v1', JSON.stringify(played)); } catch (e) {} }
-function updateProgress(){
+function updateProgress() {
   var n = 0; for (var k in played) if (played[k]) n++;
-  document.getElementById('pbar').style.width = (n / 10) + '%';
-  document.getElementById('ptext').textContent = '已试玩 ' + n + ' / 1000(' + Math.round(n / 10) + '%)· 打开过的游戏自动标记 ✓';
+  prog.textContent = '已通关机台 ' + n + ' / 1000';
 }
-root.addEventListener('click', function (e) {
-  var c = e.target.closest ? e.target.closest('.card') : null;
-  if (!c || c.classList.contains('empty')) return;
-  var id = c.getAttribute('data-id');
-  currentFile = 'games/game-' + id + '.html';
-  mtitle.textContent = id + ' · ' + c.getAttribute('data-title');
-  mframe.src = currentFile;
-  modal.hidden = false;
-  if (!played[id]) { played[id] = 1; save(); c.classList.add('done'); }
-  updateProgress();
+function applyFilter() {
+  var s = q.value.trim().toLowerCase();
+  var shown = 0;
+  var nodes = listEl.children;
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i], isSep = el.classList.contains('sep');
+    var famOk = !famSel || el.getAttribute('data-fam') === famSel;
+    var keyOk = !s || (el.getAttribute('data-key') || el.textContent).toLowerCase().indexOf(s) !== -1;
+    var show = isSep ? (famOk && keyOk && !s) : (famOk && keyOk);
+    el.style.display = show ? '' : 'none';
+    if (show && !isSep) shown++;
+  }
+  var label = 'SHOWING ' + shown + ' / 1000';
+  if (famSel) label += ' · ' + famName(famSel);
+  if (s) label += ' · 搜索“' + s + '”';
+  stat.textContent = label;
+  var sides = side.querySelectorAll('.side-item');
+  for (var j = 0; j < sides.length; j++) {
+    sides[j].classList.toggle('on', famSel && sides[j].getAttribute('data-fam') === famSel);
+  }
+}
+side.addEventListener('click', function (e) {
+  var it = e.target.closest ? e.target.closest('.side-item') : null;
+  if (!it) return;
+  var slug = it.getAttribute('data-fam');
+  famSel = (famSel === slug) ? null : slug;
+  if (famSel) q.value = '';
+  applyFilter();
+  var first = listEl.querySelector('.row:not([style*="none"])');
+  if (first) listEl.scrollTop = first.offsetTop - 60;
 });
-function closeModal(){ modal.hidden = true; mframe.src = 'about:blank'; }
-document.getElementById('mclose').onclick = closeModal;
-document.getElementById('mnew').onclick = function () { if (currentFile) window.open(currentFile, '_blank'); };
-modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
-document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+q.addEventListener('input', function () {
+  if (q.value.trim()) famSel = null;
+  applyFilter();
+});
+applyFilter();
 updateProgress();
+
+var modal = document.getElementById('modal'), frame = document.getElementById('iframe'),
+    mtitle = document.getElementById('mtitle'), cur = -1, curId = '';
+frame.addEventListener('load', function () {
+  try { frame.contentWindow.focus(); } catch (e) {}
+});
+function save(){ try { localStorage.setItem('mg-played-v1', JSON.stringify(played)); } catch (e) {} }
+function openGame(i) {
+  cur = i;
+  var g = FLAT[i];
+  curId = g.id;
+  mtitle.textContent = g.id + ' ' + g.t + ' — ' + g.fam;
+  frame.src = 'games/game-' + g.id + '.html';
+  modal.hidden = false;
+  if (!played[g.id]) {
+    played[g.id] = 1; save();
+    var row = listEl.querySelector('.row[data-id="' + g.id + '"]');
+    if (row) row.classList.add('done');
+    updateProgress();
+  }
+}
+function closeModal() {
+  modal.hidden = true;
+  frame.src = 'about:blank';
+  cur = -1; curId = '';
+}
+listEl.addEventListener('click', function (e) {
+  var c = e.target.closest ? e.target.closest('.row') : null;
+  if (!c) return;
+  openGame(IDX[c.getAttribute('data-id')]);
+});
+document.getElementById('mclose').addEventListener('click', closeModal);
+document.getElementById('mnew').addEventListener('click', function () {
+  if (curId) window.open('games/game-' + curId + '.html', '_blank');
+});
+document.getElementById('prev').addEventListener('click', function () {
+  if (cur >= 0) openGame((cur - 1 + FLAT.length) % FLAT.length);
+});
+document.getElementById('next').addEventListener('click', function () {
+  if (cur >= 0) openGame((cur + 1) % FLAT.length);
+});
+modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', function (e) {
+  if (modal.hidden) return;
+  if (e.key === 'Escape') closeModal();
+  if (e.key === 'ArrowLeft' && cur >= 0) openGame((cur - 1 + FLAT.length) % FLAT.length);
+  if (e.key === 'ArrowRight' && cur >= 0) openGame((cur + 1) % FLAT.length);
+});
 </script>
 </body>
 </html>
@@ -167,4 +268,4 @@ updateProgress();
 
 out = TEMPLATE.replace("__PAYLOAD__", payload)
 io.open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8").write(out)
-print("index.html 生成完毕:共 %d 个条目,已命名 %d 款" % (len(fams) * 20, total_done))
+print("index.html 生成完毕(街机厅 UI):共 %d 个条目,已命名 %d 款" % (len(fams) * 20, total_named))
